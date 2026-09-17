@@ -1,3 +1,4 @@
-python-telegram-bot[rate-limiter]==21.9
+# 22.8 — первая версия с поддержкой Python 3.14, который ставит Termux
+python-telegram-bot[rate-limiter]~=22.8
 anthropic>=1.6.0
 openai>=1.60

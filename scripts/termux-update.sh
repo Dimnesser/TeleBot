@@ -16,7 +16,7 @@ git pull --ff-only || { echo "Не удалось обновить код"; exit
 
 echo
 echo "==> Проверяю зависимости"
-"$PYTHON" -m pip install -q -r requirements.txt || { echo "Не удалось поставить зависимости"; exit 1; }
+"$PYTHON" -m pip install -q --upgrade -r requirements.txt || { echo "Не удалось поставить зависимости"; exit 1; }
 
 echo
 echo "==> Проверяю связь"

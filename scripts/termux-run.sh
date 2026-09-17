@@ -11,13 +11,16 @@ cd "$TARGET" || { echo "Нет каталога $TARGET"; exit 1; }
 PYTHON="./.venv/bin/python"
 [ -x "$PYTHON" ] || PYTHON="python"
 
-# Зависимости проверяем импортом: он мгновенный, в отличие от запуска pip.
-if ! "$PYTHON" -c "import telegram, anthropic, openai" >/dev/null 2>&1; then
-    echo "==> Доставляю зависимости"
-    "$PYTHON" -m pip install -q -r requirements.txt || {
+# Проверяем не только наличие пакетов, но и версии: старый
+# python-telegram-bot несовместим со свежим Python из Termux.
+if ! "$PYTHON" scripts/check_deps.py >/dev/null 2>&1; then
+    echo "==> Обновляю зависимости"
+    "$PYTHON" scripts/check_deps.py
+    "$PYTHON" -m pip install -q --upgrade -r requirements.txt || {
         echo "Не удалось поставить зависимости"
         exit 1
     }
+    echo
 fi
 
 # Настройки спрашиваем, только если их ещё нет.
