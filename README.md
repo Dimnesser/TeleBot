@@ -43,7 +43,8 @@ pip install -r requirements.txt
 cp .env.example .env
 # впишите TELEGRAM_BOT_TOKEN и ANTHROPIC_API_KEY
 
-python main.py
+python main.py --check   # проверить токены и связь
+python main.py           # запустить
 ```
 
 Токен бота выдаёт [@BotFather](https://t.me/BotFather), ключ API — консоль Anthropic.

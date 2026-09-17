@@ -31,3 +31,52 @@ def test_application_builds_with_all_handlers(monkeypatch):
     registered = application.handlers[0]
     assert len(registered) >= 7
     assert application.error_handlers
+
+
+def test_selfcheck_history_probe(tmp_path):
+    from bot.selfcheck import check_history
+
+    config = Config(telegram_token="t", history_path=tmp_path / "sub" / "history.json")
+    result = check_history(config)
+    assert result.ok is True
+    assert not (tmp_path / "sub" / ".write-probe").exists()
+
+
+def test_selfcheck_history_reports_unwritable(tmp_path):
+    from bot.selfcheck import check_history
+
+    blocker = tmp_path / "file"
+    blocker.write_text("не каталог", encoding="utf-8")
+    config = Config(telegram_token="t", history_path=blocker / "history.json")
+    assert check_history(config).ok is False
+
+
+def test_selfcheck_memory_only_history():
+    from bot.selfcheck import check_history
+
+    result = check_history(Config(telegram_token="t"))
+    assert result.ok is True
+    assert "памяти" in result.title
+
+
+async def test_selfcheck_reports_bad_anthropic_key(monkeypatch):
+    import anthropic
+    import httpx2 as httpx
+
+    from bot.selfcheck import check_anthropic
+
+    class Boom:
+        def __init__(self, **kwargs):
+            self.messages = self
+
+        async def create(self, **kwargs):
+            raise anthropic.AuthenticationError(
+                message="invalid key",
+                response=httpx.Response(401, request=httpx.Request("POST", "https://api")),
+                body=None,
+            )
+
+    monkeypatch.setattr(anthropic, "AsyncAnthropic", Boom)
+    result = await check_anthropic(Config(telegram_token="t"))
+    assert result.ok is False
+    assert "недействителен" in result.detail
