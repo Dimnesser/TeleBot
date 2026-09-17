@@ -3,12 +3,12 @@
 from __future__ import annotations
 
 import logging
-from dataclasses import dataclass, field
 from typing import Any, Awaitable, Callable, Iterable
 
 import anthropic
 
 from .config import Config, web_search_tool_type
+from .types import EMPTY_MESSAGE, REFUSAL_MESSAGE, ModelError, Reply
 
 logger = logging.getLogger(__name__)
 
@@ -35,67 +35,37 @@ KNOWN_BAD_REQUESTS: tuple[tuple[str, str], ...] = (
     ),
 )
 
-REFUSAL_MESSAGE = (
-    "Не могу ответить на этот запрос. Попробуй переформулировать или "
-    "спросить о чём-то другом — я рядом."
-)
-EMPTY_MESSAGE = "Ответ получился пустым. Попробуй переформулировать вопрос."
+# Исторический псевдоним: раньше ошибка жила в этом модуле.
+ClaudeError = ModelError
 
 
-@dataclass
-class Reply:
-    """Результат одного обращения к модели."""
-
-    text: str
-    stop_reason: str | None = None
-    refused: bool = False
-    truncated: bool = False
-    search_queries: list[str] = field(default_factory=list)
-    sources: list[tuple[str, str]] = field(default_factory=list)
-    input_tokens: int = 0
-    output_tokens: int = 0
-
-    @property
-    def used_search(self) -> bool:
-        return bool(self.search_queries)
-
-
-class ClaudeError(RuntimeError):
-    """Ошибка обращения к API с текстом, готовым к показу пользователю."""
-
-    def __init__(self, user_message: str, *, retryable: bool = False) -> None:
-        super().__init__(user_message)
-        self.user_message = user_message
-        self.retryable = retryable
-
-
-def friendly_error(exc: Exception) -> ClaudeError:
+def friendly_error(exc: Exception) -> ModelError:
     """Переводит исключение SDK в понятное пользователю сообщение."""
     if isinstance(exc, anthropic.AuthenticationError):
-        return ClaudeError("Ключ доступа к модели недействителен. Нужно проверить настройки бота.")
+        return ModelError("Ключ доступа к модели недействителен. Нужно проверить настройки бота.")
     if isinstance(exc, anthropic.PermissionDeniedError):
-        return ClaudeError("У ключа доступа не хватает прав для этой модели.")
+        return ModelError("У ключа доступа не хватает прав для этой модели.")
     if isinstance(exc, anthropic.NotFoundError):
-        return ClaudeError("Указанная модель недоступна. Проверь настройку CLAUDE_MODEL.")
+        return ModelError("Указанная модель недоступна. Проверь настройку CLAUDE_MODEL.")
     if isinstance(exc, anthropic.RateLimitError):
-        return ClaudeError(
+        return ModelError(
             "Слишком много запросов к модели. Подожди минуту и повтори.", retryable=True
         )
     if isinstance(exc, anthropic.BadRequestError):
         message = (getattr(exc, "message", "") or str(exc)).lower()
         for marker, explanation in KNOWN_BAD_REQUESTS:
             if marker in message:
-                return ClaudeError(explanation)
-        return ClaudeError(f"Запрос отклонён API: {exc.message}")
+                return ModelError(explanation)
+        return ModelError(f"Запрос отклонён API: {exc.message}")
     if isinstance(exc, anthropic.APITimeoutError):
-        return ClaudeError("Модель не ответила вовремя. Попробуй ещё раз.", retryable=True)
+        return ModelError("Модель не ответила вовремя. Попробуй ещё раз.", retryable=True)
     if isinstance(exc, anthropic.APIConnectionError):
-        return ClaudeError("Нет связи с сервером модели. Попробуй чуть позже.", retryable=True)
+        return ModelError("Нет связи с сервером модели. Попробуй чуть позже.", retryable=True)
     if isinstance(exc, anthropic.APIStatusError):
         if exc.status_code >= 500:
-            return ClaudeError("На стороне модели временная ошибка. Попробуй ещё раз.", retryable=True)
-        return ClaudeError(f"Ошибка API ({exc.status_code}): {exc.message}")
-    return ClaudeError("Что-то пошло не так при обращении к модели. Попробуй ещё раз.", retryable=True)
+            return ModelError("На стороне модели временная ошибка. Попробуй ещё раз.", retryable=True)
+        return ModelError(f"Ошибка API ({exc.status_code}): {exc.message}")
+    return ModelError("Что-то пошло не так при обращении к модели. Попробуй ещё раз.", retryable=True)
 
 
 class ClaudeClient:
@@ -104,7 +74,7 @@ class ClaudeClient:
     def __init__(self, config: Config, client: Any | None = None) -> None:
         self._config = config
         self._client = client or anthropic.AsyncAnthropic(
-            api_key=config.anthropic_api_key,
+            api_key=config.api_key,
             timeout=config.request_timeout,
             max_retries=2,
         )

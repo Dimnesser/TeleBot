@@ -15,7 +15,9 @@ def clean_env(monkeypatch):
         "CLAUDE_MAX_TOKENS", "CLAUDE_TIMEOUT_SECONDS", "ENABLE_WEB_SEARCH",
         "WEB_SEARCH_MAX_USES", "ENABLE_REFUSAL_FALLBACK", "HISTORY_TURNS",
         "HISTORY_MAX_CHARS", "HISTORY_FILE", "ALLOWED_USER_IDS",
-        "MAX_IMAGE_BYTES", "MAX_DOCUMENT_BYTES",
+        "MAX_IMAGE_BYTES", "MAX_DOCUMENT_BYTES", "AI_PROVIDER", "AI_MODEL",
+        "AI_BASE_URL", "AI_API_KEY", "GEMINI_API_KEY", "GOOGLE_API_KEY",
+        "GROQ_API_KEY", "OPENROUTER_API_KEY",
     ]:
         monkeypatch.delenv(name, raising=False)
 
@@ -98,3 +100,107 @@ def test_web_search_tool_version():
 def test_describe_mentions_model():
     config = Config(telegram_token="t", model="claude-opus-5")
     assert "claude-opus-5" in config.describe()
+
+
+def test_gemini_provider_from_env(monkeypatch):
+    monkeypatch.setenv("TELEGRAM_BOT_TOKEN", "123:abc")
+    monkeypatch.setenv("AI_PROVIDER", "gemini")
+    monkeypatch.setenv("GEMINI_API_KEY", "g-key")
+    config = Config.from_env()
+    assert config.provider == "gemini"
+    assert config.api_key == "g-key"
+    assert config.model == "gemini-2.5-flash"
+    assert config.base_url.startswith("https://generativelanguage.googleapis.com")
+    assert config.native_anthropic is False
+
+
+def test_web_search_and_effort_are_off_for_other_providers(monkeypatch):
+    monkeypatch.setenv("TELEGRAM_BOT_TOKEN", "123:abc")
+    monkeypatch.setenv("AI_PROVIDER", "groq")
+    monkeypatch.setenv("GROQ_API_KEY", "g")
+    monkeypatch.setenv("ENABLE_WEB_SEARCH", "true")
+    monkeypatch.setenv("CLAUDE_EFFORT", "high")
+    config = Config.from_env()
+    assert config.web_search is False
+    assert config.effort is None
+
+
+def test_unknown_provider_is_rejected(monkeypatch):
+    monkeypatch.setenv("TELEGRAM_BOT_TOKEN", "123:abc")
+    monkeypatch.setenv("AI_PROVIDER", "скайнет")
+    with pytest.raises(ConfigError, match="AI_PROVIDER"):
+        Config.from_env()
+
+
+def test_openrouter_requires_model(monkeypatch):
+    monkeypatch.setenv("TELEGRAM_BOT_TOKEN", "123:abc")
+    monkeypatch.setenv("AI_PROVIDER", "openrouter")
+    monkeypatch.setenv("OPENROUTER_API_KEY", "k")
+    with pytest.raises(ConfigError, match="AI_MODEL"):
+        Config.from_env()
+
+
+def test_custom_provider_requires_base_url(monkeypatch):
+    monkeypatch.setenv("TELEGRAM_BOT_TOKEN", "123:abc")
+    monkeypatch.setenv("AI_PROVIDER", "custom")
+    monkeypatch.setenv("AI_MODEL", "llama3")
+    with pytest.raises(ConfigError, match="AI_BASE_URL"):
+        Config.from_env()
+
+
+def test_ai_model_overrides_default(monkeypatch):
+    monkeypatch.setenv("TELEGRAM_BOT_TOKEN", "123:abc")
+    monkeypatch.setenv("AI_PROVIDER", "groq")
+    monkeypatch.setenv("GROQ_API_KEY", "k")
+    monkeypatch.setenv("AI_MODEL", "своя-модель")
+    assert Config.from_env().model == "своя-модель"
+
+
+def test_generic_key_wins_over_provider_key(monkeypatch):
+    monkeypatch.setenv("TELEGRAM_BOT_TOKEN", "123:abc")
+    monkeypatch.setenv("AI_PROVIDER", "gemini")
+    monkeypatch.setenv("AI_API_KEY", "общий")
+    monkeypatch.setenv("GEMINI_API_KEY", "частный")
+    assert Config.from_env().api_key == "общий"
+
+
+def test_describe_mentions_provider():
+    from bot.config import PROVIDERS
+
+    config = Config(telegram_token="t", provider="gemini")
+    assert PROVIDERS["gemini"].label in config.describe()
+
+
+def test_build_client_picks_provider():
+    from bot.claude import ClaudeClient
+    from bot.model_client import build_client
+    from bot.openai_compat import OpenAICompatClient
+    from bot.config import PROVIDERS
+
+    anthropic_client = build_client(Config(telegram_token="t", api_key="k"))
+    assert isinstance(anthropic_client, ClaudeClient)
+
+    other = build_client(
+        Config(
+            telegram_token="t",
+            api_key="k",
+            provider="gemini",
+            base_url=PROVIDERS["gemini"].base_url,
+            model="gemini-2.5-flash",
+        )
+    )
+    assert isinstance(other, OpenAICompatClient)
+
+
+def test_claude_model_does_not_leak_into_other_providers(monkeypatch):
+    monkeypatch.setenv("TELEGRAM_BOT_TOKEN", "123:abc")
+    monkeypatch.setenv("CLAUDE_MODEL", "claude-opus-5")
+    monkeypatch.setenv("AI_PROVIDER", "gemini")
+    monkeypatch.setenv("GEMINI_API_KEY", "k")
+    assert Config.from_env().model == "gemini-2.5-flash"
+
+
+def test_claude_model_still_works_for_anthropic(monkeypatch):
+    monkeypatch.setenv("TELEGRAM_BOT_TOKEN", "123:abc")
+    monkeypatch.setenv("CLAUDE_MODEL", "claude-sonnet-5")
+    assert Config.from_env().model == "claude-sonnet-5"

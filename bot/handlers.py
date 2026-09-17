@@ -18,8 +18,8 @@ from telegram.ext import (
     filters,
 )
 
-from .claude import ClaudeClient, ClaudeError, Reply
 from .config import Config
+from .types import ModelError, Reply
 from .history import HistoryStore, image_block, text_block
 from .prompts import HELP_MESSAGE, START_MESSAGE, build_system_prompt
 from .reply import ReplyStreamer, keep_typing
@@ -48,7 +48,7 @@ UNREADABLE_DOCUMENT = "Не смог прочитать файл как текс
 class BotRuntime:
     """Связывает конфигурацию, историю и клиента модели."""
 
-    def __init__(self, config: Config, claude: ClaudeClient, history: HistoryStore) -> None:
+    def __init__(self, config: Config, claude: Any, history: HistoryStore) -> None:
         self.config = config
         self.claude = claude
         self.history = history
@@ -299,7 +299,7 @@ async def _respond(
             reply = await runtime.claude.complete(
                 runtime.system_prompt, conversation, on_delta=streamer.push
             )
-        except ClaudeError as exc:
+        except ModelError as exc:
             error_text = exc.user_message
         except Exception:  # noqa: BLE001 — не роняем бота из-за одного чата
             logger.exception("Непредвиденная ошибка при генерации ответа")

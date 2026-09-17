@@ -10,9 +10,9 @@ from telegram import BotCommand
 from telegram.ext import AIORateLimiter, Application, ApplicationBuilder
 
 from . import handlers
-from .claude import ClaudeClient
 from .config import Config
 from .history import HistoryStore
+from .model_client import build_client
 
 logger = logging.getLogger(__name__)
 
@@ -57,7 +57,7 @@ def build_application(config: Config) -> Application:
         max_chars=config.history_max_chars,
         path=config.history_path,
     )
-    runtime = handlers.BotRuntime(config, ClaudeClient(config), history)
+    runtime = handlers.BotRuntime(config, build_client(config), history)
 
     async def post_init(application: Application) -> None:
         await history.load()
@@ -66,7 +66,12 @@ def build_application(config: Config) -> Application:
         except Exception:  # noqa: BLE001 — не критично для запуска
             logger.warning("Не удалось обновить список команд", exc_info=True)
         me = await application.bot.get_me()
-        logger.info("Бот @%s запущен, модель %s", me.username, config.model)
+        logger.info(
+            "Бот @%s запущен, %s, модель %s",
+            me.username,
+            config.provider_info.label,
+            config.model,
+        )
 
     application = (
         ApplicationBuilder()

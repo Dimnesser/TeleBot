@@ -45,13 +45,27 @@ async def check_telegram(config: Config) -> CheckResult:
     return CheckResult(True, f"Telegram: бот @{me.username}", f"id {me.id}")
 
 
-async def check_anthropic(config: Config) -> CheckResult:
-    """Делает минимальный запрос к модели, чтобы проверить ключ."""
+async def check_model(config: Config) -> CheckResult:
+    """Делает минимальный запрос к модели, чтобы проверить ключ и доступ."""
+    if not config.api_key:
+        names = " или ".join(config.provider_info.key_env)
+        return CheckResult(
+            False,
+            f"Не задан ключ для {config.provider_info.label}",
+            f"Впиши {names} в .env. Получить: {config.provider_info.console_url}",
+        )
+
+    if config.native_anthropic:
+        return await _check_anthropic(config)
+    return await _check_openai_compatible(config)
+
+
+async def _check_anthropic(config: Config) -> CheckResult:
     import anthropic
 
     try:
         client = anthropic.AsyncAnthropic(
-            api_key=config.anthropic_api_key, timeout=30.0, max_retries=1
+            api_key=config.api_key, timeout=30.0, max_retries=1
         )
         await client.messages.create(
             model=config.model,
@@ -61,6 +75,42 @@ async def check_anthropic(config: Config) -> CheckResult:
     except Exception as exc:  # noqa: BLE001 — переводим в понятный текст
         return CheckResult(False, "Модель недоступна", friendly_error(exc).user_message)
     return CheckResult(True, f"Модель отвечает: {config.model}")
+
+
+async def _check_openai_compatible(config: Config) -> CheckResult:
+    from .openai_compat import friendly_error as openai_friendly_error
+    from .openai_compat import list_models
+
+    from openai import AsyncOpenAI
+
+    try:
+        client = AsyncOpenAI(
+            api_key=config.api_key,
+            base_url=config.base_url,
+            timeout=30.0,
+            max_retries=1,
+        )
+        await client.chat.completions.create(
+            model=config.model,
+            max_tokens=16,
+            messages=[{"role": "user", "content": "ping"}],
+        )
+    except Exception as exc:  # noqa: BLE001 — переводим в понятный текст
+        detail = openai_friendly_error(exc).user_message
+        hint = await _suggest_models(config, list_models)
+        return CheckResult(False, "Модель недоступна", f"{detail}{hint}")
+    return CheckResult(True, f"Модель отвечает: {config.model}")
+
+
+async def _suggest_models(config: Config, list_models) -> str:
+    """Подсказка со списком доступных моделей, если провайдер его отдаёт."""
+    try:
+        names = await list_models(config)
+    except Exception:  # noqa: BLE001 — подсказка не обязана работать
+        return ""
+    if not names:
+        return ""
+    return "\n   Доступные модели: " + ", ".join(names)
 
 
 def check_history(config: Config) -> CheckResult:
@@ -79,11 +129,11 @@ def check_history(config: Config) -> CheckResult:
 
 async def run_checks(config: Config) -> int:
     """Печатает отчёт. Возвращает код выхода: 0 — всё готово."""
-    print("Проверяю настройки…\n")
+    print(f"Проверяю настройки… Провайдер: {config.provider_info.label}\n")
 
     results = [
         await check_telegram(config),
-        await check_anthropic(config),
+        await check_model(config),
         check_history(config),
     ]
     for result in results:
@@ -91,8 +141,13 @@ async def run_checks(config: Config) -> int:
 
     if config.web_search:
         print(f"{OK} Веб-поиск включён")
-    else:
+    elif config.native_anthropic:
         print(f"{WARN} Веб-поиск выключен: бот не сможет отвечать о свежих событиях")
+    else:
+        print(
+            f"{WARN} Веб-поиск недоступен: его умеет только Anthropic. "
+            "Бот честно скажет, когда данных не хватает."
+        )
 
     if config.allowed_user_ids:
         print(f"{WARN} Доступ открыт только для {len(config.allowed_user_ids)} пользователей")

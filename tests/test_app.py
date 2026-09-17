@@ -25,7 +25,7 @@ def test_load_dotenv_ignores_missing_file(tmp_path):
 
 def test_application_builds_with_all_handlers(monkeypatch):
     monkeypatch.setenv("ANTHROPIC_API_KEY", "test-key")
-    application = build_application(Config(telegram_token="123456:TEST", anthropic_api_key="k"))
+    application = build_application(Config(telegram_token="123456:TEST", api_key="k"))
 
     assert application.bot_data["runtime"].config.model == "claude-opus-5"
     registered = application.handlers[0]
@@ -63,7 +63,7 @@ async def test_selfcheck_reports_bad_anthropic_key(monkeypatch):
     import anthropic
     import httpx2 as httpx
 
-    from bot.selfcheck import check_anthropic
+    from bot.selfcheck import check_model
 
     class Boom:
         def __init__(self, **kwargs):
@@ -77,6 +77,14 @@ async def test_selfcheck_reports_bad_anthropic_key(monkeypatch):
             )
 
     monkeypatch.setattr(anthropic, "AsyncAnthropic", Boom)
-    result = await check_anthropic(Config(telegram_token="t"))
+    result = await check_model(Config(telegram_token="t", api_key="k"))
     assert result.ok is False
     assert "недействителен" in result.detail
+
+
+async def test_selfcheck_reports_missing_key():
+    from bot.selfcheck import check_model
+
+    result = await check_model(Config(telegram_token="t", provider="gemini"))
+    assert result.ok is False
+    assert "GEMINI_API_KEY" in result.detail

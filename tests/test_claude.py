@@ -18,7 +18,7 @@ from fakes import FakeAnthropic, FakeMessage, collector, text_block_obj
 def make_config(**overrides) -> Config:
     base = dict(
         telegram_token="t",
-        anthropic_api_key="k",
+        api_key="k",
         model="claude-opus-5",
         web_search=False,
         refusal_fallback=False,

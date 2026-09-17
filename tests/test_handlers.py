@@ -75,7 +75,7 @@ def make_context(bot: FakeBot, runtime) -> SimpleNamespace:
 def make_runtime(turns=None, **config_overrides):
     base = dict(
         telegram_token="t",
-        anthropic_api_key="k",
+        api_key="k",
         web_search=False,
         refusal_fallback=False,
         stream_edit_interval=0.0,
