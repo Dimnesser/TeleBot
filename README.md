@@ -102,6 +102,24 @@ pytest
 
 Тесты не ходят в сеть: Anthropic SDK и Telegram заменены заглушками.
 
+## Запуск на телефоне (Android, Termux)
+
+Бот может работать прямо на телефоне. Пошаговая инструкция со всеми
+подводными камнями — в [docs/TERMUX.md](docs/TERMUX.md). Коротко:
+
+```bash
+pkg install -y curl && \
+curl -fsSL https://raw.githubusercontent.com/Dimnesser/TeleBot/claude/telegram-ai-assistant-pfzidg/scripts/termux-install.sh \
+  -o ~/termux-install.sh && bash ~/termux-install.sh
+
+nano ~/TeleBot/.env                       # вписать токены
+bash ~/TeleBot/scripts/termux-run.sh      # запустить
+```
+
+Нужен Termux из F-Droid, не из Google Play. Первая установка может занять
+до 40 минут: библиотекам `pydantic-core` и `jiter` нужны бинарники на Rust,
+а готовых сборок под Android нет, поэтому они собираются на месте.
+
 ## Запуск в Docker
 
 ```bash
