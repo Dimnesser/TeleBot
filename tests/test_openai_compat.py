@@ -212,3 +212,19 @@ def test_quota_error_is_explained():
         body=None,
     )
     assert "квота" in friendly_error(error).user_message.lower()
+
+
+def test_invalid_key_message_is_human_readable():
+    import httpx
+
+    error = openai.APIStatusError(
+        message=(
+            "Error code: 400 - [{'error': {'code': 400, "
+            "'message': 'Please pass a valid API key', 'status': 'INVALID_ARGUMENT'}}]"
+        ),
+        response=httpx.Response(400, request=httpx.Request("POST", "https://api")),
+        body=None,
+    )
+    message = friendly_error(error).user_message
+    assert "скопировал его целиком" in message
+    assert "INVALID_ARGUMENT" not in message

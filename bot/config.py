@@ -61,6 +61,14 @@ PROVIDERS: dict[str, Provider] = {
         console_url="https://openrouter.ai/keys",
         free_tier=True,
     ),
+    "openai": Provider(
+        name="openai",
+        label="OpenAI",
+        key_env=("OPENAI_API_KEY",),
+        base_url="https://api.openai.com/v1",
+        default_model="gpt-4o-mini",
+        console_url="https://platform.openai.com/api-keys",
+    ),
     "custom": Provider(
         name="custom",
         label="Свой сервер, совместимый с OpenAI",
@@ -111,6 +119,27 @@ def web_search_tool_type(model: str) -> str:
     if model.startswith(_MODERN_SEARCH_MODELS):
         return "web_search_20260209"
     return "web_search_20250305"
+
+
+# По виду ключа почти всегда понятно, чей он. Порядок важен: более
+# специфичные образцы идут раньше общего "sk-".
+KEY_SIGNATURES: tuple[tuple[str, str], ...] = (
+    ("sk-ant-", "anthropic"),
+    ("sk-or-", "openrouter"),
+    ("gsk_", "groq"),
+    ("AIza", "gemini"),
+    ("sk-proj-", "openai"),
+    ("sk-", "openai"),
+)
+
+
+def detect_provider(api_key: str) -> str | None:
+    """Определяет провайдера по формату ключа. None, если не узнали."""
+    key = (api_key or "").strip()
+    for prefix, provider in KEY_SIGNATURES:
+        if key.startswith(prefix):
+            return provider
+    return None
 
 
 def _env_flag(name: str, default: bool) -> bool:

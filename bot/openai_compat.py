@@ -17,8 +17,31 @@ logger = logging.getLogger(__name__)
 
 DeltaCallback = Callable[[str], Awaitable[None]]
 
+MISSING_LIBRARY = (
+    "Не установлена библиотека openai, без неё этот провайдер не работает. "
+    "Выполни в каталоге бота: ./.venv/bin/pip install -r requirements.txt"
+)
+
+
+def _import_async_openai():
+    """Отдельная функция, чтобы отсутствие библиотеки давало понятный текст."""
+    try:
+        from openai import AsyncOpenAI
+    except ImportError as exc:  # pragma: no cover — зависит от окружения
+        raise ModelError(MISSING_LIBRARY) from exc
+    return AsyncOpenAI
+
 # Куски текста ошибок, для которых сырое сообщение провайдера бесполезно.
 KNOWN_ERRORS: tuple[tuple[str, str], ...] = (
+    (
+        "api key",
+        "Ключ не принят провайдером. Проверь, что скопировал его целиком, без пробелов.",
+    ),
+    (
+        "api_key_invalid",
+        "Ключ не принят провайдером. Проверь, что скопировал его целиком, без пробелов.",
+    ),
+    ("unauthorized", "Ключ не принят провайдером. Проверь, что скопировал его целиком."),
     ("insufficient_quota", "У провайдера закончилась квота. Проверь лимиты в его панели."),
     ("quota", "Исчерпан лимит запросов у провайдера. Подожди или смени модель."),
     ("model_not_found", "Такой модели у провайдера нет. Проверь AI_MODEL."),
@@ -74,7 +97,12 @@ def to_openai_messages(system: str, messages: list[dict[str, Any]]) -> list[dict
 
 def friendly_error(exc: Exception) -> ModelError:
     """Переводит исключение провайдера в понятное пользователю сообщение."""
-    import openai
+    if isinstance(exc, ModelError):
+        return exc
+    try:
+        import openai
+    except ImportError:  # pragma: no cover — зависит от окружения
+        return ModelError(MISSING_LIBRARY)
 
     if isinstance(exc, openai.AuthenticationError):
         return ModelError("Ключ провайдера отклонён. Проверь его в .env")
@@ -109,7 +137,7 @@ class OpenAICompatClient:
         if client is not None:
             self._client = client
         else:
-            from openai import AsyncOpenAI
+            AsyncOpenAI = _import_async_openai()
 
             self._client = AsyncOpenAI(
                 api_key=config.api_key or "not-needed",
@@ -179,7 +207,7 @@ class OpenAICompatClient:
 
 async def list_models(config: Config, limit: int = 15) -> list[str]:
     """Названия доступных моделей — чтобы подсказать при опечатке в AI_MODEL."""
-    from openai import AsyncOpenAI
+    AsyncOpenAI = _import_async_openai()
 
     client = AsyncOpenAI(
         api_key=config.api_key or "not-needed",

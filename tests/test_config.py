@@ -204,3 +204,28 @@ def test_claude_model_still_works_for_anthropic(monkeypatch):
     monkeypatch.setenv("TELEGRAM_BOT_TOKEN", "123:abc")
     monkeypatch.setenv("CLAUDE_MODEL", "claude-sonnet-5")
     assert Config.from_env().model == "claude-sonnet-5"
+
+
+@pytest.mark.parametrize(
+    "key, expected",
+    [
+        ("sk-ant-api03-abc", "anthropic"),
+        ("AIzaSyCsomething", "gemini"),
+        ("gsk_abc123", "groq"),
+        ("sk-or-v1-abc", "openrouter"),
+        ("sk-proj-abc", "openai"),
+        ("sk-abc123", "openai"),
+        ("", None),
+        ("просто текст", None),
+    ],
+)
+def test_provider_detected_from_key(key, expected):
+    from bot.config import detect_provider
+
+    assert detect_provider(key) == expected
+
+
+def test_openrouter_prefix_wins_over_openai():
+    from bot.config import detect_provider
+
+    assert detect_provider("sk-or-v1-xyz") == "openrouter"

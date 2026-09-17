@@ -11,6 +11,9 @@ cd "$TARGET" || { echo "Нет каталога $TARGET"; exit 1; }
 PYTHON="./.venv/bin/python"
 [ -x "$PYTHON" ] || PYTHON="python"
 
+# Настройки могли поменяться вместе с кодом, поэтому доставляем зависимости.
+"$PYTHON" -m pip install -q -r requirements.txt 2>/dev/null
+
 "$PYTHON" scripts/setup_keys.py || exit $?
 
 echo

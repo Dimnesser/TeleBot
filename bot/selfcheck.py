@@ -78,10 +78,13 @@ async def _check_anthropic(config: Config) -> CheckResult:
 
 
 async def _check_openai_compatible(config: Config) -> CheckResult:
+    from .openai_compat import MISSING_LIBRARY, list_models
     from .openai_compat import friendly_error as openai_friendly_error
-    from .openai_compat import list_models
 
-    from openai import AsyncOpenAI
+    try:
+        from openai import AsyncOpenAI
+    except ImportError:
+        return CheckResult(False, "Не хватает зависимости", MISSING_LIBRARY)
 
     try:
         client = AsyncOpenAI(

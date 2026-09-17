@@ -91,11 +91,23 @@ python main.py           # запустить
 [Groq](https://console.groq.com/keys),
 [OpenRouter](https://openrouter.ai/keys).
 
-Переключение одной командой:
+Провайдер определяется автоматически по виду ключа, отдельно указывать его не
+нужно. Достаточно вставить ключ:
 
 ```bash
 python scripts/setup_keys.py
 ```
+
+| Начало ключа | Провайдер |
+|---|---|
+| `AIza` | Google Gemini |
+| `gsk_` | Groq |
+| `sk-ant-` | Anthropic |
+| `sk-or-` | OpenRouter |
+| `sk-` | OpenAI |
+
+Если модель по умолчанию недоступна, бот запрашивает у провайдера список
+моделей и подбирает рабочую сам.
 
 Для `openrouter` и `custom` модель нужно задать явно в `AI_MODEL`. Если
 ошибиться в названии, `python main.py --check` покажет список доступных
@@ -169,8 +181,7 @@ apt install -y curl && \
 curl -fsSL https://raw.githubusercontent.com/Dimnesser/TeleBot/claude/telegram-ai-assistant-pfzidg/scripts/termux-install.sh \
   -o ~/termux-install.sh && bash ~/termux-install.sh
 
-bash ~/TeleBot/scripts/termux-keys.sh     # вписать ключи и проверить связь
-bash ~/TeleBot/scripts/termux-run.sh      # запустить
+bash ~/TeleBot/scripts/termux-run.sh      # спросит токен и ключ, потом запустит
 ```
 
 Без первой команды установка сломает `curl`: Termux обновляется непрерывно,
