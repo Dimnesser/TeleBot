@@ -115,7 +115,7 @@ apt install -y curl && \
 curl -fsSL https://raw.githubusercontent.com/Dimnesser/TeleBot/claude/telegram-ai-assistant-pfzidg/scripts/termux-install.sh \
   -o ~/termux-install.sh && bash ~/termux-install.sh
 
-nano ~/TeleBot/.env                       # вписать токены
+bash ~/TeleBot/scripts/termux-keys.sh     # вписать ключи и проверить связь
 bash ~/TeleBot/scripts/termux-run.sh      # запустить
 ```
 

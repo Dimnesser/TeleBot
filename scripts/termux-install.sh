@@ -98,7 +98,7 @@ mkdir -p data
 say "Готово"
 cat <<'HINT'
 Дальше:
-  1. nano ~/TeleBot/.env      — вписать токен бота и ключ Anthropic
+  1. bash ~/TeleBot/scripts/termux-keys.sh  — вписать ключи и проверить связь
   2. bash ~/TeleBot/scripts/termux-run.sh   — запустить бота
 
 Автозапуск после перезагрузки телефона:
