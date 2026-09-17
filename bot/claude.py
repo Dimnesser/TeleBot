@@ -17,6 +17,24 @@ DeltaCallback = Callable[[str], Awaitable[None]]
 FALLBACK_BETA = "server-side-fallback-2026-07-01"
 MAX_PAUSE_RESUMES = 4
 
+# Частые ответы API, для которых сырой английский текст ошибки бесполезен.
+KNOWN_BAD_REQUESTS: tuple[tuple[str, str], ...] = (
+    (
+        "credit balance is too low",
+        "На счёте Anthropic закончились средства. Пополни баланс в консоли: "
+        "console.anthropic.com, раздел Plans & Billing. Подписка Claude Pro "
+        "для API не действует, кредиты покупаются отдельно.",
+    ),
+    (
+        "max_tokens",
+        "Слишком большой лимит ответа для этой модели. Уменьши CLAUDE_MAX_TOKENS.",
+    ),
+    (
+        "prompt is too long",
+        "Диалог стал слишком длинным для модели. Отправь /reset и спроси заново.",
+    ),
+)
+
 REFUSAL_MESSAGE = (
     "Не могу ответить на этот запрос. Попробуй переформулировать или "
     "спросить о чём-то другом — я рядом."
@@ -64,6 +82,10 @@ def friendly_error(exc: Exception) -> ClaudeError:
             "Слишком много запросов к модели. Подожди минуту и повтори.", retryable=True
         )
     if isinstance(exc, anthropic.BadRequestError):
+        message = (getattr(exc, "message", "") or str(exc)).lower()
+        for marker, explanation in KNOWN_BAD_REQUESTS:
+            if marker in message:
+                return ClaudeError(explanation)
         return ClaudeError(f"Запрос отклонён API: {exc.message}")
     if isinstance(exc, anthropic.APITimeoutError):
         return ClaudeError("Модель не ответила вовремя. Попробуй ещё раз.", retryable=True)

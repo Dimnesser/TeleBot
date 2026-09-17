@@ -166,3 +166,35 @@ def test_extract_sources_skips_tool_errors():
     }
     failed = {"type": "web_search_tool_result", "content": {"error_code": "max_uses_exceeded"}}
     assert extract_sources([ok, failed]) == [("А", "https://a.tld")]
+
+
+def test_low_credit_balance_gets_actionable_message():
+    error = anthropic.BadRequestError(
+        message=(
+            "Your credit balance is too low to access the Anthropic API. "
+            "Please go to Plans & Billing to upgrade or purchase credits."
+        ),
+        response=_fake_response(400),
+        body=None,
+    )
+    result = friendly_error(error)
+    assert "Пополни баланс" in result.user_message
+    assert "credit balance" not in result.user_message
+
+
+def test_prompt_too_long_suggests_reset():
+    error = anthropic.BadRequestError(
+        message="prompt is too long: 1200000 tokens > 1000000 maximum",
+        response=_fake_response(400),
+        body=None,
+    )
+    assert "/reset" in friendly_error(error).user_message
+
+
+def test_unknown_bad_request_keeps_original_text():
+    error = anthropic.BadRequestError(
+        message="something unusual happened",
+        response=_fake_response(400),
+        body=None,
+    )
+    assert "something unusual happened" in friendly_error(error).user_message

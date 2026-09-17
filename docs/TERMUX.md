@@ -153,6 +153,7 @@ cd ~/TeleBot && git pull && ./.venv/bin/pip install -r requirements.txt
 | `newer than PyO3's maximum supported version` | Termux ставит самый свежий Python. Выполни `export PYO3_USE_ABI3_FORWARD_COMPATIBILITY=1` и повтори установку |
 | `Ошибка конфигурации: Не задан TELEGRAM_BOT_TOKEN` | Не заполнен `.env` |
 | `Ключ доступа к модели недействителен` | Неверный `ANTHROPIC_API_KEY` |
+| `На счёте Anthropic закончились средства` | Ключ верный, но баланс пуст. Купи кредиты в консоли, раздел Plans & Billing. Подписка Claude Pro на API не распространяется |
 | Бот молчит в группе | В группах он отвечает только на упоминание `@имя_бота` или на ответ своему сообщению |
 | `Нет связи с Telegram` при проверке | Нет интернета или провайдер блокирует Telegram: включи VPN |
 | Бот замолкает через время | Android усыпил Termux: сними ограничения батареи и проверь wake lock |
