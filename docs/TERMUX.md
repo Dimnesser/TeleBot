@@ -136,7 +136,8 @@ cd ~/TeleBot && git pull && ./.venv/bin/pip install -r requirements.txt
 | `CANNOT LINK EXECUTABLE "curl"`, `cannot locate symbol` | Частичное обновление Termux. Лечится командой `apt update && apt full-upgrade -y`, затем повтори установку |
 | `pkg` падает с той же ошибкой про curl | `pkg` сам вызывает `curl`. Делай то же самое через `apt`, у него этой зависимости нет |
 | `Это не Termux` | Скрипт запущен не в Termux |
-| Сборка падает на `pydantic-core` | `pkg install rust binutils`, затем повторить установку |
+| Сборка падает на `pydantic-core` или `jiter` | `apt install -y rust binutils`, затем повторить установку |
+| `newer than PyO3's maximum supported version` | Termux ставит самый свежий Python. Выполни `export PYO3_USE_ABI3_FORWARD_COMPATIBILITY=1` и повтори установку |
 | `Ошибка конфигурации: Не задан TELEGRAM_BOT_TOKEN` | Не заполнен `.env` |
 | `Ключ доступа к модели недействителен` | Неверный `ANTHROPIC_API_KEY` |
 | Бот молчит в группе | В группах он отвечает только на упоминание `@имя_бота` или на ответ своему сообщению |

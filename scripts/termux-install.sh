@@ -15,6 +15,13 @@ die()  { printf '\033[1;31m✗   %s\033[0m\n' "$*" >&2; exit 1; }
 
 [ -d /data/data/com.termux ] || die "Это не Termux. Скрипт рассчитан на Termux для Android."
 
+# Установка длинная, а Android охотно усыпляет фоновые процессы.
+# Блокировка снимается в конце скрипта.
+if command -v termux-wake-lock >/dev/null 2>&1; then
+    termux-wake-lock
+    trap 'command -v termux-wake-unlock >/dev/null 2>&1 && termux-wake-unlock' EXIT
+fi
+
 # Termux — система с плавающими версиями. Если поставить один свежий пакет
 # поверх старой базы, он потянет библиотеку, которой ещё нет, и сломается.
 # Классический симптом: curl падает с "cannot locate symbol". Поэтому
@@ -32,8 +39,8 @@ fi
 say "Ставлю Python и Git"
 apt install -y python git
 
-command -v python >/dev/null 2>&1 || die "Python не установился. Повтори pkg install python."
-command -v git >/dev/null 2>&1 || die "Git не установился. Повтори pkg install git."
+command -v python >/dev/null 2>&1 || die "Python не установился. Повтори apt install -y python."
+command -v git >/dev/null 2>&1 || die "Git не установился. Повтори apt install -y git."
 
 say "Забираю код в $TARGET"
 if [ -d "$TARGET/.git" ]; then
@@ -52,16 +59,26 @@ say "Создаю виртуальное окружение"
 
 say "Ставлю зависимости"
 if ! ./.venv/bin/pip install -r requirements.txt; then
-    warn "Готовых пакетов под Android нет — собираю pydantic-core и jiter из исходников."
-    warn "Это долго: от 15 до 40 минут. Не сворачивай Termux, держи телефон на зарядке."
+    warn "Готовых пакетов под Android нет: собираю pydantic-core и jiter из исходников."
+    warn "Это долго, от 15 до 40 минут. Не сворачивай Termux, держи телефон на зарядке."
 
-    pkg install -y rust binutils
+    free_mb="$(df -Pm "$HOME" | awk 'NR==2 {print $4}')"
+    if [ -n "${free_mb:-}" ] && [ "$free_mb" -lt 2500 ]; then
+        warn "Свободно всего ${free_mb} МБ. Сборке Rust нужно около 2 ГБ, может не хватить."
+    fi
+
+    apt install -y rust binutils
+
     CARGO_BUILD_TARGET="$(rustc -vV | sed -n 's/^host: //p')"
     export CARGO_BUILD_TARGET
     export CARGO_NET_GIT_FETCH_WITH_CLI=true
+    # Termux ставит самый свежий Python, который часто новее, чем знает PyO3
+    # в опубликованных исходниках. Без этого флага сборка отказывается
+    # начинаться со словами про "newer than PyO3 maximum supported version".
+    export PYO3_USE_ABI3_FORWARD_COMPATIBILITY=1
 
     ./.venv/bin/pip install -r requirements.txt \
-        || die "Сборка не удалась. Пришли вывод ошибки — разберёмся."
+        || die "Сборка не удалась. Пришли вывод ошибки, разберёмся."
 fi
 
 say "Проверяю, что всё импортируется"
