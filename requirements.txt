@@ -1,0 +1,2 @@
+python-telegram-bot[rate-limiter]==21.9
+anthropic>=1.6.0
