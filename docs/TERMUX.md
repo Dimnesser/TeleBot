@@ -19,15 +19,21 @@
 Открой Termux и сначала обнови систему целиком:
 
 ```bash
-pkg upgrade -y
+apt update && apt full-upgrade -y
 ```
 
 Это обязательный первый шаг, и он занимает несколько минут. Termux обновляет
 пакеты непрерывно, и установка одного свежего пакета поверх старой базы ломает
-`curl`: он потянет библиотеку, которой ещё нет в системе. Затем:
+`curl`: он потянет библиотеку, которой ещё нет в системе.
+
+Здесь именно `apt`, а не привычный `pkg`. Команда `pkg` — это обёртка, которая
+перед работой проверяет зеркала при помощи `curl`, поэтому со сломанным `curl`
+она не запустится вовсе. У `apt` такой зависимости нет.
+
+Дальше:
 
 ```bash
-pkg install -y curl && \
+apt install -y curl && \
 curl -fsSL https://raw.githubusercontent.com/Dimnesser/TeleBot/claude/telegram-ai-assistant-pfzidg/scripts/termux-install.sh \
   -o ~/termux-install.sh && bash ~/termux-install.sh
 ```
@@ -127,7 +133,8 @@ cd ~/TeleBot && git pull && ./.venv/bin/pip install -r requirements.txt
 
 | Симптом | Что делать |
 |---|---|
-| `CANNOT LINK EXECUTABLE "curl"`, `cannot locate symbol` | Частичное обновление Termux. Лечится командой `pkg upgrade -y`, затем повтори установку |
+| `CANNOT LINK EXECUTABLE "curl"`, `cannot locate symbol` | Частичное обновление Termux. Лечится командой `apt update && apt full-upgrade -y`, затем повтори установку |
+| `pkg` падает с той же ошибкой про curl | `pkg` сам вызывает `curl`. Делай то же самое через `apt`, у него этой зависимости нет |
 | `Это не Termux` | Скрипт запущен не в Termux |
 | Сборка падает на `pydantic-core` | `pkg install rust binutils`, затем повторить установку |
 | `Ошибка конфигурации: Не задан TELEGRAM_BOT_TOKEN` | Не заполнен `.env` |

@@ -109,9 +109,9 @@ pytest
 подводными камнями — в [docs/TERMUX.md](docs/TERMUX.md). Коротко:
 
 ```bash
-pkg upgrade -y                            # обязательно первым шагом
+apt update && apt full-upgrade -y         # обязательно первым шагом
 
-pkg install -y curl && \
+apt install -y curl && \
 curl -fsSL https://raw.githubusercontent.com/Dimnesser/TeleBot/claude/telegram-ai-assistant-pfzidg/scripts/termux-install.sh \
   -o ~/termux-install.sh && bash ~/termux-install.sh
 
@@ -120,7 +120,8 @@ bash ~/TeleBot/scripts/termux-run.sh      # запустить
 ```
 
 Без первой команды установка сломает `curl`: Termux обновляется непрерывно,
-и свежий пакет поверх старой базы не находит нужную версию openssl.
+и свежий пакет поверх старой базы не находит нужную версию openssl. Здесь
+именно `apt`, потому что `pkg` сам вызывает `curl` и падает вместе с ним.
 
 Нужен Termux из F-Droid, не из Google Play. Первая установка может занять
 до 40 минут: библиотекам `pydantic-core` и `jiter` нужны бинарники на Rust,

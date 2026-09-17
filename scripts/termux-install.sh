@@ -19,15 +19,18 @@ die()  { printf '\033[1;31m✗   %s\033[0m\n' "$*" >&2; exit 1; }
 # поверх старой базы, он потянет библиотеку, которой ещё нет, и сломается.
 # Классический симптом: curl падает с "cannot locate symbol". Поэтому
 # сначала обновляем всё целиком и только потом что-то ставим.
+# Работаем через apt, а не через pkg: pkg — это обёртка, которая сама
+# вызывает curl для проверки зеркал и падает вместе с ним.
 say "Обновляю Termux целиком (это защищает от поломки libcurl)"
-pkg upgrade -y -o Dpkg::Options::=--force-confold
+apt update
+apt full-upgrade -y -o Dpkg::Options::=--force-confold
 
 if ! curl --version >/dev/null 2>&1; then
-    die "curl всё ещё сломан. Выполни: pkg upgrade -y  и запусти скрипт заново."
+    die "curl всё ещё сломан. Выполни: apt update && apt full-upgrade -y  и запусти скрипт заново."
 fi
 
 say "Ставлю Python и Git"
-pkg install -y python git
+apt install -y python git
 
 command -v python >/dev/null 2>&1 || die "Python не установился. Повтори pkg install python."
 command -v git >/dev/null 2>&1 || die "Git не установился. Повтори pkg install git."
