@@ -15,9 +15,22 @@ die()  { printf '\033[1;31m✗   %s\033[0m\n' "$*" >&2; exit 1; }
 
 [ -d /data/data/com.termux ] || die "Это не Termux. Скрипт рассчитан на Termux для Android."
 
-say "Обновляю пакеты Termux"
-pkg update -y
+# Termux — система с плавающими версиями. Если поставить один свежий пакет
+# поверх старой базы, он потянет библиотеку, которой ещё нет, и сломается.
+# Классический симптом: curl падает с "cannot locate symbol". Поэтому
+# сначала обновляем всё целиком и только потом что-то ставим.
+say "Обновляю Termux целиком (это защищает от поломки libcurl)"
+pkg upgrade -y -o Dpkg::Options::=--force-confold
+
+if ! curl --version >/dev/null 2>&1; then
+    die "curl всё ещё сломан. Выполни: pkg upgrade -y  и запусти скрипт заново."
+fi
+
+say "Ставлю Python и Git"
 pkg install -y python git
+
+command -v python >/dev/null 2>&1 || die "Python не установился. Повтори pkg install python."
+command -v git >/dev/null 2>&1 || die "Git не установился. Повтори pkg install git."
 
 say "Забираю код в $TARGET"
 if [ -d "$TARGET/.git" ]; then
