@@ -139,3 +139,30 @@ CASES_DEMO_DISCLAIMER = (
     "Кейсы работают на демо-фишках 🎫 — они не покупаются за деньги/предметы и не выводятся, "
     "это отдельная песочница для проверки механики, не связанная с балансом B из обменника."
 )
+
+UPGRADER_HOME_HEADER = "<b>АПГРЕЙДЕР</b>"
+UPGRADER_HOME_DISCLAIMER = (
+    "Апгрейдер работает с предметами из твоего инвентаря (дропы из кейсов), а не с балансом B "
+    "или Stars — рискуешь только тем, что уже выиграл в демо-режиме."
+)
+UPGRADER_CONTRIBUTION_LABEL = "ТВОЙ ВКЛАД"
+UPGRADER_TARGET_LABEL = "ЖЕЛАЕМЫЙ ПРЕДМЕТ"
+UPGRADER_SLOT_EMPTY = "— не выбрано —"
+UPGRADER_SLOT_ITEM = "{name} ({value} B)"
+UPGRADER_CHANCE_LINE = "ШАНС: <b>{chance}%</b>"
+UPGRADER_CHANCE_BAR = "{bar} {chance}%"
+UPGRADER_NEED_CONTRIBUTION_FIRST = "Сначала выбери предмет во «Твой вклад»."
+UPGRADER_NO_ITEMS_TEXT = "Инвентарь пуст — сначала открой кейс, чтобы получить предметы для апгрейда."
+UPGRADER_NO_TARGET_FOUND = "Не нашлось подходящего предмета под этот пресет — попробуй выбрать цель вручную."
+
+UPGRADER_MY_ITEMS_HEADER = "<b>Мои предметы</b>\nВыбери, чем рискуешь:"
+UPGRADER_TARGETS_HEADER = "<b>Желаемые предметы</b>\nВыбери, что хочешь получить:"
+
+UPGRADER_CONFIRM_NEED_BOTH = "Выбери и вклад, и желаемый предмет."
+UPGRADER_CONFIRM_ITEM_GONE = "Этот предмет уже не в инвентаре — выбери вклад заново."
+
+UPGRADER_RESULT_SUCCESS = (
+    "🎉 <b>Успех!</b> {contribution} превратился в {target} — предмет добавлен в инвентарь."
+)
+UPGRADER_RESULT_FAIL = "💥 <b>Не повезло.</b> {contribution} потерян."
+UPGRADER_RESULT_CHANCE_LINE = "Шанс был: {chance}%"

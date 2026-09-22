@@ -162,7 +162,9 @@ async def handle_confirm_open(callback: CallbackQuery, callback_data: CaseConfir
         await session.commit()
         await session.refresh(user)
 
-        await inventory_repo.add_items(session, user, case, [(item.name, item.value) for item in won])
+        await inventory_repo.add_items(
+            session, user, case.name, [(item.name, item.value) for item in won], case_id=case.id
+        )
         tokens_after = user.game_tokens
 
     result_lines = [CASE_OPEN_RESULT_HEADER.format(name=case.name, qty=callback_data.qty)]

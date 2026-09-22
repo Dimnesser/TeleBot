@@ -87,3 +87,36 @@ class CasesTopUpCB(CallbackData, prefix="ctopup"):
 
 class CasesInventoryCB(CallbackData, prefix="cinv"):
     pass
+
+
+class UpgraderHomeCB(CallbackData, prefix="uhome"):
+    pass
+
+
+class UpgraderMyItemsCB(CallbackData, prefix="umine"):
+    page: int = 0
+
+
+class UpgraderPickContributionCB(CallbackData, prefix="upick_c"):
+    item_id: int
+
+
+class UpgraderTargetsCB(CallbackData, prefix="utargets"):
+    page: int = 0
+
+
+class UpgraderPickTargetCB(CallbackData, prefix="upick_t"):
+    index: int
+
+
+class UpgraderPresetCB(CallbackData, prefix="upreset"):
+    kind: str  # "mult" | "chance"
+    value: int
+
+
+class UpgraderConfirmCB(CallbackData, prefix="uconfirm"):
+    pass
+
+
+class UpgraderResetCB(CallbackData, prefix="ureset"):
+    pass

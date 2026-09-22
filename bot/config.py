@@ -23,6 +23,9 @@ class Config:
     # Демо-валюта игровых разделов (кейсы и т.п.) — НЕ связана с депозитами.
     demo_starting_tokens: int = int(os.getenv("DEMO_STARTING_TOKENS", "2000"))
     demo_topup_tokens: int = int(os.getenv("DEMO_TOPUP_TOKENS", "1000"))
+    # Апгрейдер: шанс всегда режется в этот диапазон, чтобы не было 0%/100% исходов.
+    upgrader_min_chance_percent: int = int(os.getenv("UPGRADER_MIN_CHANCE_PERCENT", "1"))
+    upgrader_max_chance_percent: int = int(os.getenv("UPGRADER_MAX_CHANCE_PERCENT", "95"))
 
 
 config = Config()

@@ -64,7 +64,7 @@ async def test_inventory_add_and_list_recent():
         user = await users_repo.get_or_create_user(session, tg_id=3, username="c", first_name="C")
         case = await _seed_case_with_items(session)
 
-        await inventory_repo.add_items(session, user, case, [("Cheap", 10), ("Rare", 1000)])
+        await inventory_repo.add_items(session, user, case.name, [("Cheap", 10), ("Rare", 1000)], case_id=case.id)
         recent = await inventory_repo.list_recent(session, user, limit=10)
 
         assert len(recent) == 2

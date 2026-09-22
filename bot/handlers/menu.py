@@ -10,6 +10,7 @@ from bot.database.models import CaseCategory
 from bot.database.repo.users import get_user_by_tg_id
 from bot.handlers.cases.catalog import open_cases_home
 from bot.handlers.deposit.catalog import DEFAULT_CATALOG_STATE, open_catalog
+from bot.handlers.upgrader import open_upgrader_home
 from bot.keyboards.callbacks import MainMenuCB
 from bot.keyboards.main_menu import main_menu_keyboard
 from bot.utils.texts import SECTION_IN_PROGRESS, WELCOME_TEXT
@@ -28,6 +29,10 @@ async def handle_menu(callback: CallbackQuery, callback_data: MainMenuCB, state:
 
     if section == "cases":
         await open_cases_home(callback, state, category=CaseCategory.CASES, page=0)
+        return
+
+    if section == "upgrader":
+        await open_upgrader_home(callback, state)
         return
 
     if section == "home":
