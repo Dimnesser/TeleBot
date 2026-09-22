@@ -120,3 +120,47 @@ class UpgraderConfirmCB(CallbackData, prefix="uconfirm"):
 
 class UpgraderResetCB(CallbackData, prefix="ureset"):
     pass
+
+
+class CrashHomeCB(CallbackData, prefix="chome"):
+    pass
+
+
+class CrashPickItemsCB(CallbackData, prefix="citems"):
+    page: int = 0
+
+
+class CrashPickItemCB(CallbackData, prefix="cpick"):
+    item_id: int
+
+
+class CrashStartCB(CallbackData, prefix="cstart"):
+    pass
+
+
+class CrashCashoutCB(CallbackData, prefix="ccashout"):
+    pass
+
+
+class DiceHomeCB(CallbackData, prefix="dhome"):
+    pass
+
+
+class DicePickItemsCB(CallbackData, prefix="ditems"):
+    page: int = 0
+
+
+class DicePickItemCB(CallbackData, prefix="dpick"):
+    item_id: int
+
+
+class DicePickColorCB(CallbackData, prefix="dcolor"):
+    color: str
+
+
+class DiceRollCB(CallbackData, prefix="droll"):
+    pass
+
+
+class DiceResetCB(CallbackData, prefix="dreset2"):
+    pass

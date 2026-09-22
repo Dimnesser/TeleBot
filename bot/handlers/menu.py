@@ -9,7 +9,9 @@ from bot.database.engine import async_session
 from bot.database.models import CaseCategory
 from bot.database.repo.users import get_user_by_tg_id
 from bot.handlers.cases.catalog import open_cases_home
+from bot.handlers.crash import open_crash_home
 from bot.handlers.deposit.catalog import DEFAULT_CATALOG_STATE, open_catalog
+from bot.handlers.dice import open_dice_home
 from bot.handlers.upgrader import open_upgrader_home
 from bot.keyboards.callbacks import MainMenuCB
 from bot.keyboards.main_menu import main_menu_keyboard
@@ -33,6 +35,14 @@ async def handle_menu(callback: CallbackQuery, callback_data: MainMenuCB, state:
 
     if section == "upgrader":
         await open_upgrader_home(callback, state)
+        return
+
+    if section == "crash":
+        await open_crash_home(callback, state)
+        return
+
+    if section == "dice":
+        await open_dice_home(callback, state)
         return
 
     if section == "home":

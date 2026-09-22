@@ -166,3 +166,47 @@ UPGRADER_RESULT_SUCCESS = (
 )
 UPGRADER_RESULT_FAIL = "💥 <b>Не повезло.</b> {contribution} потерян."
 UPGRADER_RESULT_CHANCE_LINE = "Шанс был: {chance}%"
+
+CRASH_HOME_HEADER = "<b>КРАШ</b>"
+CRASH_HOME_DISCLAIMER = (
+    "В отличие от оригинала раунд личный, не общий на всех — Telegram-бот не может "
+    "синхронно транслировать одну и ту же ракету всем игрокам сразу. "
+    "Ставка — предмет из инвентаря."
+)
+CRASH_STAKE_LABEL = "СТАВКА"
+CRASH_SLOT_EMPTY = "— не выбрано —"
+CRASH_SLOT_ITEM = "{name} ({value} B)"
+CRASH_HISTORY_LABEL = "Последние раунды: {history}"
+CRASH_NO_ITEMS_TEXT = "Инвентарь пуст — сначала открой кейс, чтобы получить предметы для ставки."
+CRASH_NEED_ITEM_FIRST = "Сначала выбери брейнрота для ставки."
+CRASH_ALREADY_RUNNING = "У тебя уже есть раунд в полёте — сначала заверши его."
+CRASH_ITEM_GONE = "Этот предмет уже не в инвентаре — выбери ставку заново."
+CRASH_NO_ACTIVE_ROUND = "Нет активного раунда."
+CRASH_ALREADY_RESOLVED = "Раунд уже завершён."
+
+CRASH_IN_FLIGHT_TEXT = "🚀 <b>В ПОЛЁТЕ</b>\n\nМножитель: <b>{multiplier}x</b>\nСтавка: {stake}"
+CRASH_CASHOUT_SUCCESS = (
+    "💰 <b>Забрал на {multiplier}x!</b>\n{stake} превратился в {result} — предмет добавлен в инвентарь."
+)
+CRASH_CRASHED_TEXT = "💥 <b>Крах на {crash_point}x!</b>\n{stake} потерян."
+
+DICE_HOME_HEADER = "<b>ДАЙСЫ</b>"
+DICE_HOME_DISCLAIMER = "4 кубика, выбери цвет и предмет для ставки."
+DICE_STAKE_LABEL = "СТАВКА"
+DICE_COLOR_LABEL = "ЦВЕТ"
+DICE_SLOT_EMPTY = "— не выбрано —"
+DICE_SLOT_ITEM = "{name} ({value} B)"
+DICE_NEED_BOTH = "Выбери и цвет, и предмет для ставки."
+DICE_NO_ITEMS_TEXT = "Инвентарь пуст — сначала открой кейс, чтобы получить предметы для ставки."
+DICE_ITEM_GONE = "Этот предмет уже не в инвентаре — выбери ставку заново."
+
+DICE_RULES_HEADER = "<b>Правила игры</b>"
+DICE_RULES_ROW_WIN = "{count}/4 — выигрыш x{multiplier}"
+DICE_RULES_ROW_LOSS = "{count}/4 — проигрыш"
+DICE_RULES_BONUS_ROW = "БОНУС 🌈 — выигрыш x{multiplier}"
+
+DICE_RESULT_HEADER = "Выпало: {dice}"
+DICE_RESULT_MATCHES = "Совпадений с {color}: {count}/4"
+DICE_RESULT_BONUS = "🌈 БОНУС!"
+DICE_RESULT_WIN = "🎉 <b>Выигрыш x{multiplier}!</b> {stake} превратился в {result} — предмет добавлен в инвентарь."
+DICE_RESULT_LOSS = "💥 <b>Проигрыш.</b> {stake} потерян."

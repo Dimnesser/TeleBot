@@ -26,6 +26,15 @@ class Config:
     # Апгрейдер: шанс всегда режется в этот диапазон, чтобы не было 0%/100% исходов.
     upgrader_min_chance_percent: int = int(os.getenv("UPGRADER_MIN_CHANCE_PERCENT", "1"))
     upgrader_max_chance_percent: int = int(os.getenv("UPGRADER_MAX_CHANCE_PERCENT", "95"))
+    # Краш: интервал тика анимации, скорость роста множителя, safety-cap по времени.
+    crash_tick_seconds: float = float(os.getenv("CRASH_TICK_SECONDS", "1.2"))
+    crash_growth_rate: float = float(os.getenv("CRASH_GROWTH_RATE", "0.07"))
+    crash_max_duration_seconds: float = float(os.getenv("CRASH_MAX_DURATION_SECONDS", "30"))
+    crash_house_edge: float = float(os.getenv("CRASH_HOUSE_EDGE", "0.97"))
+    crash_max_multiplier: float = float(os.getenv("CRASH_MAX_MULTIPLIER", "100"))
+    # Дайсы: шанс отдельного бонус-события (rainbow) поверх таблицы совпадений.
+    dice_bonus_chance_percent: float = float(os.getenv("DICE_BONUS_CHANCE_PERCENT", "3"))
+    dice_bonus_multiplier: float = float(os.getenv("DICE_BONUS_MULTIPLIER", "10"))
 
 
 config = Config()
