@@ -35,6 +35,16 @@ class Config:
     # Дайсы: шанс отдельного бонус-события (rainbow) поверх таблицы совпадений.
     dice_bonus_chance_percent: float = float(os.getenv("DICE_BONUS_CHANCE_PERCENT", "3"))
     dice_bonus_multiplier: float = float(os.getenv("DICE_BONUS_MULTIPLIER", "10"))
+    # Mini App: публичный HTTPS-адрес (см. webapp/README.md), на котором
+    # запущен webapp/server.py — по нему бот отправляет кнопку web_app.
+    webapp_url: str = os.getenv("WEBAPP_URL", "")
+    webapp_host: str = os.getenv("WEBAPP_HOST", "0.0.0.0")
+    webapp_port: int = int(os.getenv("WEBAPP_PORT", "8080"))
+    # Небезопасный обход проверки initData для локальной отладки в обычном
+    # браузере (Telegram WebView не нужен) — ?dev_tg_id=... в query string.
+    # По умолчанию выключен: включать только на localhost, никогда на
+    # адресе, пробрасываемом наружу (ngrok и т.п.).
+    webapp_allow_dev_auth: bool = os.getenv("WEBAPP_ALLOW_DEV_AUTH", "false").lower() == "true"
 
 
 config = Config()

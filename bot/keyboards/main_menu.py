@@ -1,9 +1,10 @@
 """Клавиатура бокового меню (гамбургер) — [ПОДТВЕРЖДЕНО СКРИНШОТОМ]."""
 from __future__ import annotations
 
-from aiogram.types import InlineKeyboardButton, InlineKeyboardMarkup
+from aiogram.types import InlineKeyboardButton, InlineKeyboardMarkup, WebAppInfo
 from aiogram.utils.keyboard import InlineKeyboardBuilder
 
+from bot.config import config
 from bot.keyboards.callbacks import MainMenuCB
 
 # [ПОДТВЕРЖДЕНО СКРИНШОТОМ] порядок пунктов — из бокового меню:
@@ -29,6 +30,11 @@ MENU_SECTIONS: list[tuple[str, str]] = [
 
 def main_menu_keyboard() -> InlineKeyboardMarkup:
     builder = InlineKeyboardBuilder()
+    # Telegram принимает web_app-кнопку только на https-адресе — если
+    # WEBAPP_URL не задан (Mini App ещё не выложен), кнопку просто не рисуем,
+    # чтобы не падать при отправке клавиатуры.
+    if config.webapp_url:
+        builder.row(InlineKeyboardButton(text="🎮 ОТКРЫТЬ MINI APP", web_app=WebAppInfo(url=config.webapp_url)))
     for section, label in MENU_SECTIONS:
         builder.row(InlineKeyboardButton(text=label, callback_data=MainMenuCB(section=section).pack()))
     return builder.as_markup()

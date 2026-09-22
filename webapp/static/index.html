@@ -1,0 +1,37 @@
+<!DOCTYPE html>
+<html lang="ru">
+<head>
+<meta charset="UTF-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover, user-scalable=no" />
+<title>Brainrot Battle</title>
+<link rel="stylesheet" href="/static/css/app.css" />
+<script src="https://telegram.org/js/telegram-web-app.js"></script>
+</head>
+<body>
+<div id="app">
+  <header class="topbar">
+    <button id="btn-drawer" class="icon-btn" aria-label="Меню">☰</button>
+    <div class="brand">BRAIN<span class="brand-emoji">🧠</span>BATTLE</div>
+    <button id="btn-profile" class="icon-btn" aria-label="Профиль">⚙️</button>
+  </header>
+
+  <div id="drawer-overlay" class="drawer-overlay hidden"></div>
+  <nav id="drawer" class="drawer hidden">
+    <div class="drawer-profile">
+      <div class="avatar">🧑‍💻</div>
+      <div class="drawer-profile-info">
+        <div class="drawer-profile-name" id="drawer-username">@игрок</div>
+        <div class="drawer-balance"><span id="drawer-balance">0</span> <span class="coin">🪙</span></div>
+      </div>
+    </div>
+    <div class="drawer-items" id="drawer-items"></div>
+  </nav>
+
+  <main id="screen" class="screen"></main>
+
+  <div id="modal-root"></div>
+  <div id="toast-root"></div>
+</div>
+<script src="/static/js/app.js"></script>
+</body>
+</html>

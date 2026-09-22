@@ -23,6 +23,7 @@ def _run_against_real_main(env_file_content: str | None, extra_env: dict[str, st
     with tempfile.TemporaryDirectory() as tmp:
         work_dir = Path(tmp)
         (work_dir / "bot").symlink_to(repo_root / "bot")
+        (work_dir / "webapp").symlink_to(repo_root / "webapp")
         (work_dir / "main.py").symlink_to(repo_root / "main.py")
         if env_file_content is not None:
             (work_dir / ".env").write_text(env_file_content, encoding="utf-8")
