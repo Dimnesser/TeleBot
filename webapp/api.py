@@ -175,6 +175,24 @@ async def get_inventory(request: web.Request) -> web.Response:
     return web.json_response([_inventory_item_json(i) for i in items[:limit]])
 
 
+SELL_RATE = 0.9  # 10% комиссии — иначе открыть кейс и тут же продать дроп было бы безрисковым арбитражем
+
+
+@routes.post("/api/inventory/{item_id}/sell")
+async def post_inventory_sell(request: web.Request) -> web.Response:
+    session, user = request["session"], request["user"]
+    item = await inventory_repo.get_by_id(session, int(request.match_info["item_id"]))
+    if item is None or item.user_id != user.id:
+        return web.json_response({"error": "not_found"}, status=404)
+
+    payout = round(item.value * SELL_RATE)
+    name = item.item_name
+    await inventory_repo.delete(session, item)
+    user = await add_game_tokens(session, user, payout)
+
+    return web.json_response({"sold_name": name, "payout": payout, "game_tokens": user.game_tokens})
+
+
 @routes.get("/api/recent-wins")
 async def get_recent_wins(request: web.Request) -> web.Response:
     session = request["session"]

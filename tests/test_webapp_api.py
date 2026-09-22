@@ -100,6 +100,33 @@ async def test_cases_feed_and_open(client, auth_headers) -> None:
     assert inventory[0]["name"] == body["won"][0]["name"]
 
 
+async def test_inventory_sell(client, auth_headers) -> None:
+    r = await client.get("/api/cases?category=cases", headers=auth_headers)
+    case = next(c for c in (await r.json())["cases"] if c["is_openable"] and c["price_tokens"])
+    r = await client.post(f"/api/cases/{case['id']}/open", headers=auth_headers, json={"qty": 1})
+    won = (await r.json())["won"][0]
+
+    r = await client.get("/api/me", headers=auth_headers)
+    tokens_before = (await r.json())["game_tokens"]
+
+    r = await client.get("/api/inventory", headers=auth_headers)
+    item = (await r.json())[0]
+
+    r = await client.post(f"/api/inventory/{item['id']}/sell", headers=auth_headers)
+    assert r.status == 200
+    body = await r.json()
+    assert body["sold_name"] == won["name"]
+    assert body["payout"] == round(won["value"] * 0.9)
+    assert body["game_tokens"] == tokens_before + body["payout"]
+
+    r = await client.get("/api/inventory", headers=auth_headers)
+    assert await r.json() == []
+
+    # повторная продажа того же (уже удалённого) предмета -> 404, не крэш
+    r = await client.post(f"/api/inventory/{item['id']}/sell", headers=auth_headers)
+    assert r.status == 404
+
+
 async def test_case_open_reel_lands_on_server_decided_winner(client, auth_headers) -> None:
     """Провабли-фёрность: результат решает сервер ДО генерации ленты
     рулетки — лента только декорация вокруг уже готового исхода, клиент

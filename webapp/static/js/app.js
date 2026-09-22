@@ -8,6 +8,16 @@ if (tg) {
   if (tg.setBackgroundColor) try { tg.setBackgroundColor('#08090f'); } catch (e) {}
 }
 
+// Диагностическая страховка: любая необработанная ошибка/rejection раньше
+// просто вешала экран молча ("не открывается") — теперь хотя бы видно, что
+// именно сломалось, вместо тишины.
+window.addEventListener('error', (e) => {
+  try { toast('Ошибка интерфейса: ' + (e.message || 'см. консоль'), 'error'); } catch (_) {}
+});
+window.addEventListener('unhandledrejection', (e) => {
+  try { toast('Ошибка запроса: ' + (e.reason && e.reason.message || e.reason || 'см. консоль'), 'error'); } catch (_) {}
+});
+
 const DEV_ID_KEY = 'bb_dev_tg_id';
 
 const CATEGORY_LABELS = {
@@ -54,7 +64,21 @@ function escapeHtml(str) {
   return String(str).replace(/[&<>"']/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
 }
 
+// Итало-brainrot-мемы — абсурдные животные/предметы-гибриды: без реальных
+// рендеров (см. докстринг ниже) эмодзи-пул хотя бы намекает на характер
+// персонажа вместо голых инициалов. Хэш от имени -> всегда один и тот же
+// эмодзи для одного и того же персонажа.
+const GLYPH_POOL = ['🐊','🦈','🐸','🦶','🐍','🦵','🐘','🦉','🐢','🦫','🐫','🦒','🦩','🦚','🦜','🐙',
+  '🍕','🍔','🧀','🍦','🥐','🍩','🌵','🎪','🎩','👑','⚓','🚀','🛞','🔫','💣','🎺','🥁','🛹','🧦',
+  '👟','🦷','👁️','🫀','🧠','🎭','🐲','🦖','🦣','🐆'];
+
 function glyphFor(name) {
+  let hash = 0;
+  for (const ch of name || '?') hash = (hash * 31 + ch.charCodeAt(0)) >>> 0;
+  return GLYPH_POOL[hash % GLYPH_POOL.length];
+}
+
+function monogramFor(name) {
   const words = (name || '?').split(/\s+/).filter(Boolean);
   if (words.length >= 2) return (words[0][0] + words[1][0]).toUpperCase();
   return (name || '?').slice(0, 2).toUpperCase();
@@ -62,6 +86,8 @@ function glyphFor(name) {
 
 /** Prestige-tile: заменяет реальное фото персонажа, которого нет (сеть в
  * этой песочнице режет любые image-CDN, см. bot/data/brainrot_roster.py).
+ * Многослойная процедурная карточка (не голые буквы): диагональные грани +
+ * радиальный блик + крупный тематический эмодзи + мелкая монограмма-бейдж.
  * <img> всё равно указывает на /static/assets/brainrots/<slug>.png — если
  * туда положить настоящий файл, он подхватится сам, тайл спрячется onload. */
 function prestigeTile(brainrot, sizeClass = '') {
@@ -69,11 +95,14 @@ function prestigeTile(brainrot, sizeClass = '') {
   const rc = brainrot.rarity_color || '#8a93a8';
   const rca = brainrot.rarity_color_accent || '#5c6478';
   const glyph = glyphFor(brainrot.name);
+  const mono = monogramFor(brainrot.name);
   const imgUrl = brainrot.image_url || `/static/assets/brainrots/${brainrot.slug || ''}.png`;
   return `
     <div class="p-tile r-${rarity} ${sizeClass}" style="--rc:${rc};--rca:${rca}">
-      <span class="p-tile-glyph">${escapeHtml(glyph)}</span>
-      <img src="${imgUrl}" alt="" loading="lazy" onerror="this.remove()" onload="this.previousElementSibling.style.display='none'" />
+      <div class="p-tile-facets"></div>
+      <span class="p-tile-mono">${escapeHtml(mono)}</span>
+      <span class="p-tile-glyph">${glyph}</span>
+      <img src="${imgUrl}" alt="" loading="lazy" onerror="this.remove()" onload="this.parentElement.classList.add('has-photo')" />
     </div>`;
 }
 
@@ -119,12 +148,23 @@ function closeModal() {
 
 let ME = null;
 
+function popNumber(el) {
+  if (!el) return;
+  el.classList.remove('num-pop');
+  void el.offsetWidth; // restart animation
+  el.classList.add('num-pop');
+}
+
 async function refreshMe() {
+  const prevTokens = ME ? ME.game_tokens : null;
   ME = await api('/api/me');
   document.getElementById('drawer-username').textContent = ME.username ? '@' + ME.username : (ME.first_name || 'игрок');
   document.getElementById('drawer-balance').textContent = ME.balance;
   const topBalance = document.getElementById('topbar-tokens');
-  if (topBalance) topBalance.textContent = ME.game_tokens;
+  if (topBalance) {
+    topBalance.textContent = ME.game_tokens;
+    if (prevTokens !== null && prevTokens !== ME.game_tokens) popNumber(topBalance);
+  }
   return ME;
 }
 
@@ -226,14 +266,14 @@ async function renderCasesScreen(root, params = {}) {
     ([key, label]) => `<button class="category-tab ${key === category ? 'active' : ''}" data-cat="${key}">${label}</button>`
   ).join('');
 
-  const cards = data.cases.map((c) => {
+  const cards = data.cases.map((c, idx) => {
     const price = c.price_tokens !== null ? `${c.price_tokens} 🎫` : 'по условию';
     const count = c.item_count_label !== null ? `${c.item_count_label} шт.` : '? шт.';
-    const glyph = glyphFor(c.name);
+    const caseAsBrainrot = { name: c.name, rarity: c.best_rarity || 'common', rarity_color: c.best_rarity_color, rarity_color_accent: c.best_rarity_color_accent, slug: 'case-' + c.id };
     return `
-      <button class="case-card ${c.is_openable ? '' : 'locked'}" style="${caseCardStyle(c)}" data-case-id="${c.id}">
+      <button class="case-card fade-in-up ${c.is_openable ? '' : 'locked'}" style="${caseCardStyle(c)};animation-delay:${Math.min(idx * 35, 350)}ms" data-case-id="${c.id}">
         ${c.is_openable ? '' : '<span class="lock-badge">🔒</span>'}
-        <div class="case-art"><span class="p-tile-glyph">${escapeHtml(glyph)}</span></div>
+        <div class="case-art">${prestigeTile(caseAsBrainrot)}</div>
         <div class="case-name">${escapeHtml(c.name)}</div>
         ${c.best_rarity_label ? `<span class="rarity-badge" style="--rc:${c.best_rarity_color}">до ${escapeHtml(c.best_rarity_label)}</span>` : ''}
         <div class="case-meta"><span>${count}</span><span class="case-price">${price}</span></div>
@@ -244,8 +284,8 @@ async function renderCasesScreen(root, params = {}) {
     <div class="ticker-wrap">
       <div class="ticker-label"><span class="ticker-dot"></span> Последние выигрыши</div>
       <div class="ticker-row">
-        ${recentWins.map((w) => `
-          <div class="ticker-card" style="--rc:${w.rarity_color}">
+        ${recentWins.map((w, idx) => `
+          <div class="ticker-card fade-in-up" style="--rc:${w.rarity_color};animation-delay:${idx * 40}ms">
             <div class="ticker-tile">${prestigeTile(w)}</div>
             <div class="ticker-player">${escapeHtml(w.player)}</div>
             <div class="ticker-value">${w.value} B</div>
@@ -302,8 +342,8 @@ async function openCaseDetail(caseId) {
 function renderCaseDetailModal(c, qty) {
   const price = c.price_tokens !== null ? `${c.price_tokens} 🎫 за 1 шт.` : 'цена по условию';
   const items = (c.items || []).slice().sort((a, b) => b.value - a.value);
-  const dropTable = items.map((i) => `
-    <div class="drop-tile" style="--rc:${i.rarity_color}">
+  const dropTable = items.map((i, idx) => `
+    <div class="drop-tile fade-in-up" style="--rc:${i.rarity_color};animation-delay:${Math.min(idx * 30, 300)}ms">
       ${prestigeTile(i)}
       <div class="drop-name">${escapeHtml(i.name)}</div>
       <div class="drop-value">${i.value} B</div>
@@ -442,11 +482,12 @@ function paintInventory(root, items) {
     return `<button class="filter-chip ${inventoryFilter === r ? 'active' : ''}" style="--rc:${rc}" data-r="${r}">${label} (${count})</button>`;
   }).join('');
 
-  const tiles = sorted.map((i) => `
-    <div class="inv-tile" style="--rc:${i.rarity_color}">
+  const tiles = sorted.map((i, idx) => `
+    <div class="inv-tile fade-in-up" style="--rc:${i.rarity_color};animation-delay:${Math.min(idx * 25, 300)}ms">
       ${prestigeTile(i)}
       <div class="inv-name">${escapeHtml(i.name)}</div>
       <div class="inv-value">${i.value} B</div>
+      <button class="inv-sell-btn" data-sell="${i.id}" data-payout="${Math.round(i.value * 0.9)}">Продать · ${Math.round(i.value * 0.9)} 🎫</button>
     </div>`).join('') || '<div class="empty-state" style="grid-column:1/-1">Пусто — открой кейс на главной.</div>';
 
   root.innerHTML = `
@@ -457,11 +498,45 @@ function paintInventory(root, items) {
       <button class="pill sort-pill ${inventorySort === 'rarity' ? 'active' : ''}" data-sort="rarity">По редкости</button>
       <button class="pill sort-pill ${inventorySort === 'date' ? 'active' : ''}" data-sort="date">По дате</button>
     </div>
+    ${items.length ? `<div class="btn-row"><button class="btn btn-ghost" id="btn-sell-all" style="flex:1">💰 Продать всё (${items.length})</button></div>` : ''}
     <div class="inventory-grid">${tiles}</div>
   `;
 
   root.querySelectorAll('.filter-chip').forEach((el) => el.addEventListener('click', () => { inventoryFilter = el.dataset.r; paintInventory(root, items); }));
   root.querySelectorAll('.sort-pill').forEach((el) => el.addEventListener('click', () => { inventorySort = el.dataset.sort; paintInventory(root, items); }));
+  root.querySelectorAll('[data-sell]').forEach((el) => el.addEventListener('click', async (e) => {
+    e.stopPropagation();
+    el.disabled = true;
+    try {
+      const res = await api(`/api/inventory/${el.dataset.sell}/sell`, { method: 'POST' });
+      toast(`Продано: ${res.sold_name} +${res.payout} 🎫`, 'success');
+      ME.game_tokens = res.game_tokens;
+      const topBalance = document.getElementById('topbar-tokens');
+      if (topBalance) { topBalance.textContent = res.game_tokens; popNumber(topBalance); }
+      const fresh = await api('/api/inventory?limit=200');
+      paintInventory(root, fresh);
+    } catch (err) {
+      toast('Ошибка: ' + err.message, 'error');
+      el.disabled = false;
+    }
+  }));
+  root.querySelector('#btn-sell-all')?.addEventListener('click', async (e) => {
+    const btn = e.currentTarget;
+    btn.disabled = true;
+    let total = 0;
+    for (const item of items) {
+      try {
+        const res = await api(`/api/inventory/${item.id}/sell`, { method: 'POST' });
+        total += res.payout;
+        ME.game_tokens = res.game_tokens;
+      } catch (err) { /* предмет уже продан/удалён — пропускаем */ }
+    }
+    toast(`Продано всё: +${total} 🎫`, 'success');
+    const topBalance = document.getElementById('topbar-tokens');
+    if (topBalance) { topBalance.textContent = ME.game_tokens; popNumber(topBalance); }
+    const fresh = await api('/api/inventory?limit=200');
+    paintInventory(root, fresh);
+  });
 }
 
 // =================================================================== ПРОФИЛЬ
