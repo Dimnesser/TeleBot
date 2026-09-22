@@ -1,27 +1,19 @@
-"""Сборка и запуск приложения Telegram."""
-
+"""Сборка и запуск aiogram-приложения."""
 from __future__ import annotations
 
 import logging
 import os
 from pathlib import Path
 
-from telegram import BotCommand
-from telegram.ext import AIORateLimiter, Application, ApplicationBuilder
+from aiogram import Bot, Dispatcher
+from aiogram.client.default import DefaultBotProperties
+from aiogram.enums import ParseMode
 
-from . import handlers
-from .config import Config
-from .history import HistoryStore
-from .model_client import build_client
+from bot.config import config
+from bot.database.engine import init_db
+from bot.handlers import routers
 
 logger = logging.getLogger(__name__)
-
-COMMANDS = [
-    BotCommand("start", "Начать работу"),
-    BotCommand("help", "Что я умею"),
-    BotCommand("reset", "Очистить контекст диалога"),
-    BotCommand("about", "Настройки бота"),
-]
 
 
 def load_dotenv(path: str | Path = ".env") -> None:
@@ -45,49 +37,25 @@ def setup_logging(level: str | None = None) -> None:
         format="%(asctime)s %(levelname)-8s %(name)s — %(message)s",
         level=getattr(logging, (level or os.getenv("LOG_LEVEL") or "INFO").upper(), logging.INFO),
     )
-    logging.getLogger("httpx").setLevel(logging.WARNING)
-    logging.getLogger("httpx2").setLevel(logging.WARNING)
-    logging.getLogger("telegram.ext.Application").setLevel(logging.INFO)
+    logging.getLogger("aiogram.event").setLevel(logging.WARNING)
 
 
-def build_application(config: Config) -> Application:
-    """Собирает приложение со всеми обработчиками."""
-    history = HistoryStore(
-        max_messages=config.history_turns,
-        max_chars=config.history_max_chars,
-        path=config.history_path,
-    )
-    runtime = handlers.BotRuntime(config, build_client(config), history)
-
-    async def post_init(application: Application) -> None:
-        await history.load()
-        try:
-            await application.bot.set_my_commands(COMMANDS)
-        except Exception:  # noqa: BLE001 — не критично для запуска
-            logger.warning("Не удалось обновить список команд", exc_info=True)
-        me = await application.bot.get_me()
-        logger.info(
-            "Бот @%s запущен, %s, модель %s",
-            me.username,
-            config.provider_info.label,
-            config.model,
-        )
-
-    application = (
-        ApplicationBuilder()
-        .token(config.telegram_token)
-        .rate_limiter(AIORateLimiter())
-        .concurrent_updates(True)
-        .post_init(post_init)
-        .build()
-    )
-    handlers.register(application, runtime)
-    return application
-
-
-def main() -> None:
+async def main() -> None:
     load_dotenv()
     setup_logging()
-    config = Config.from_env()
-    application = build_application(config)
-    application.run_polling(drop_pending_updates=True)
+
+    if not config.bot_token:
+        raise SystemExit("Не задан BOT_TOKEN (переменная окружения или .env)")
+
+    await init_db()
+
+    bot = Bot(token=config.bot_token, default=DefaultBotProperties(parse_mode=ParseMode.HTML))
+    dp = Dispatcher()
+    for router in routers:
+        dp.include_router(router)
+
+    me = await bot.get_me()
+    logger.info("Бот @%s запущен", me.username)
+
+    await bot.delete_webhook(drop_pending_updates=True)
+    await dp.start_polling(bot)
