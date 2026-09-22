@@ -12,6 +12,7 @@ from bot.keyboards.callbacks import (
     CasesCategoryCB,
     CasesInventoryCB,
     CasesTopUpCB,
+    MainMenuCB,
 )
 
 CATEGORY_LABELS = {
@@ -74,6 +75,7 @@ def cases_list_keyboard(cases: list[Case], category: CaseCategory, page: int) ->
 
     builder.row(InlineKeyboardButton(text="🎒 Инвентарь", callback_data=CasesInventoryCB().pack()))
     builder.row(InlineKeyboardButton(text="🎁 Пополнить демо-баланс", callback_data=CasesTopUpCB().pack()))
+    builder.row(InlineKeyboardButton(text="☰ МЕНЮ", callback_data=MainMenuCB(section="menu").pack()))
     return builder.as_markup()
 
 

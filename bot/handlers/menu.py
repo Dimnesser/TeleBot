@@ -34,10 +34,6 @@ async def handle_menu(callback: CallbackQuery, callback_data: MainMenuCB, state:
         await open_catalog(callback, state, category="brainrot")
         return
 
-    if section == "cases":
-        await open_cases_home(callback, state, category=CaseCategory.CASES, page=0)
-        return
-
     if section == "upgrader":
         await open_upgrader_home(callback, state)
         return
@@ -71,13 +67,20 @@ async def handle_menu(callback: CallbackQuery, callback_data: MainMenuCB, state:
         return
 
     if section == "home":
-        await _render_home(callback)
+        # [ПОДТВЕРЖДЕНО СКРИНШОТОМ] «ГЛАВНАЯ» — это сама лента кейсов
+        # (КЕЙСЫ / ТЕМАТИЧЕСКИЕ / ALL-IN / ПАРТНЁРЫ / БЕСПЛАТНЫЕ), а не
+        # текстовый список разделов.
+        await open_cases_home(callback, state, category=CaseCategory.CASES, page=0)
+        return
+
+    if section == "menu":
+        await _render_drawer(callback)
         return
 
     await callback.answer(SECTION_IN_PROGRESS, show_alert=True)
 
 
-async def _render_home(callback: CallbackQuery) -> None:
+async def _render_drawer(callback: CallbackQuery) -> None:
     async with async_session() as session:
         user = await get_user_by_tg_id(session, callback.from_user.id)
 
