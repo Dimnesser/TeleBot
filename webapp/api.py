@@ -8,6 +8,7 @@ from __future__ import annotations
 from aiohttp import web
 
 from bot.config import config
+from bot.data.brainrot_roster import RARITY_COLOR, RARITY_LABEL_RU, ROSTER_BY_NAME, Rarity, slugify
 from bot.data.referral_tiers import next_tier_for_count, tier_for_count
 from bot.database.models import (
     Case,
@@ -29,7 +30,7 @@ from bot.database.repo.known_items import list_known_items
 from bot.database.repo.users import add_game_tokens, count_referrals
 from bot.services import quest_service
 from bot.services.battle_service import run_battle
-from bot.services.cases_service import draw_items, total_cost
+from bot.services.cases_service import REEL_REVEAL_INDEX, build_reel, draw_items, item_weight, total_cost
 from bot.services.dice_service import COLORS, MATCH_PAYOUT_TABLE, resolve_roll
 from bot.services.giveaway_service import resolve_all_expired
 from bot.services.staking_service import MIN_STAKE_AMOUNT, STAKE_TIERS, is_matured, payout_amount, tier_by_term
@@ -47,6 +48,7 @@ routes = web.RouteTableDef()
 
 
 def _case_json(case: Case) -> dict:
+    color = RARITY_COLOR.get(Rarity(case.best_rarity), RARITY_COLOR[Rarity.COMMON]) if case.best_rarity else RARITY_COLOR[Rarity.COMMON]
     return {
         "id": case.id,
         "category": case.category.value,
@@ -55,22 +57,44 @@ def _case_json(case: Case) -> dict:
         "item_count_label": case.item_count_label,
         "note": case.note,
         "is_openable": case.is_openable,
+        "best_rarity": case.best_rarity,
+        "best_rarity_label": RARITY_LABEL_RU.get(Rarity(case.best_rarity), "?") if case.best_rarity else None,
+        "best_rarity_color": color[0],
+        "best_rarity_color_accent": color[1],
+    }
+
+
+def _brainrot_json(name: str, value: int, rarity: str | None) -> dict:
+    roster_entry = ROSTER_BY_NAME.get(name)
+    color = RARITY_COLOR.get(Rarity(rarity), RARITY_COLOR[Rarity.COMMON]) if rarity else RARITY_COLOR[Rarity.COMMON]
+    return {
+        "name": name,
+        "value": value,
+        "rarity": rarity,
+        "rarity_label": RARITY_LABEL_RU.get(Rarity(rarity), "?") if rarity else "?",
+        "rarity_color": color[0],
+        "rarity_color_accent": color[1],
+        "slug": slugify(name),
+        "real_value_label": roster_entry.real_value_usd_label if roster_entry else None,
+        "image_url": f"/static/assets/brainrots/{slugify(name)}.png",
     }
 
 
 def _case_item_json(item: CaseItem) -> dict:
-    return {"name": item.name, "value": item.value}
+    return _brainrot_json(item.name, item.value, item.rarity)
 
 
 def _inventory_item_json(item: InventoryItem) -> dict:
-    return {
-        "id": item.id,
-        "case_id": item.case_id,
-        "case_name": item.case_name,
-        "item_name": item.item_name,
-        "value": item.value,
-        "obtained_at": item.obtained_at.isoformat(),
-    }
+    payload = _brainrot_json(item.item_name, item.value, item.rarity)
+    payload.update(
+        {
+            "id": item.id,
+            "case_id": item.case_id,
+            "case_name": item.case_name,
+            "obtained_at": item.obtained_at.isoformat(),
+        }
+    )
+    return payload
 
 
 def _quest_json(quest: Quest, progress_count: int, claimed: bool, reset_label: str) -> dict:
@@ -151,6 +175,21 @@ async def get_inventory(request: web.Request) -> web.Response:
     return web.json_response([_inventory_item_json(i) for i in items[:limit]])
 
 
+@routes.get("/api/recent-wins")
+async def get_recent_wins(request: web.Request) -> web.Response:
+    session = request["session"]
+    limit = int(request.query.get("limit", "20"))
+    rows = await inventory_repo.list_recent_global(session, limit=limit)
+    payload = []
+    for item, owner in rows:
+        entry = _brainrot_json(item.item_name, item.value, item.rarity)
+        entry["player"] = f"@{owner.username}" if owner.username else (owner.first_name or "игрок")
+        entry["case_name"] = item.case_name
+        entry["obtained_at"] = item.obtained_at.isoformat()
+        payload.append(entry)
+    return web.json_response(payload)
+
+
 # ----------------------------------------------------------------------- кейсы
 
 
@@ -169,8 +208,16 @@ async def get_case_detail(request: web.Request) -> web.Response:
     if case is None:
         return web.json_response({"error": "not_found"}, status=404)
     items = await cases_repo.list_case_items(session, case.id)
+    weights = [item_weight(i) for i in items]
+    total_weight = sum(weights) or 1.0
+
     payload = _case_json(case)
-    payload["items"] = [_case_item_json(i) for i in items]
+    item_payloads = []
+    for item, weight in zip(items, weights):
+        entry = _case_item_json(item)
+        entry["chance_percent"] = round(weight / total_weight * 100, 2)
+        item_payloads.append(entry)
+    payload["items"] = item_payloads
     return web.json_response(payload)
 
 
@@ -195,6 +242,10 @@ async def post_case_open(request: web.Request) -> web.Response:
         return web.json_response({"error": "not_enough_tokens", "cost": cost, "balance": user.game_tokens}, status=400)
 
     items = await cases_repo.list_case_items(session, case.id)
+    # Результат определяется ЗДЕСЬ, на сервере, до какой-либо анимации —
+    # клиент получает уже готовый won[] и (для qty=1) декоративную reel[]
+    # с тем же результатом на фиксированной позиции REEL_REVEAL_INDEX,
+    # см. bot.services.cases_service.build_reel.
     won = draw_items(items, qty)
 
     user.game_tokens -= cost
@@ -204,9 +255,13 @@ async def post_case_open(request: web.Request) -> web.Response:
     await inventory_repo.add_items(session, user, case.name, [(i.name, i.value) for i in won], case_id=case.id)
     await quest_service.record_progress(session, user, f"open_case:{case.code}")
 
-    return web.json_response(
-        {"won": [_case_item_json(i) for i in won], "cost": cost, "game_tokens": user.game_tokens}
-    )
+    response = {"won": [_case_item_json(i) for i in won], "cost": cost, "game_tokens": user.game_tokens}
+    if qty == 1:
+        reel = build_reel(items, won[0])
+        response["reel"] = [_case_item_json(i) for i in reel]
+        response["reveal_index"] = REEL_REVEAL_INDEX
+
+    return web.json_response(response)
 
 
 # -------------------------------------------------------------------- апгрейдер

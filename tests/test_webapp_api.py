@@ -49,9 +49,10 @@ async def client(in_memory_db, monkeypatch):
     # seed the same case/quest fixture data init_db() would normally add,
     # via the private seed helpers (they look up bot.database.engine's own
     # async_session at call time, which conftest already points at the test DB).
-    from bot.database.engine import _seed_cases_if_empty, _seed_quests_if_empty
+    # _seed_cases_reconcile also needs the app_meta table, already created above.
+    from bot.database.engine import _seed_cases_reconcile, _seed_quests_if_empty
 
-    await _seed_cases_if_empty()
+    await _seed_cases_reconcile()
     await _seed_quests_if_empty()
 
     app = create_app(FakeBot())
@@ -96,7 +97,42 @@ async def test_cases_feed_and_open(client, auth_headers) -> None:
     r = await client.get("/api/inventory", headers=auth_headers)
     inventory = await r.json()
     assert len(inventory) == 1
-    assert inventory[0]["item_name"] == body["won"][0]["name"]
+    assert inventory[0]["name"] == body["won"][0]["name"]
+
+
+async def test_case_open_reel_lands_on_server_decided_winner(client, auth_headers) -> None:
+    """Провабли-фёрность: результат решает сервер ДО генерации ленты
+    рулетки — лента только декорация вокруг уже готового исхода, клиент
+    не может повлиять на won[]. Прогоняем несколько раз, т.к. и выбор
+    результата, и наполнение ленты — рандом."""
+    r = await client.get("/api/cases?category=cases", headers=auth_headers)
+    case = next(c for c in (await r.json())["cases"] if c["is_openable"] and c["price_tokens"])
+
+    for _ in range(8):
+        r = await client.get(f"/api/me", headers=auth_headers)
+        if (await r.json())["game_tokens"] < case["price_tokens"]:
+            await client.post("/api/demo-topup", headers=auth_headers)
+        r = await client.post(f"/api/cases/{case['id']}/open", headers=auth_headers, json={"qty": 1})
+        assert r.status == 200
+        body = await r.json()
+        assert len(body["reel"]) == 40
+        assert body["reveal_index"] == 34
+        landed = body["reel"][34]
+        won = body["won"][0]
+        assert landed["name"] == won["name"]
+        assert landed["value"] == won["value"]
+        assert landed["rarity"] == won["rarity"]
+
+
+async def test_case_detail_drop_chances_sum_to_100(client, auth_headers) -> None:
+    r = await client.get("/api/cases?category=cases", headers=auth_headers)
+    for case in (await r.json())["cases"]:
+        if not case["is_openable"]:
+            continue
+        r = await client.get(f"/api/cases/{case['id']}", headers=auth_headers)
+        detail = await r.json()
+        total = sum(i["chance_percent"] for i in detail["items"])
+        assert 99.0 <= total <= 101.0, f"{case['name']}: chances sum to {total}"
 
 
 async def test_case_open_rejects_insufficient_tokens(client, auth_headers) -> None:
@@ -127,7 +163,7 @@ async def test_upgrader_spin_consumes_contribution(client, auth_headers) -> None
     contribution = (await r.json())[0]
 
     r = await client.get(
-        f"/api/upgrader/targets?min_value={contribution['value']}&exclude_name={contribution['item_name']}",
+        f"/api/upgrader/targets?min_value={contribution['value']}&exclude_name={contribution['name']}",
         headers=auth_headers,
     )
     targets = await r.json()
@@ -153,7 +189,7 @@ async def test_upgrader_spin_consumes_contribution(client, auth_headers) -> None
     remaining = await r.json()
     if body["success"]:
         assert len(remaining) == 1
-        assert remaining[0]["item_name"] == targets[0]["name"]
+        assert remaining[0]["name"] == targets[0]["name"]
         assert remaining[0]["value"] == targets[0]["value"]
     else:
         assert remaining == []

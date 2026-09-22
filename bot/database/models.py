@@ -14,6 +14,15 @@ class Base(DeclarativeBase):
     pass
 
 
+class AppMeta(Base):
+    """Key-value хранилище служебных отметок (например, версия сид-контента кейсов)."""
+
+    __tablename__ = "app_meta"
+
+    key: Mapped[str] = mapped_column(String(64), primary_key=True)
+    value: Mapped[str] = mapped_column(String(256))
+
+
 class DepositCategory(str, enum.Enum):
     BRAINROT = "brainrot"
     HIRSY = "hirsy"
@@ -111,15 +120,21 @@ class Case(Base):
     item_count_label: Mapped[int | None] = mapped_column(Integer, nullable=True)
     note: Mapped[str | None] = mapped_column(String(256), nullable=True)
     is_openable: Mapped[bool] = mapped_column(default=False)
+    # Денормализовано при сидировании (макс. rarity среди items) — чтобы
+    # карточка кейса в общем списке могла подсветиться цветом старшего
+    # возможного дропа без N+1 запроса за items на каждую карточку.
+    best_rarity: Mapped[str | None] = mapped_column(String(16), nullable=True)
     sort_order: Mapped[int] = mapped_column(Integer, default=0)
 
 
 class CaseItem(Base):
-    """Один возможный дроп из кейса, со скриншота «Что может выпасть».
+    """Один возможный дроп из кейса — реальный персонаж Steal a Brainrot.
 
-    [ЛОГИЧЕСКИ ПРЕДПОЛОЖЕНО] Проценты выпадения на скриншотах не показаны —
-    вес рассчитывается из value (чем дороже предмет, тем он реже), формула в
-    bot/services/cases_service.py помечена как предположение.
+    [ПОДТВЕРЖДЕНО ВЕБ-ПОИСКОМ] name/rarity берутся из bot.data.brainrot_roster
+    (реальный ростер игры, см. докстринг модуля про источники и ограничения
+    сети в этом окружении). value — демо-токены 🎫, посчитанные из rarity по
+    RARITY_VALUE_RANGE в том же модуле. Вес выпадения — по rarity
+    (RARITY_DROP_WEIGHT), не по value напрямую, см. bot/services/cases_service.py.
     """
 
     __tablename__ = "case_items"
@@ -128,6 +143,7 @@ class CaseItem(Base):
     case_id: Mapped[int] = mapped_column(ForeignKey("cases.id"))
     name: Mapped[str] = mapped_column(String(128))
     value: Mapped[int] = mapped_column(Integer)
+    rarity: Mapped[str | None] = mapped_column(String(16), nullable=True)
     sort_order: Mapped[int] = mapped_column(Integer, default=0)
 
 
@@ -142,6 +158,7 @@ class InventoryItem(Base):
     case_name: Mapped[str] = mapped_column(String(128))
     item_name: Mapped[str] = mapped_column(String(128))
     value: Mapped[int] = mapped_column(Integer)
+    rarity: Mapped[str | None] = mapped_column(String(16), nullable=True)
     obtained_at: Mapped[datetime] = mapped_column(DateTime, server_default=func.now())
 
 

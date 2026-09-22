@@ -3,17 +3,20 @@ from __future__ import annotations
 
 from pathlib import Path
 
-from sqlalchemy import select
+from sqlalchemy import delete, select, text
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker, create_async_engine
 
 from bot.config import config
-from bot.data.seed_cases import SEED_CASES
+from bot.data.brainrot_roster import RARITY_ORDER, Rarity
+from bot.data.seed_cases import CASES_CONTENT_VERSION, SEED_CASES
 from bot.data.seed_items import SEED_ITEMS
 from bot.data.seed_quests import SEED_QUESTS
-from bot.database.models import Base, Case, CaseItem, DepositItem, Quest
+from bot.database.models import AppMeta, Base, Case, CaseItem, DepositItem, Quest
 
 engine = create_async_engine(config.database_url)
 async_session: async_sessionmaker[AsyncSession] = async_sessionmaker(engine, expire_on_commit=False)
+
+CASES_VERSION_KEY = "cases_content_version"
 
 
 def _ensure_sqlite_dir(database_url: str) -> None:
@@ -28,9 +31,32 @@ async def init_db() -> None:
     _ensure_sqlite_dir(config.database_url)
     async with engine.begin() as conn:
         await conn.run_sync(Base.metadata.create_all)
+    await _migrate_add_missing_columns()
     await _seed_items_if_empty()
-    await _seed_cases_if_empty()
+    await _seed_cases_reconcile()
     await _seed_quests_if_empty()
+
+
+async def _migrate_add_missing_columns() -> None:
+    """Лёгкая ad-hoc миграция для SQLite: ADD COLUMN, если её ещё нет.
+
+    В проекте нет полноценного миграционного инструмента (Alembic и т.п.) —
+    для демо-масштаба этого бота ALTER TABLE ADD COLUMN на старте процесса
+    достаточно и не требует ручных шагов при обновлении с прошлых версий.
+    """
+    if not config.database_url.startswith("sqlite"):
+        return
+    columns_to_add = [
+        ("case_items", "rarity", "VARCHAR(16)"),
+        ("inventory_items", "rarity", "VARCHAR(16)"),
+        ("cases", "best_rarity", "VARCHAR(16)"),
+    ]
+    async with engine.begin() as conn:
+        for table, column, coltype in columns_to_add:
+            result = await conn.execute(text(f"PRAGMA table_info({table})"))
+            existing = {row[1] for row in result.fetchall()}
+            if column not in existing:
+                await conn.execute(text(f"ALTER TABLE {table} ADD COLUMN {column} {coltype}"))
 
 
 async def _seed_items_if_empty() -> None:
@@ -53,12 +79,32 @@ async def _seed_items_if_empty() -> None:
         await session.commit()
 
 
-async def _seed_cases_if_empty() -> None:
+async def _seed_cases_reconcile() -> None:
+    """Пересеивает каталог кейсов, если контент устарел (CASES_CONTENT_VERSION).
+
+    В отличие от прежнего «only if empty», это переживает обновление ростера
+    персонажей/цен без ручного вмешательства: поднял CASES_CONTENT_VERSION в
+    bot/data/seed_cases.py — при следующем старте каталог кейсов
+    пересобирается из SEED_CASES. Инвентарь пользователей не трогается:
+    InventoryItem хранит своё собственное имя/цену/редкость на момент
+    выигрыша, а не ссылку на живой каталог.
+    """
     async with async_session() as session:
-        result = await session.execute(select(Case.id).limit(1))
-        if result.scalar_one_or_none() is not None:
+        result = await session.execute(select(AppMeta.value).where(AppMeta.key == CASES_VERSION_KEY))
+        current_version = result.scalar_one_or_none()
+        if current_version == CASES_CONTENT_VERSION:
             return
+
+        await session.execute(delete(CaseItem))
+        await session.execute(delete(Case))
+
         for seed_case in SEED_CASES:
+            best_rarity = None
+            if seed_case.items:
+                best_index = max(
+                    (RARITY_ORDER.index(Rarity(i.rarity)) for i in seed_case.items if i.rarity), default=None
+                )
+                best_rarity = RARITY_ORDER[best_index].value if best_index is not None else None
             case = Case(
                 category=seed_case.category,
                 code=seed_case.code,
@@ -67,13 +113,21 @@ async def _seed_cases_if_empty() -> None:
                 item_count_label=seed_case.item_count_label,
                 note=seed_case.note,
                 is_openable=seed_case.is_openable,
+                best_rarity=best_rarity,
                 sort_order=seed_case.sort_order,
             )
             session.add(case)
             await session.flush()
             session.add_all(
-                CaseItem(case_id=case.id, name=item.name, value=item.value, sort_order=i)
+                CaseItem(case_id=case.id, name=item.name, value=item.value, rarity=item.rarity, sort_order=i)
                 for i, item in enumerate(seed_case.items)
+            )
+
+        if current_version is None:
+            session.add(AppMeta(key=CASES_VERSION_KEY, value=CASES_CONTENT_VERSION))
+        else:
+            await session.execute(
+                AppMeta.__table__.update().where(AppMeta.key == CASES_VERSION_KEY).values(value=CASES_CONTENT_VERSION)
             )
         await session.commit()
 

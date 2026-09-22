@@ -4,6 +4,7 @@ from __future__ import annotations
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from bot.data.brainrot_roster import infer_rarity
 from bot.database.models import InventoryItem, User
 
 
@@ -14,8 +15,18 @@ async def add_items(
     item_names_and_values: list[tuple[str, int]],
     case_id: int | None = None,
 ) -> list[InventoryItem]:
+    # rarity выводится из value автоматически (infer_rarity) — вызывающему
+    # коду (кейсы/апгрейдер/краш/дайсы/батл) не нужно её прокидывать отдельно,
+    # а значения демо-токенов и так посчитаны из тиров редкости при сидировании.
     entries = [
-        InventoryItem(user_id=user.id, case_id=case_id, case_name=source_name, item_name=name, value=value)
+        InventoryItem(
+            user_id=user.id,
+            case_id=case_id,
+            case_name=source_name,
+            item_name=name,
+            value=value,
+            rarity=infer_rarity(value).value,
+        )
         for name, value in item_names_and_values
     ]
     session.add_all(entries)
@@ -38,6 +49,17 @@ async def list_all(session: AsyncSession, user: User) -> list[InventoryItem]:
         select(InventoryItem).where(InventoryItem.user_id == user.id).order_by(InventoryItem.value.desc())
     )
     return list(result.scalars().all())
+
+
+async def list_recent_global(session: AsyncSession, limit: int = 20) -> list[tuple[InventoryItem, User]]:
+    """Последние выигрыши по всем пользователям — для ленты «последние выигрыши» на главной."""
+    result = await session.execute(
+        select(InventoryItem, User)
+        .join(User, User.id == InventoryItem.user_id)
+        .order_by(InventoryItem.obtained_at.desc())
+        .limit(limit)
+    )
+    return [(row[0], row[1]) for row in result.all()]
 
 
 async def get_by_id(session: AsyncSession, item_id: int) -> InventoryItem | None:

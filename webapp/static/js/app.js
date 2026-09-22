@@ -4,8 +4,8 @@ const tg = window.Telegram && window.Telegram.WebApp;
 if (tg) {
   tg.ready();
   tg.expand();
-  if (tg.setHeaderColor) try { tg.setHeaderColor('#0a0e17'); } catch (e) {}
-  if (tg.setBackgroundColor) try { tg.setBackgroundColor('#0a0e17'); } catch (e) {}
+  if (tg.setHeaderColor) try { tg.setHeaderColor('#08090f'); } catch (e) {}
+  if (tg.setBackgroundColor) try { tg.setBackgroundColor('#08090f'); } catch (e) {}
 }
 
 const DEV_ID_KEY = 'bb_dev_tg_id';
@@ -24,19 +24,7 @@ const CATEGORY_TITLES = {
   partners: 'ПАРТНЁРЫ',
   free: 'БЕСПЛАТНЫЕ КЕЙСЫ',
 };
-const CASE_EMOJI = ['📦', '🎁', '🧨', '🔮', '🗝️', '🏺', '💎', '🎲'];
-
-function caseEmoji(name) {
-  let hash = 0;
-  for (const ch of name || '') hash = (hash * 31 + ch.charCodeAt(0)) >>> 0;
-  return CASE_EMOJI[hash % CASE_EMOJI.length];
-}
-function caseArtColor(name) {
-  const colors = ['#3a3f7a', '#5a2f6b', '#2f5a4e', '#6b3a2f', '#2f4a6b'];
-  let hash = 0;
-  for (const ch of name || '') hash = (hash * 17 + ch.charCodeAt(0)) >>> 0;
-  return colors[hash % colors.length];
-}
+const RARITY_ORDER = ['common', 'rare', 'epic', 'legendary', 'mythic', 'secret', 'og'];
 
 // ------------------------------------------------------------------- API
 
@@ -60,6 +48,45 @@ async function api(path, opts = {}) {
   return body;
 }
 
+// ------------------------------------------------------------------- utils
+
+function escapeHtml(str) {
+  return String(str).replace(/[&<>"']/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
+}
+
+function glyphFor(name) {
+  const words = (name || '?').split(/\s+/).filter(Boolean);
+  if (words.length >= 2) return (words[0][0] + words[1][0]).toUpperCase();
+  return (name || '?').slice(0, 2).toUpperCase();
+}
+
+/** Prestige-tile: заменяет реальное фото персонажа, которого нет (сеть в
+ * этой песочнице режет любые image-CDN, см. bot/data/brainrot_roster.py).
+ * <img> всё равно указывает на /static/assets/brainrots/<slug>.png — если
+ * туда положить настоящий файл, он подхватится сам, тайл спрячется onload. */
+function prestigeTile(brainrot, sizeClass = '') {
+  const rarity = brainrot.rarity || 'common';
+  const rc = brainrot.rarity_color || '#8a93a8';
+  const rca = brainrot.rarity_color_accent || '#5c6478';
+  const glyph = glyphFor(brainrot.name);
+  const imgUrl = brainrot.image_url || `/static/assets/brainrots/${brainrot.slug || ''}.png`;
+  return `
+    <div class="p-tile r-${rarity} ${sizeClass}" style="--rc:${rc};--rca:${rca}">
+      <span class="p-tile-glyph">${escapeHtml(glyph)}</span>
+      <img src="${imgUrl}" alt="" loading="lazy" onerror="this.remove()" onload="this.previousElementSibling.style.display='none'" />
+    </div>`;
+}
+
+function rarityBadge(brainrot) {
+  const rc = brainrot.rarity_color || '#8a93a8';
+  return `<span class="rarity-badge" style="--rc:${rc}">${escapeHtml(brainrot.rarity_label || '?')}</span>`;
+}
+
+function caseCardStyle(c) {
+  const rc = c.best_rarity_color || '#5b7cfa';
+  return `--rc:${rc}`;
+}
+
 // ------------------------------------------------------------------- toast
 
 function toast(message, kind = 'info') {
@@ -68,7 +95,7 @@ function toast(message, kind = 'info') {
   el.className = `toast ${kind}`;
   el.textContent = message;
   root.appendChild(el);
-  setTimeout(() => el.remove(), 2600);
+  setTimeout(() => el.remove(), 2800);
 }
 
 // ------------------------------------------------------------------- modal
@@ -96,6 +123,8 @@ async function refreshMe() {
   ME = await api('/api/me');
   document.getElementById('drawer-username').textContent = ME.username ? '@' + ME.username : (ME.first_name || 'игрок');
   document.getElementById('drawer-balance').textContent = ME.balance;
+  const topBalance = document.getElementById('topbar-tokens');
+  if (topBalance) topBalance.textContent = ME.game_tokens;
   return ME;
 }
 
@@ -108,6 +137,7 @@ const DRAWER_SECTIONS = [
   ['battle', '🛡️ БАТЛ'],
   ['dice', '🎲 ДАЙСЫ'],
   ['crash', '🚀 КРАШ'],
+  ['inventory', '🎒 ИНВЕНТАРЬ'],
   ['quests', '📋 КВЕСТЫ'],
   ['giveaways', '🏆 РОЗЫГРЫШИ'],
   ['faq', '❓ FAQ'],
@@ -153,6 +183,7 @@ const SCREENS = {
   faq: renderFaqScreen,
   bonuses: renderBonusesScreen,
   deposit: renderDepositPlaceholder,
+  inventory: renderInventoryScreen,
 };
 
 function navigate(screen, params = {}) {
@@ -160,10 +191,14 @@ function navigate(screen, params = {}) {
   renderScreen(screen, params);
 }
 
+function skeletonGrid() {
+  return `<div class="skeleton-grid">${Array(6).fill('<div class="skeleton skeleton-card"></div>').join('')}</div>`;
+}
+
 async function renderScreen(screen, params = {}) {
   renderDrawer(screen);
   const root = document.getElementById('screen');
-  root.innerHTML = '<div class="empty-state">Загрузка…</div>';
+  root.innerHTML = `<div class="section-title">&nbsp;</div>${skeletonGrid()}`;
   try {
     const fn = SCREENS[screen] || renderCasesScreen;
     await fn(root, params);
@@ -177,35 +212,54 @@ window.addEventListener('hashchange', () => {
   renderScreen(screen);
 });
 
-function escapeHtml(str) {
-  return String(str).replace(/[&<>"']/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
-}
-
 // =================================================================== ГЛАВНАЯ / КЕЙСЫ
 
 async function renderCasesScreen(root, params = {}) {
   const category = params.category || 'cases';
-  const [data] = await Promise.all([api(`/api/cases?category=${category}`), refreshMe()]);
+  const [data, me, recentWins] = await Promise.all([
+    api(`/api/cases?category=${category}`),
+    refreshMe(),
+    api('/api/recent-wins?limit=12').catch(() => []),
+  ]);
 
   const tabs = Object.entries(CATEGORY_LABELS).map(
     ([key, label]) => `<button class="category-tab ${key === category ? 'active' : ''}" data-cat="${key}">${label}</button>`
   ).join('');
 
   const cards = data.cases.map((c) => {
-    const price = c.price_tokens !== null ? `${c.price_tokens} 🎫` : 'цена уточняется';
-    const count = c.item_count_label !== null ? `${c.item_count_label} предм.` : '? предм.';
+    const price = c.price_tokens !== null ? `${c.price_tokens} 🎫` : 'по условию';
+    const count = c.item_count_label !== null ? `${c.item_count_label} шт.` : '? шт.';
+    const glyph = glyphFor(c.name);
     return `
-      <button class="case-card ${c.is_openable ? '' : 'locked'}" data-case-id="${c.id}">
+      <button class="case-card ${c.is_openable ? '' : 'locked'}" style="${caseCardStyle(c)}" data-case-id="${c.id}">
         ${c.is_openable ? '' : '<span class="lock-badge">🔒</span>'}
-        <div class="case-art" style="--art-a:${caseArtColor(c.name)}">${caseEmoji(c.name)}</div>
+        <div class="case-art"><span class="p-tile-glyph">${escapeHtml(glyph)}</span></div>
         <div class="case-name">${escapeHtml(c.name)}</div>
+        ${c.best_rarity_label ? `<span class="rarity-badge" style="--rc:${c.best_rarity_color}">до ${escapeHtml(c.best_rarity_label)}</span>` : ''}
         <div class="case-meta"><span>${count}</span><span class="case-price">${price}</span></div>
       </button>`;
   }).join('') || '<div class="empty-state">В этой категории пока нет кейсов.</div>';
 
+  const ticker = recentWins.length ? `
+    <div class="ticker-wrap">
+      <div class="ticker-label"><span class="ticker-dot"></span> Последние выигрыши</div>
+      <div class="ticker-row">
+        ${recentWins.map((w) => `
+          <div class="ticker-card" style="--rc:${w.rarity_color}">
+            <div class="ticker-tile">${prestigeTile(w)}</div>
+            <div class="ticker-player">${escapeHtml(w.player)}</div>
+            <div class="ticker-value">${w.value} B</div>
+          </div>`).join('')}
+      </div>
+    </div>` : '';
+
   root.innerHTML = `
     <div class="section-title">${CATEGORY_TITLES[category]}</div>
-    <div class="balance-line">Демо-баланс: <b>${ME.game_tokens} 🎫</b></div>
+    <div class="balance-hero">
+      <div class="balance-tile gold"><div class="balance-tile-label">Демо 🎫</div><div class="balance-tile-value">${me.game_tokens}</div></div>
+      <div class="balance-tile"><div class="balance-tile-label">Баланс B</div><div class="balance-tile-value">${me.balance}</div></div>
+    </div>
+    ${ticker}
     <div class="category-tabs">${tabs}</div>
     <div class="case-grid">${cards}</div>
     <div class="btn-row" style="margin-top:14px">
@@ -219,79 +273,13 @@ async function renderCasesScreen(root, params = {}) {
   root.querySelectorAll('.case-card').forEach((el) =>
     el.addEventListener('click', () => openCaseDetail(Number(el.dataset.caseId)))
   );
-  root.querySelector('#btn-inventory').addEventListener('click', openInventoryModal);
+  root.querySelector('#btn-inventory').addEventListener('click', () => navigate('inventory'));
   root.querySelector('#btn-topup').addEventListener('click', async () => {
     const res = await api('/api/demo-topup', { method: 'POST' });
     toast(`+${res.amount} 🎫`, 'success');
     ME.game_tokens = res.game_tokens;
     navigate('home', { category });
   });
-}
-
-async function openInventoryModal() {
-  const items = await api('/api/inventory?limit=30');
-  const rows = items.map((i) => `
-    <div class="item-row"><span>${escapeHtml(i.item_name)} <span class="muted">(${escapeHtml(i.case_name)})</span></span><span class="item-value">${i.value} B</span></div>
-  `).join('') || '<div class="empty-state">Инвентарь пуст.</div>';
-  openModal(`
-    <button class="modal-close" onclick="closeModal()">✕</button>
-    <h3>🎒 Инвентарь</h3>
-    <div class="card" style="padding:0">${rows}</div>
-  `);
-}
-
-async function openCaseDetail(caseId) {
-  const c = await api(`/api/cases/${caseId}`);
-  renderCaseDetailModal(c, 1);
-}
-
-function renderCaseDetailModal(c, qty) {
-  const price = c.price_tokens !== null ? `${c.price_tokens} 🎫 за 1 шт.` : 'цена уточняется';
-  const items = c.items.map((i) => `<div class="item-row"><span>${escapeHtml(i.name)}</span><span class="item-value">${i.value} B</span></div>`).join('')
-    || '<div class="empty-state">Дроп-пул этого кейса пока не подтверждён.</div>';
-  const totalCost = c.price_tokens !== null ? c.price_tokens * qty : null;
-
-  const overlay = openModal(`
-    <button class="modal-close" onclick="closeModal()">✕</button>
-    <div class="case-art" style="--art-a:${caseArtColor(c.name)};height:120px;font-size:52px;margin-bottom:10px">${caseEmoji(c.name)}</div>
-    <h2 style="margin:0 0 4px">${escapeHtml(c.name)}</h2>
-    <div class="muted">${price} · ${c.item_count_label ?? '?'} предм.</div>
-    ${c.note ? `<div class="muted" style="margin-top:6px">${escapeHtml(c.note)}</div>` : ''}
-    <div class="pill-row" style="margin-top:14px">
-      ${[1, 3, 5].map((q) => `<button class="pill qty-pill ${q === qty ? 'active' : ''}" data-qty="${q}">${q}</button>`).join('')}
-    </div>
-    ${c.is_openable
-      ? `<button class="btn btn-primary" id="btn-open-case">ОТКРЫТЬ КЕЙС ×${qty}${totalCost !== null ? ` — ${totalCost} 🎫` : ''}</button>`
-      : `<div class="empty-state">Кейс пока нельзя открыть.</div>`}
-    <h4 style="margin:18px 0 8px">Что может выпасть</h4>
-    <div class="card" style="padding:0;max-height:220px;overflow-y:auto">${items}</div>
-  `);
-
-  overlay.querySelectorAll('.qty-pill').forEach((el) =>
-    el.addEventListener('click', () => renderCaseDetailModal(c, Number(el.dataset.qty)))
-  );
-  const openBtn = overlay.querySelector('#btn-open-case');
-  if (openBtn) openBtn.addEventListener('click', async () => {
-    openBtn.disabled = true;
-    try {
-      const res = await api(`/api/cases/${c.id}/open`, { method: 'POST', body: JSON.stringify({ qty }) });
-      ME.game_tokens = res.game_tokens;
-      renderCaseOpenResult(c, res.won);
-    } catch (err) {
-      toast('Ошибка: ' + err.message, 'error');
-      openBtn.disabled = false;
-    }
-  });
-}
-
-function renderCaseOpenResult(c, won) {
-  const rows = won.map((i) => `<div class="item-row"><span>🎉 ${escapeHtml(i.name)}</span><span class="item-value">${i.value} B</span></div>`).join('');
-  openModal(`
-    <button class="modal-close" onclick="closeModal()">✕</button>
-    <h2 style="margin:0 0 10px">Результат: ${escapeHtml(c.name)}</h2>
-    <div class="card" style="padding:0">${rows}</div>
-    <button class="btn btn-primary" style="margin-top:14px" onclick="closeModal(); navigate('home')">Готово</button>
-  `);
 }
 
 function renderDepositPlaceholder(root) {
@@ -304,11 +292,185 @@ function renderDepositPlaceholder(root) {
     </div>`;
 }
 
+// =================================================================== СТРАНИЦА КЕЙСА + РУЛЕТКА
+
+async function openCaseDetail(caseId) {
+  const c = await api(`/api/cases/${caseId}`);
+  renderCaseDetailModal(c, 1);
+}
+
+function renderCaseDetailModal(c, qty) {
+  const price = c.price_tokens !== null ? `${c.price_tokens} 🎫 за 1 шт.` : 'цена по условию';
+  const items = (c.items || []).slice().sort((a, b) => b.value - a.value);
+  const dropTable = items.map((i) => `
+    <div class="drop-tile" style="--rc:${i.rarity_color}">
+      ${prestigeTile(i)}
+      <div class="drop-name">${escapeHtml(i.name)}</div>
+      <div class="drop-value">${i.value} B</div>
+      <div class="drop-chance">${i.chance_percent}%</div>
+    </div>`).join('') || '<div class="empty-state">Дроп-пул этого кейса пока не подтверждён.</div>';
+  const totalCost = c.price_tokens !== null ? c.price_tokens * qty : null;
+
+  const overlay = openModal(`
+    <button class="modal-close" onclick="closeModal()">✕</button>
+    <div style="display:flex;justify-content:center">${prestigeTile({ name: c.name, rarity: c.best_rarity, rarity_color: c.best_rarity_color, rarity_color_accent: c.best_rarity_color_accent, slug: '' }, '')}</div>
+    <style>#active-modal .p-tile:first-of-type{width:120px;height:120px;font-size:44px;margin-bottom:12px}</style>
+    <h2 style="margin:6px 0 4px;text-align:center">${escapeHtml(c.name)}</h2>
+    <div class="muted" style="text-align:center">${price} · ${c.item_count_label ?? '?'} предм. ${c.best_rarity_label ? `· до <span style="color:${c.best_rarity_color}">${escapeHtml(c.best_rarity_label)}</span>` : ''}</div>
+    ${c.note ? `<div class="muted" style="margin-top:6px;text-align:center">${escapeHtml(c.note)}</div>` : ''}
+    <div id="reel-slot"></div>
+    <div class="pill-row" style="margin-top:14px">
+      ${[1, 3, 5].map((q) => `<button class="pill qty-pill ${q === qty ? 'active' : ''}" data-qty="${q}">${q}</button>`).join('')}
+    </div>
+    ${c.is_openable
+      ? `<button class="btn btn-primary" id="btn-open-case">ОТКРЫТЬ КЕЙС ×${qty}${totalCost !== null ? ` — ${totalCost} 🎫` : ''}</button>`
+      : `<div class="empty-state">Кейс пока нельзя открыть.</div>`}
+    <h4 style="margin:18px 0 8px">Что может выпасть</h4>
+    <div class="drop-table">${dropTable}</div>
+  `);
+
+  overlay.querySelectorAll('.qty-pill').forEach((el) =>
+    el.addEventListener('click', () => renderCaseDetailModal(c, Number(el.dataset.qty)))
+  );
+  const openBtn = overlay.querySelector('#btn-open-case');
+  if (openBtn) openBtn.addEventListener('click', async () => {
+    openBtn.disabled = true;
+    try {
+      const res = await api(`/api/cases/${c.id}/open`, { method: 'POST', body: JSON.stringify({ qty }) });
+      ME.game_tokens = res.game_tokens;
+      if (qty === 1 && res.reel) {
+        openBtn.disabled = true;
+        await playReel(overlay.querySelector('#reel-slot'), res.reel, res.reveal_index);
+        renderCaseOpenResult(c, res.won);
+      } else {
+        renderCaseOpenResult(c, res.won);
+      }
+    } catch (err) {
+      toast('Ошибка: ' + err.message, 'error');
+      openBtn.disabled = false;
+    }
+  });
+}
+
+const REEL_ITEM_WIDTH = 104; // 96px карточка + 8px gap, см. .reel-item/.reel-track в app.css
+
+/** Рулетка: сервер уже решил результат (res.won[0]), reel[] — только
+ * декорация вокруг него на позиции reveal_index (см. build_reel на
+ * бэкенде). Анимация не выбирает исход — она едет к уже готовой позиции. */
+function playReel(slot, reel, revealIndex) {
+  return new Promise((resolve) => {
+    slot.innerHTML = `
+      <div class="reel-outer">
+        <div class="reel-fade left"></div>
+        <div class="reel-fade right"></div>
+        <div class="reel-marker"></div>
+        <div class="reel-track" id="reel-track">
+          ${reel.map((i) => `
+            <div class="reel-item" style="--rc:${i.rarity_color}">
+              ${prestigeTile(i)}
+              <div class="reel-item-name">${escapeHtml(i.name)}</div>
+              <div class="reel-item-value">${i.value} B</div>
+            </div>`).join('')}
+        </div>
+      </div>`;
+    const track = slot.querySelector('#reel-track');
+    const outerWidth = slot.querySelector('.reel-outer').clientWidth;
+    requestAnimationFrame(() => {
+      const target = revealIndex * REEL_ITEM_WIDTH + REEL_ITEM_WIDTH / 2 - outerWidth / 2;
+      track.style.transition = 'transform 4.2s cubic-bezier(0.09, 0.85, 0.12, 1)';
+      track.style.transform = `translateX(${-target}px)`;
+    });
+    track.addEventListener('transitionend', () => {
+      const landed = slot.querySelectorAll('.reel-item')[revealIndex];
+      if (landed) landed.style.boxShadow = '0 0 24px -2px var(--rc)';
+      setTimeout(resolve, 350);
+    }, { once: true });
+  });
+}
+
+function renderCaseOpenResult(c, won) {
+  if (won.length === 1) {
+    const w = won[0];
+    openModal(`
+      <button class="modal-close" onclick="closeModal()">✕</button>
+      <div class="reveal-card" style="--rc:${w.rarity_color}">
+        ${prestigeTile(w)}
+        <style>#active-modal .reveal-card .p-tile{width:110px;height:110px;font-size:40px;margin:0 auto 14px}</style>
+        ${rarityBadge(w)}
+        <div class="reveal-name" style="margin-top:8px">${escapeHtml(w.name)}</div>
+        <div class="reveal-value" style="--rc:${w.rarity_color}">${w.value} B</div>
+      </div>
+      <button class="btn btn-primary" style="margin-top:16px" onclick="closeModal(); navigate('home')">Готово</button>
+      <button class="btn btn-ghost" style="margin-top:8px" onclick="closeModal(); openCaseDetail(${c.id})">Открыть ещё раз</button>
+    `);
+    return;
+  }
+  const rows = won.map((i) => `<div class="item-row" style="--rc:${i.rarity_color}">${rarityBadge(i)}<span style="flex:1;margin:0 8px">${escapeHtml(i.name)}</span><span class="item-value" style="color:${i.rarity_color}">${i.value} B</span></div>`).join('');
+  openModal(`
+    <button class="modal-close" onclick="closeModal()">✕</button>
+    <h2 style="margin:0 0 10px">Результат: ${escapeHtml(c.name)}</h2>
+    <div class="card" style="padding:0">${rows}</div>
+    <button class="btn btn-primary" style="margin-top:14px" onclick="closeModal(); navigate('home')">Готово</button>
+  `);
+}
+
+// =================================================================== ИНВЕНТАРЬ
+
+let inventoryFilter = 'all';
+let inventorySort = 'value';
+
+async function renderInventoryScreen(root) {
+  const items = await api('/api/inventory?limit=200');
+  paintInventory(root, items);
+}
+
+function paintInventory(root, items) {
+  const filtered = inventoryFilter === 'all' ? items : items.filter((i) => i.rarity === inventoryFilter);
+  const sorted = filtered.slice().sort((a, b) => {
+    if (inventorySort === 'value') return b.value - a.value;
+    if (inventorySort === 'rarity') return RARITY_ORDER.indexOf(b.rarity) - RARITY_ORDER.indexOf(a.rarity);
+    return new Date(b.obtained_at) - new Date(a.obtained_at);
+  });
+
+  const rarityCounts = {};
+  items.forEach((i) => { rarityCounts[i.rarity] = (rarityCounts[i.rarity] || 0) + 1; });
+  const chips = ['all', ...RARITY_ORDER].map((r) => {
+    if (r !== 'all' && !rarityCounts[r]) return '';
+    const count = r === 'all' ? items.length : rarityCounts[r];
+    const label = r === 'all' ? 'Все' : (items.find((i) => i.rarity === r) || {}).rarity_label || r;
+    const rc = r === 'all' ? '#5b7cfa' : (items.find((i) => i.rarity === r) || {}).rarity_color || '#8a93a8';
+    return `<button class="filter-chip ${inventoryFilter === r ? 'active' : ''}" style="--rc:${rc}" data-r="${r}">${label} (${count})</button>`;
+  }).join('');
+
+  const tiles = sorted.map((i) => `
+    <div class="inv-tile" style="--rc:${i.rarity_color}">
+      ${prestigeTile(i)}
+      <div class="inv-name">${escapeHtml(i.name)}</div>
+      <div class="inv-value">${i.value} B</div>
+    </div>`).join('') || '<div class="empty-state" style="grid-column:1/-1">Пусто — открой кейс на главной.</div>';
+
+  root.innerHTML = `
+    <div class="section-title">ИНВЕНТАРЬ</div>
+    <div class="filter-row">${chips}</div>
+    <div class="pill-row">
+      <button class="pill sort-pill ${inventorySort === 'value' ? 'active' : ''}" data-sort="value">По цене</button>
+      <button class="pill sort-pill ${inventorySort === 'rarity' ? 'active' : ''}" data-sort="rarity">По редкости</button>
+      <button class="pill sort-pill ${inventorySort === 'date' ? 'active' : ''}" data-sort="date">По дате</button>
+    </div>
+    <div class="inventory-grid">${tiles}</div>
+  `;
+
+  root.querySelectorAll('.filter-chip').forEach((el) => el.addEventListener('click', () => { inventoryFilter = el.dataset.r; paintInventory(root, items); }));
+  root.querySelectorAll('.sort-pill').forEach((el) => el.addEventListener('click', () => { inventorySort = el.dataset.sort; paintInventory(root, items); }));
+}
+
 // =================================================================== ПРОФИЛЬ
 
 async function renderProfileScreen(root) {
-  const [me, inventory] = await Promise.all([refreshMe(), api('/api/inventory?limit=5')]);
+  const [me, inventory] = await Promise.all([refreshMe(), api('/api/inventory?limit=50')]);
   const bestDrop = inventory.slice().sort((a, b) => b.value - a.value)[0];
+  const rarityCounts = {};
+  inventory.forEach((i) => { rarityCounts[i.rarity] = (rarityCounts[i.rarity] || 0) + 1; });
 
   root.innerHTML = `
     <div class="section-title">ПРОФИЛЬ</div>
@@ -324,15 +486,19 @@ async function renderProfileScreen(root) {
     <div class="stat-grid">
       <div class="stat-box"><div class="stat-label">Реальный баланс</div><div class="stat-value">${me.balance} 🪙</div></div>
       <div class="stat-box"><div class="stat-label">Демо-фишки</div><div class="stat-value">${me.game_tokens} 🎫</div></div>
+      <div class="stat-box"><div class="stat-label">Предметов в инвентаре</div><div class="stat-value">${inventory.length}</div></div>
       <div class="stat-box"><div class="stat-label">Рефералов</div><div class="stat-value">${me.referral_count}</div></div>
-      <div class="stat-box"><div class="stat-label">Заработано с рефералов</div><div class="stat-value">${me.referral_earned_total} 🪙</div></div>
     </div>
     ${bestDrop ? `
-      <h4 style="margin:18px 0 8px">Лучший недавний дроп</h4>
-      <div class="card" style="padding:0">
-        <div class="item-row"><span>${escapeHtml(bestDrop.item_name)} <span class="muted">(${escapeHtml(bestDrop.case_name)})</span></span><span class="item-value">${bestDrop.value} B</span></div>
+      <h4 style="margin:18px 0 8px">Лучший дроп</h4>
+      <div class="reveal-card" style="--rc:${bestDrop.rarity_color};padding:16px">
+        ${prestigeTile(bestDrop)}
+        <style>#app .reveal-card .p-tile{width:64px;height:64px;font-size:24px;margin:0 auto 8px}</style>
+        ${rarityBadge(bestDrop)}
+        <div class="reveal-name" style="font-size:15px;margin-top:6px">${escapeHtml(bestDrop.name)}</div>
+        <div class="reveal-value" style="font-size:16px;--rc:${bestDrop.rarity_color}">${bestDrop.value} B</div>
       </div>` : ''}
-    <button class="btn btn-ghost" style="margin-top:16px" onclick="openInventoryModal()">🎒 Весь инвентарь</button>
+    <button class="btn btn-ghost" style="margin-top:8px" onclick="navigate('inventory')">🎒 Весь инвентарь</button>
   `;
 }
 
@@ -347,7 +513,7 @@ async function renderUpgraderScreen(root) {
   root.innerHTML = `
     <div class="section-title">АПГРЕЙДЕР</div>
     <div class="dial-wrap">
-      <div class="dial" style="background:conic-gradient(var(--accent-red) ${chance ?? 0}%, #241826 0)">
+      <div class="dial" style="background:conic-gradient(var(--r-mythic) ${chance ?? 0}%, #1a1c22 0)">
         <div class="dial" style="width:150px;height:150px;background:var(--bg);display:flex;flex-direction:column;align-items:center;justify-content:center">
           <div class="dial-chance">${chance !== null ? chance + '%' : '—'}</div>
           <div class="dial-label">ШАНС</div>
@@ -356,11 +522,11 @@ async function renderUpgraderScreen(root) {
     </div>
     <div class="slot-row">
       <button class="slot ${contribution ? 'filled' : ''}" id="slot-contribution">
-        ${contribution ? `${escapeHtml(contribution.item_name)}<br><span class="item-value">${contribution.value} B</span>` : 'ТВОЙ ВКЛАД<br>выбрать из инвентаря'}
+        ${contribution ? `${prestigeTile(contribution)}${escapeHtml(contribution.name)}<br><span class="item-value">${contribution.value} B</span>` : 'ТВОЙ ВКЛАД<br>выбрать из инвентаря'}
       </button>
       <div class="slot-arrow">→</div>
       <button class="slot ${target ? 'filled' : ''}" id="slot-target">
-        ${target ? `${escapeHtml(target.name)}<br><span class="item-value">${target.value} B</span>` : 'ЖЕЛАЕМЫЙ ПРЕДМЕТ<br>выбрать цель'}
+        ${target ? `${prestigeTile(target)}${escapeHtml(target.name)}<br><span class="item-value">${target.value} B</span>` : 'ЖЕЛАЕМЫЙ ПРЕДМЕТ<br>выбрать цель'}
       </button>
     </div>
     <button class="btn btn-primary" id="btn-spin" ${contribution && target ? '' : 'disabled'}>ПРОКАЧАТЬ</button>
@@ -368,7 +534,7 @@ async function renderUpgraderScreen(root) {
   `;
 
   root.querySelector('#slot-contribution').addEventListener('click', async () => {
-    const items = await api('/api/inventory?limit=50');
+    const items = await api('/api/inventory?limit=100');
     openItemPicker(items, (item) => {
       upgraderState.contribution = item;
       upgraderState.target = null;
@@ -378,7 +544,7 @@ async function renderUpgraderScreen(root) {
 
   root.querySelector('#slot-target').addEventListener('click', async () => {
     if (!contribution) { toast('Сначала выбери вклад', 'error'); return; }
-    const targets = await api(`/api/upgrader/targets?min_value=${contribution.value}&exclude_name=${encodeURIComponent(contribution.item_name)}`);
+    const targets = await api(`/api/upgrader/targets?min_value=${contribution.value}&exclude_name=${encodeURIComponent(contribution.name)}`);
     openTargetPicker(targets, (t) => {
       upgraderState.target = t;
       renderUpgraderScreen(root);
@@ -413,7 +579,6 @@ async function renderUpgraderScreen(root) {
   });
 }
 
-// зеркалит bot/services/upgrader_service.chance_percent на фронте для мгновенного отображения
 function computeChance(contributionValue, targetValue) {
   if (targetValue <= 0) return 95;
   const raw = Math.round((contributionValue / targetValue) * 100);
@@ -422,13 +587,14 @@ function computeChance(contributionValue, targetValue) {
 
 function openItemPicker(items, onPick) {
   const rows = items.map((i) => `
-    <button class="item-row" style="width:100%;background:none;border:none;color:inherit;cursor:pointer" data-id="${i.id}">
-      <span>${escapeHtml(i.item_name)}</span><span class="item-value">${i.value} B</span>
+    <button class="item-row" style="width:100%;background:none;border:none;color:inherit;cursor:pointer;--rc:${i.rarity_color}" data-id="${i.id}">
+      ${prestigeTile(i)}<span style="flex:1;margin:0 8px;text-align:left">${escapeHtml(i.name)}</span><span class="item-value" style="color:${i.rarity_color}">${i.value} B</span>
     </button>`).join('') || '<div class="empty-state">Инвентарь пуст — сначала открой кейс.</div>';
   const overlay = openModal(`
     <button class="modal-close" onclick="closeModal()">✕</button>
     <h3>Выбери предмет</h3>
-    <div class="card" style="padding:0">${rows}</div>
+    <style>#active-modal .item-row .p-tile{width:36px;height:36px;font-size:14px;flex-shrink:0}</style>
+    <div class="card" style="padding:0;max-height:400px;overflow-y:auto">${rows}</div>
   `);
   overlay.querySelectorAll('[data-id]').forEach((el) =>
     el.addEventListener('click', () => {
@@ -441,13 +607,14 @@ function openItemPicker(items, onPick) {
 
 function openTargetPicker(targets, onPick) {
   const rows = targets.map((t, idx) => `
-    <button class="item-row" style="width:100%;background:none;border:none;color:inherit;cursor:pointer" data-idx="${idx}">
-      <span>${escapeHtml(t.name)}</span><span class="item-value">${t.value} B</span>
+    <button class="item-row" style="width:100%;background:none;border:none;color:inherit;cursor:pointer;--rc:${t.rarity_color}" data-idx="${idx}">
+      ${prestigeTile(t)}<span style="flex:1;margin:0 8px;text-align:left">${escapeHtml(t.name)}</span><span class="item-value" style="color:${t.rarity_color}">${t.value} B</span>
     </button>`).join('') || '<div class="empty-state">Нет подходящих целей дороже вклада.</div>';
   const overlay = openModal(`
     <button class="modal-close" onclick="closeModal()">✕</button>
     <h3>Желаемый предмет</h3>
-    <div class="card" style="padding:0;max-height:320px;overflow-y:auto">${rows}</div>
+    <style>#active-modal .item-row .p-tile{width:36px;height:36px;font-size:14px;flex-shrink:0}</style>
+    <div class="card" style="padding:0;max-height:400px;overflow-y:auto">${rows}</div>
   `);
   overlay.querySelectorAll('[data-idx]').forEach((el) =>
     el.addEventListener('click', () => {
@@ -468,7 +635,7 @@ async function renderCrashScreen(root) {
   paintCrash(root, state);
 
   root.querySelector('#btn-crash-pick')?.addEventListener('click', async () => {
-    const items = await api('/api/inventory?limit=50');
+    const items = await api('/api/inventory?limit=100');
     openItemPicker(items, async (item) => {
       try {
         await api('/api/crash/start', { method: 'POST', body: JSON.stringify({ item_id: item.id }) });
@@ -539,8 +706,8 @@ function paintDice(root, rules) {
 
   root.innerHTML = `
     <div class="section-title">ДАЙСЫ</div>
-    <button class="slot ${item ? 'filled' : ''}" id="slot-dice-item" style="width:100%;margin-bottom:10px">
-      ${item ? `Ставка: ${escapeHtml(item.item_name)} — ${item.value} B` : 'Выбрать предмет из инвентаря'}
+    <button class="slot ${item ? 'filled' : ''}" id="slot-dice-item" style="width:100%;margin-bottom:10px;flex-direction:row;gap:10px">
+      ${item ? `${prestigeTile(item)}Ставка: ${escapeHtml(item.name)} — ${item.value} B` : 'Выбрать предмет из инвентаря'}
     </button>
     <div class="color-row">${colors}</div>
     <button class="btn btn-primary" id="btn-dice-roll" ${item && color ? '' : 'disabled'}>БРОСИТЬ</button>
@@ -552,7 +719,7 @@ function paintDice(root, rules) {
   `;
 
   root.querySelector('#slot-dice-item').addEventListener('click', async () => {
-    const items = await api('/api/inventory?limit=50');
+    const items = await api('/api/inventory?limit=100');
     openItemPicker(items, (i) => { diceState.item = i; paintDice(root, rules); });
   });
   root.querySelectorAll('.color-dot').forEach((el) =>
@@ -608,8 +775,9 @@ function renderBattleResult(res) {
   openModal(`
     <button class="modal-close" onclick="closeModal()">✕</button>
     <h2>${title}</h2>
-    <div class="item-row"><span>Ты</span><span class="item-value">${escapeHtml(res.player_item.name)} — ${res.player_item.value} B</span></div>
-    <div class="item-row"><span>Бот</span><span class="item-value">${escapeHtml(res.bot_item.name)} — ${res.bot_item.value} B</span></div>
+    <div class="item-row" style="--rc:${res.player_item.rarity_color}">${prestigeTile(res.player_item)}<span style="flex:1;margin:0 8px">Ты: ${escapeHtml(res.player_item.name)}</span><span class="item-value" style="color:${res.player_item.rarity_color}">${res.player_item.value} B</span></div>
+    <div class="item-row" style="--rc:${res.bot_item.rarity_color}">${prestigeTile(res.bot_item)}<span style="flex:1;margin:0 8px">Бот: ${escapeHtml(res.bot_item.name)}</span><span class="item-value" style="color:${res.bot_item.rarity_color}">${res.bot_item.value} B</span></div>
+    <style>#active-modal .item-row .p-tile{width:36px;height:36px;font-size:14px;flex-shrink:0}</style>
     <button class="btn btn-primary" style="margin-top:14px" onclick="closeModal()">Готово</button>
   `);
 }
@@ -783,7 +951,7 @@ async function renderStakingTab(body) {
     const amount = Number(body.querySelector('#stake-amount').value);
     if (!amount) { toast('Укажи сумму', 'error'); return; }
     try {
-      const res = await api('/api/staking/start', { method: 'POST', body: JSON.stringify({ term_days: selectedTerm, amount }) });
+      await api('/api/staking/start', { method: 'POST', body: JSON.stringify({ term_days: selectedTerm, amount }) });
       toast('Стейк открыт!', 'success');
       renderStakingTab(body);
     } catch (err) { toast('Ошибка: ' + err.message, 'error'); }
@@ -802,7 +970,7 @@ function stakingStatsHtml(s) {
 
 window.closeModal = closeModal;
 window.navigate = navigate;
-window.openInventoryModal = openInventoryModal;
+window.openCaseDetail = openCaseDetail;
 
 (async function boot() {
   try {
