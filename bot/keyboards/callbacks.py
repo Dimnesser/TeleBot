@@ -164,3 +164,59 @@ class DiceRollCB(CallbackData, prefix="droll"):
 
 class DiceResetCB(CallbackData, prefix="dreset2"):
     pass
+
+
+class QuestsHomeCB(CallbackData, prefix="qhome"):
+    pass
+
+
+class QuestClaimCB(CallbackData, prefix="qclaim"):
+    quest_id: int
+
+
+class BonusesHomeCB(CallbackData, prefix="bhome"):
+    pass
+
+
+class BonusesTabCB(CallbackData, prefix="btab"):
+    tab: str  # "referral" | "staking"
+
+
+class StakeStartCB(CallbackData, prefix="sstart"):
+    term_days: int
+
+
+class StakeCancelCB(CallbackData, prefix="scancel"):
+    pass
+
+
+class StakeConfirmCB(CallbackData, prefix="sconfirm"):
+    pass
+
+
+class StakeClaimCB(CallbackData, prefix="sclaim"):
+    stake_id: int
+
+
+class BattleHomeCB(CallbackData, prefix="bahome"):
+    pass
+
+
+class BattlePickCaseCB(CallbackData, prefix="bapick"):
+    case_id: int
+
+
+class BattleStartCB(CallbackData, prefix="bastart"):
+    case_id: int
+
+
+class GiveawaysHomeCB(CallbackData, prefix="ghome"):
+    pass
+
+
+class GiveawayJoinCB(CallbackData, prefix="gjoin"):
+    giveaway_id: int
+
+
+class FaqHomeCB(CallbackData, prefix="fhome"):
+    pass

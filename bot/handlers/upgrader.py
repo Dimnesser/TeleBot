@@ -24,6 +24,7 @@ from bot.keyboards.callbacks import (
     UpgraderTargetsCB,
 )
 from bot.keyboards.upgrader import my_items_keyboard, targets_keyboard, upgrader_home_keyboard
+from bot.services import quest_service
 from bot.services.upgrader_service import (
     chance_percent,
     find_nearest_target,
@@ -242,6 +243,7 @@ async def handle_confirm(callback: CallbackQuery, state: FSMContext) -> None:
         await inventory_repo.delete(session, item)
         if success:
             await inventory_repo.add_items(session, user, "Апгрейдер", [(target_name, target_value)])
+        await quest_service.record_progress(session, user, "upgrader_spin")
 
     await state.update_data(
         upgrader_contribution_id=None,

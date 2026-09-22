@@ -12,6 +12,7 @@ from bot.database.repo import deposit_items as items_repo
 from bot.database.repo import deposit_requests as requests_repo
 from bot.keyboards.callbacks import DepositAdminCB
 from bot.services.notify import notify_admins_new_request
+from bot.services.referral_service import credit_referral_commission
 from bot.utils.texts import (
     ADMIN_REQUEST_ALREADY_RESOLVED,
     ADMIN_REQUEST_APPROVED,
@@ -42,6 +43,7 @@ async def handle_admin_decision(callback: CallbackQuery, callback_data: DepositA
         if callback_data.action == "approve":
             user.balance += request.total_b
             await requests_repo.resolve_request(session, request, DepositRequestStatus.APPROVED, callback.from_user.id)
+            await credit_referral_commission(session, user, request.total_b)
             admin_text = ADMIN_REQUEST_APPROVED.format(request_id=request.id)
             user_text = USER_DEPOSIT_APPROVED.format(total=request.total_b, balance=user.balance)
         else:

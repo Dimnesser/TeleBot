@@ -9,7 +9,8 @@ from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker, create_asyn
 from bot.config import config
 from bot.data.seed_cases import SEED_CASES
 from bot.data.seed_items import SEED_ITEMS
-from bot.database.models import Base, Case, CaseItem, DepositItem
+from bot.data.seed_quests import SEED_QUESTS
+from bot.database.models import Base, Case, CaseItem, DepositItem, Quest
 
 engine = create_async_engine(config.database_url)
 async_session: async_sessionmaker[AsyncSession] = async_sessionmaker(engine, expire_on_commit=False)
@@ -29,6 +30,7 @@ async def init_db() -> None:
         await conn.run_sync(Base.metadata.create_all)
     await _seed_items_if_empty()
     await _seed_cases_if_empty()
+    await _seed_quests_if_empty()
 
 
 async def _seed_items_if_empty() -> None:
@@ -73,4 +75,25 @@ async def _seed_cases_if_empty() -> None:
                 CaseItem(case_id=case.id, name=item.name, value=item.value, sort_order=i)
                 for i, item in enumerate(seed_case.items)
             )
+        await session.commit()
+
+
+async def _seed_quests_if_empty() -> None:
+    async with async_session() as session:
+        result = await session.execute(select(Quest.id).limit(1))
+        if result.scalar_one_or_none() is not None:
+            return
+        session.add_all(
+            Quest(
+                code=quest.code,
+                scope=quest.scope,
+                title=quest.title,
+                description=quest.description,
+                target_type=quest.target_type,
+                target_count=quest.target_count,
+                reward_tokens=quest.reward_tokens,
+                sort_order=quest.sort_order,
+            )
+            for quest in SEED_QUESTS
+        )
         await session.commit()

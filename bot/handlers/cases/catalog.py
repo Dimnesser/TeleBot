@@ -20,6 +20,7 @@ from bot.keyboards.callbacks import (
     CasesTopUpCB,
 )
 from bot.keyboards.cases import case_detail_keyboard, cases_list_keyboard
+from bot.services import quest_service
 from bot.services.cases_service import draw_items, total_cost
 from bot.utils.texts import (
     CASE_DETAIL_BALANCE_LINE,
@@ -165,6 +166,7 @@ async def handle_confirm_open(callback: CallbackQuery, callback_data: CaseConfir
         await inventory_repo.add_items(
             session, user, case.name, [(item.name, item.value) for item in won], case_id=case.id
         )
+        await quest_service.record_progress(session, user, f"open_case:{case.code}")
         tokens_after = user.game_tokens
 
     result_lines = [CASE_OPEN_RESULT_HEADER.format(name=case.name, qty=callback_data.qty)]

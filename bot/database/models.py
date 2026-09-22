@@ -41,6 +41,7 @@ class User(Base):
     game_tokens: Mapped[int] = mapped_column(Integer, default=0)
     referral_code: Mapped[str] = mapped_column(String(16), unique=True)
     referred_by_id: Mapped[int | None] = mapped_column(ForeignKey("users.id"), nullable=True)
+    referral_earned_total: Mapped[int] = mapped_column(Integer, default=0)
     created_at: Mapped[datetime] = mapped_column(DateTime, server_default=func.now())
 
 
@@ -142,6 +143,118 @@ class InventoryItem(Base):
     item_name: Mapped[str] = mapped_column(String(128))
     value: Mapped[int] = mapped_column(Integer)
     obtained_at: Mapped[datetime] = mapped_column(DateTime, server_default=func.now())
+
+
+class QuestScope(str, enum.Enum):
+    DAILY = "daily"
+    WEEKLY = "weekly"
+
+
+class Quest(Base):
+    """Задание из раздела «Квесты».
+
+    [ПОДТВЕРЖДЕНО СКРИНШОТОМ] Два дневных квеста с этими текстами/наградами
+    видны на скриншоте: «Открой Сикс Севен» (открыть кейс «Сикс Севен» 1 раз,
+    +23 🎫) и «Сыграй в апгрейдере» (1 спин в апгрейдере, +6 🎫), плюс начало
+    недельного «Открой Тако 3 раза» (обрезано, награда не видна —
+    reward_tokens для него [ЛОГИЧЕСКИ ПРЕДПОЛОЖЕНО]).
+    target_type: "open_case:<code кейса>" | "upgrader_spin".
+    """
+
+    __tablename__ = "quests"
+
+    id: Mapped[int] = mapped_column(primary_key=True)
+    code: Mapped[str] = mapped_column(String(64), unique=True)
+    scope: Mapped[QuestScope] = mapped_column(SAEnum(QuestScope))
+    title: Mapped[str] = mapped_column(String(128))
+    description: Mapped[str] = mapped_column(String(256))
+    target_type: Mapped[str] = mapped_column(String(64))
+    target_count: Mapped[int] = mapped_column(Integer, default=1)
+    reward_tokens: Mapped[int] = mapped_column(Integer)
+    sort_order: Mapped[int] = mapped_column(Integer, default=0)
+
+
+class UserQuestProgress(Base):
+    """Прогресс пользователя по квесту за текущий период (день/неделя).
+
+    period_key — ключ периода («2026-09-23» для дневных, «2026-W39» для
+    недельных), при смене периода прогресс логически обнуляется: старые
+    записи просто перестают совпадать с текущим period_key и создаётся новая.
+    """
+
+    __tablename__ = "user_quest_progress"
+
+    id: Mapped[int] = mapped_column(primary_key=True)
+    user_id: Mapped[int] = mapped_column(ForeignKey("users.id"))
+    quest_id: Mapped[int] = mapped_column(ForeignKey("quests.id"))
+    period_key: Mapped[str] = mapped_column(String(16))
+    progress_count: Mapped[int] = mapped_column(Integer, default=0)
+    claimed: Mapped[bool] = mapped_column(default=False)
+    updated_at: Mapped[datetime] = mapped_column(DateTime, server_default=func.now(), onupdate=func.now())
+
+
+class StakeStatus(str, enum.Enum):
+    ACTIVE = "active"
+    COMPLETED = "completed"
+
+
+class StakePosition(Base):
+    """Стейкинг реального баланса B (раздел «Бонусы»).
+
+    [ПОДТВЕРЖДЕНО СКРИНШОТОМ] 3 тарифа: неделя +10%, 2 недели +20%, месяц
+    +42.9%; минимум 100 B; тело возвращается по частям (по одной в сутки
+    после срока), надбавка — только если досидеть до конца.
+    [ЛОГИЧЕСКИ ПРЕДПОЛОЖЕНО, упрощение] Заморозка выплачивается одним
+    платежом (тело + бонус) сразу после наступления matures_at, а не
+    подневным капанием — планировщика для фоновых ежедневных выплат в
+    этом процессе нет, см. bot/services/staking_service.py.
+    """
+
+    __tablename__ = "stake_positions"
+
+    id: Mapped[int] = mapped_column(primary_key=True)
+    user_id: Mapped[int] = mapped_column(ForeignKey("users.id"))
+    amount: Mapped[int] = mapped_column(Integer)
+    term_days: Mapped[int] = mapped_column(Integer)
+    bonus_percent: Mapped[float] = mapped_column()
+    started_at: Mapped[datetime] = mapped_column(DateTime, server_default=func.now())
+    matures_at: Mapped[datetime] = mapped_column(DateTime)
+    status: Mapped[StakeStatus] = mapped_column(SAEnum(StakeStatus), default=StakeStatus.ACTIVE)
+
+
+class GiveawayStatus(str, enum.Enum):
+    ACTIVE = "active"
+    RESOLVED = "resolved"
+
+
+class Giveaway(Base):
+    """Розыгрыш из раздела «Розыгрыши».
+
+    [НЕИЗВЕСТНО] Интерфейс раздела ни разу не был на скриншотах — по
+    согласованию с пользователем сделано по собственному усмотрению:
+    администратор создаёт розыгрыш с призом и датой окончания, пользователи
+    участвуют один раз, по истечении срока случайно выбирается победитель.
+    """
+
+    __tablename__ = "giveaways"
+
+    id: Mapped[int] = mapped_column(primary_key=True)
+    title: Mapped[str] = mapped_column(String(128))
+    prize_description: Mapped[str] = mapped_column(String(256))
+    ends_at: Mapped[datetime] = mapped_column(DateTime)
+    status: Mapped[GiveawayStatus] = mapped_column(SAEnum(GiveawayStatus), default=GiveawayStatus.ACTIVE)
+    winner_user_id: Mapped[int | None] = mapped_column(ForeignKey("users.id"), nullable=True)
+    created_by_tg_id: Mapped[int] = mapped_column(BigInteger)
+    created_at: Mapped[datetime] = mapped_column(DateTime, server_default=func.now())
+
+
+class GiveawayEntry(Base):
+    __tablename__ = "giveaway_entries"
+
+    id: Mapped[int] = mapped_column(primary_key=True)
+    giveaway_id: Mapped[int] = mapped_column(ForeignKey("giveaways.id"))
+    user_id: Mapped[int] = mapped_column(ForeignKey("users.id"))
+    joined_at: Mapped[datetime] = mapped_column(DateTime, server_default=func.now())
 
 
 class StarsDeposit(Base):

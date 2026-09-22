@@ -210,3 +210,92 @@ DICE_RESULT_MATCHES = "Совпадений с {color}: {count}/4"
 DICE_RESULT_BONUS = "🌈 БОНУС!"
 DICE_RESULT_WIN = "🎉 <b>Выигрыш x{multiplier}!</b> {stake} превратился в {result} — предмет добавлен в инвентарь."
 DICE_RESULT_LOSS = "💥 <b>Проигрыш.</b> {stake} потерян."
+
+# --- Квесты ---
+QUESTS_HEADER = "<b>КВЕСТЫ</b>"
+QUESTS_BALANCE_LINE = "БАЛАНС: <b>{tokens} 🎫</b>"
+QUESTS_SCOPE_DAILY = "<b>ДНЕВНЫЕ</b>"
+QUESTS_SCOPE_WEEKLY = "<b>НЕДЕЛЬНЫЕ</b>"
+QUEST_ROW = "{title}\n{description}\n{progress}/{target} · Сброс через {reset}\n+{reward} 🎫"
+QUEST_CLAIMED_ROW = "{title} — ✅ забрано"
+QUEST_NOT_READY_ALERT = "Квест ещё не выполнен."
+QUEST_ALREADY_CLAIMED_ALERT = "Награда уже забрана."
+QUEST_CLAIMED_ALERT = "Получено {reward} 🎫!"
+
+# --- Бонусы: общее ---
+BONUSES_HEADER = "<b>БОНУСЫ</b>"
+BONUSES_TAB_REFERRAL = "👥 Рефералы"
+BONUSES_TAB_STAKING = "🔒 Стейкинг"
+
+# --- Бонусы: рефералы ---
+REFERRAL_HEADER = "<b>РЕФЕРАЛЫ</b>\nПриглашай друзей и получай процент с их депозитов"
+REFERRAL_CODE_LINE = "Мой реферальный код: <code>{code}</code>"
+REFERRAL_LINK_LINE = "Ссылка: {link}"
+REFERRAL_TIER_LINE = "Тир: <b>{tier}</b> (комиссия {commission}%)"
+REFERRAL_NEXT_TIER_LINE = "До {next_tier}: ещё {remaining} чел."
+REFERRAL_MAX_TIER_LINE = "Максимальный тир достигнут."
+REFERRAL_STATS = "Рефералов: <b>{count}</b>\nЗаработано всего: <b>{earned} B</b>\nКомиссия: <b>{commission}%</b>"
+
+# --- Бонусы: стейкинг ---
+STAKING_HEADER = "<b>СТЕЙКИНГ БАЛАНСА</b>\nОдин активный стейк на аккаунт"
+STAKING_DESCRIPTION = (
+    "Заморозь B на срок и получи надбавку сверху. Забрать раньше срока нельзя. "
+    "Минимум {min_amount} B."
+)
+STAKING_TIER_LABEL = "{label} — +{bonus}% ({days} дней)"
+STAKING_ASK_AMOUNT = "Сколько заморозить? Минимум {min_amount} B, доступно {balance} B."
+STAKING_AMOUNT_INVALID = "Введите целое число от {min_amount} до твоего баланса ({balance} B)."
+STAKING_CONFIRM_TEXT = (
+    "Заморозить <b>{amount} B</b> на {days} дней (+{bonus}%)?\n"
+    "К получению по окончании срока: <b>{payout} B</b>."
+)
+STAKING_ALREADY_ACTIVE = "У тебя уже есть активный стейк — сначала забери его."
+STAKING_STARTED_TEXT = "🔒 Заморожено {amount} B на {days} дней. Готово к получению: {matures_at}."
+STAKING_NO_ACTIVE = "Активного стейка нет."
+STAKING_ACTIVE_INFO = (
+    "Заморожено: <b>{amount} B</b>\nСрок: {days} дней (+{bonus}%)\n"
+    "Готово к получению: {matures_at}\nК выплате: <b>{payout} B</b>"
+)
+STAKING_NOT_MATURED_ALERT = "Ещё рано — заберёшь после {matures_at}."
+STAKING_CLAIMED_TEXT = "✅ Стейк завершён! Начислено <b>{payout} B</b> ({amount} B тело + {bonus} B бонус)."
+STAKING_MY_STATS = (
+    "<b>МОЙ СТЕЙКИНГ</b>\nЗаморожено за всё время: {total_frozen} B\n"
+    "Заработано сверху: {total_bonus} B\nСтейков завершено: {completed_count}"
+)
+
+# --- Батл ---
+BATTLE_HOME_HEADER = "<b>БАТЛ</b>"
+BATTLE_HOME_DISCLAIMER = (
+    "1×1 против бота-соперника на демо-фишках 🎫: оба открывают один кейс, "
+    "у кого дороже дроп — забирает оба предмета, ничья — возврат входа."
+)
+BATTLE_PICK_CASE_HINT = "Выбери кейс для батла:"
+BATTLE_NO_CASES = "Пока нет ни одного кейса с подтверждённым пулом для батла."
+BATTLE_NOT_ENOUGH_TOKENS = "Недостаточно фишек. Вход {cost} 🎫, у тебя {balance} 🎫."
+BATTLE_RESULT_HEADER = "<b>{case_name}</b> — батл против бота"
+BATTLE_RESULT_PLAYER_LINE = "Ты: {name} — {value} B"
+BATTLE_RESULT_BOT_LINE = "Бот: {name} — {value} B"
+BATTLE_RESULT_WIN = "🎉 <b>Победа!</b> Забираешь оба предмета."
+BATTLE_RESULT_LOSS = "💥 <b>Поражение.</b> Вход потерян."
+BATTLE_RESULT_TIE = "🤝 <b>Ничья.</b> Вход возвращён."
+
+# --- Розыгрыши ---
+GIVEAWAYS_HEADER = "<b>РОЗЫГРЫШИ</b>"
+GIVEAWAYS_EMPTY = "Активных розыгрышей пока нет."
+GIVEAWAY_ROW = "🏆 <b>{title}</b>\nПриз: {prize}\nУчастников: {entries}\nЗавершится: {ends_at}"
+GIVEAWAY_ALREADY_JOINED = "Ты уже участвуешь в этом розыгрыше."
+GIVEAWAY_JOINED = "✅ Ты участвуешь в розыгрыше «{title}»!"
+GIVEAWAY_ALREADY_RESOLVED = "Этот розыгрыш уже завершён."
+GIVEAWAY_WINNER_ANNOUNCEMENT = "🏆 Розыгрыш «{title}» завершён! Победитель: {winner}"
+GIVEAWAY_NO_WINNER_ANNOUNCEMENT = "🏆 Розыгрыш «{title}» завершён — участников не было."
+
+# --- FAQ ---
+FAQ_HEADER = "<b>FAQ</b>"
+FAQ_ENTRIES = [
+    ("Что такое B и 🎫?", "B — внутренний баланс от обменника (реальные предметы/Stars по фиксированному курсу). 🎫 — отдельная демо-валюта игровых разделов (кейсы, апгрейдер, краш, дайсы, батл), не связанная с депозитами."),
+    ("Можно ли вывести B в деньги или предметы?", "Нет, обратного вывода из бота не предусмотрено — только приём пополнений."),
+    ("Как получить 🎫?", "Стартовый демо-баланс при первом /start, плюс кнопка «Пополнить демо-баланс» в разделе кейсов/апгрейдера/краша/дайсов."),
+    ("Как работает депозит предметами?", "Выбираешь предметы в обменнике, указываешь ник, заявку проверяет модератор — после подтверждения B зачисляется на баланс."),
+    ("Что если кейс помечен 🔒?", "Значит пул дропа для него ещё не подтверждён — открытие временно недоступно."),
+]
+

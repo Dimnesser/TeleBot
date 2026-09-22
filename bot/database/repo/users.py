@@ -3,7 +3,7 @@ from __future__ import annotations
 
 import secrets
 
-from sqlalchemy import select
+from sqlalchemy import func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from bot.config import config
@@ -54,3 +54,19 @@ async def add_game_tokens(session: AsyncSession, user: User, amount: int) -> Use
     await session.commit()
     await session.refresh(user)
     return user
+
+
+async def add_balance(session: AsyncSession, user: User, amount: int) -> User:
+    user.balance += amount
+    await session.commit()
+    await session.refresh(user)
+    return user
+
+
+async def get_user_by_id(session: AsyncSession, user_id: int) -> User | None:
+    return await session.get(User, user_id)
+
+
+async def count_referrals(session: AsyncSession, user: User) -> int:
+    result = await session.execute(select(func.count()).select_from(User).where(User.referred_by_id == user.id))
+    return result.scalar_one()
