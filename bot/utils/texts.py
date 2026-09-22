@@ -1,7 +1,7 @@
 """Тексты сообщений бота."""
 from __future__ import annotations
 
-from bot.database.models import DepositCategory
+from bot.database.models import CaseCategory, DepositCategory
 
 WELCOME_TEXT = (
     "👋 Привет, {name}!\n\n"
@@ -95,3 +95,47 @@ STARS_READY_TEXT = (
     "Нажми «Создать счёт в Stars», чтобы оплатить."
 )
 STARS_PAYMENT_SUCCESS = "✅ Оплата получена! Начислено {credited} B. Текущий баланс: {balance} B."
+
+CASES_CATEGORY_TITLES = {
+    CaseCategory.CASES: "КЕЙСЫ",
+    CaseCategory.THEMATIC: "ТЕМАТИЧЕСКИЕ КЕЙСЫ",
+    CaseCategory.ALLIN: "ALL-IN",
+    CaseCategory.PARTNERS: "ПАРТНЁРЫ",
+    CaseCategory.FREE: "БЕСПЛАТНЫЕ КЕЙСЫ",
+}
+
+CASES_HOME_TEXT = (
+    "<b>{title}</b>\n\n"
+    "Демо-баланс: <b>{tokens} 🎫</b>\n"
+    "🔒 — пул предметов кейса пока не подтверждён скриншотами, открытие временно недоступно.\n\n"
+    "Выбери кейс:"
+)
+
+CASE_DETAIL_HEADER = "<b>{name}</b>"
+CASE_DETAIL_PRICE_LINE = "Цена: <b>{price} 🎫</b> за 1 шт · {count} предм. в пуле"
+CASE_DETAIL_PRICE_UNKNOWN_LINE = "Цена уточняется · {count} предм. в пуле"
+CASE_DETAIL_NOTE_LINE = "ℹ️ {note}"
+CASE_DETAIL_NOT_OPENABLE = "🔒 Пул предметов этого кейса пока не подтверждён скриншотами — открытие недоступно."
+CASE_DETAIL_DROP_POOL_HEADER = "<b>ЧТО МОЖЕТ ВЫПАСТЬ</b>"
+CASE_DETAIL_DROP_POOL_PARTIAL = "(известно {known} из {total} предметов пула)"
+CASE_DETAIL_BALANCE_LINE = "Демо-баланс: <b>{tokens} 🎫</b>"
+CASE_DETAIL_TOTAL_COST_LINE = "Стоимость открытия ×{qty}: <b>{cost} 🎫</b>"
+
+CASE_OPEN_NOT_OPENABLE_ALERT = "Пул предметов этого кейса ещё не подтверждён — открытие недоступно."
+CASE_OPEN_NO_PRICE_ALERT = "У этого кейса не задана цена — открытие недоступно."
+CASE_OPEN_NOT_ENOUGH_TOKENS = "Недостаточно демо-фишек. Нужно {cost} 🎫, у тебя {balance} 🎫."
+
+CASE_OPEN_RESULT_HEADER = "🎉 Открыт кейс «{name}» ×{qty}:"
+CASE_OPEN_RESULT_LINE = "• {name} — {value} B"
+CASE_OPEN_RESULT_FOOTER = "\nДемо-баланс: <b>{tokens} 🎫</b>"
+
+CASES_TOPUP_TEXT = "🎁 Начислено {amount} 🎫 демо-баланса. Текущий демо-баланс: {tokens} 🎫."
+
+CASES_INVENTORY_HEADER = "<b>🎒 Твой инвентарь (последние {limit})</b>"
+CASES_INVENTORY_EMPTY = "Пока пусто — открой кейс, чтобы что-то тут появилось."
+CASES_INVENTORY_LINE = "• {item_name} ({case_name}) — {value} B"
+
+CASES_DEMO_DISCLAIMER = (
+    "Кейсы работают на демо-фишках 🎫 — они не покупаются за деньги/предметы и не выводятся, "
+    "это отдельная песочница для проверки механики, не связанная с балансом B из обменника."
+)

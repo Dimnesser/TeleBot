@@ -4,6 +4,7 @@ from __future__ import annotations
 from aiogram import Router
 
 from bot.handlers import menu, start
+from bot.handlers.cases import catalog as cases_catalog
 from bot.handlers.deposit import admin as deposit_admin
 from bot.handlers.deposit import catalog as deposit_catalog
 from bot.handlers.deposit import stars as deposit_stars
@@ -14,4 +15,5 @@ routers: list[Router] = [
     deposit_catalog.router,
     deposit_stars.router,
     deposit_admin.router,
+    cases_catalog.router,
 ]

@@ -60,3 +60,30 @@ class StarsSkipPromoCB(CallbackData, prefix="stars_skip"):
 
 class StarsCreateInvoiceCB(CallbackData, prefix="stars_inv"):
     pass
+
+
+class CasesCategoryCB(CallbackData, prefix="ccat"):
+    category: str
+    page: int = 0
+
+
+class CaseOpenViewCB(CallbackData, prefix="cview"):
+    case_id: int
+
+
+class CaseQtySelectCB(CallbackData, prefix="cqty"):
+    case_id: int
+    qty: int
+
+
+class CaseConfirmOpenCB(CallbackData, prefix="copen"):
+    case_id: int
+    qty: int
+
+
+class CasesTopUpCB(CallbackData, prefix="ctopup"):
+    pass
+
+
+class CasesInventoryCB(CallbackData, prefix="cinv"):
+    pass

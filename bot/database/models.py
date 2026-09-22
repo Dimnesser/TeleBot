@@ -34,6 +34,11 @@ class User(Base):
     username: Mapped[str | None] = mapped_column(String(64), nullable=True)
     first_name: Mapped[str | None] = mapped_column(String(128), nullable=True)
     balance: Mapped[int] = mapped_column(Integer, default=0)
+    # Отдельная демо-валюта для игровых разделов со случайным исходом (кейсы,
+    # апгрейдер, краш, дайсы) — НЕ связана с депозитами/выводом, пополняется
+    # только через демо-кран, чтобы игровые механики не были обёрткой над
+    # реальными деньгами/предметами из обменника.
+    game_tokens: Mapped[int] = mapped_column(Integer, default=0)
     referral_code: Mapped[str] = mapped_column(String(16), unique=True)
     referred_by_id: Mapped[int | None] = mapped_column(ForeignKey("users.id"), nullable=True)
     created_at: Mapped[datetime] = mapped_column(DateTime, server_default=func.now())
@@ -71,6 +76,72 @@ class DepositRequest(Base):
     resolved_at: Mapped[datetime | None] = mapped_column(DateTime, nullable=True)
 
     user: Mapped["User"] = relationship()
+
+
+class CaseCategory(str, enum.Enum):
+    CASES = "cases"
+    THEMATIC = "thematic"
+    ALLIN = "allin"
+    PARTNERS = "partners"
+    FREE = "free"
+
+
+class Case(Base):
+    """Кейс из каталога.
+
+    [ПОДТВЕРЖДЕНО СКРИНШОТОМ] category/name/price_tokens/item_count — из
+    списков «КЕЙСЫ», «ТЕМАТИЧЕСКИЕ КЕЙСЫ», «ALL-IN», «ПАРТНЕРЫ», «БЕСПЛАТНЫЕ
+    КЕЙСЫ». Цена переведена в демо-валюту (🎫) один-в-один по числу, которое
+    было на скриншоте у B или 🎫 — сама единица измерения намеренно заменена
+    на демо-фишки (см. комментарий у User.game_tokens).
+    price_tokens может быть None, если цена на скриншоте не читается
+    (обрезана) — такой кейс просто нельзя открыть, пока это не уточнено.
+    is_openable=True только если набор предметов подтверждён скриншотом
+    «Что может выпасть» хотя бы частично.
+    """
+
+    __tablename__ = "cases"
+
+    id: Mapped[int] = mapped_column(primary_key=True)
+    category: Mapped[CaseCategory] = mapped_column(SAEnum(CaseCategory))
+    code: Mapped[str] = mapped_column(String(64), unique=True)
+    name: Mapped[str] = mapped_column(String(128))
+    price_tokens: Mapped[int | None] = mapped_column(Integer, nullable=True)
+    item_count_label: Mapped[int | None] = mapped_column(Integer, nullable=True)
+    note: Mapped[str | None] = mapped_column(String(256), nullable=True)
+    is_openable: Mapped[bool] = mapped_column(default=False)
+    sort_order: Mapped[int] = mapped_column(Integer, default=0)
+
+
+class CaseItem(Base):
+    """Один возможный дроп из кейса, со скриншота «Что может выпасть».
+
+    [ЛОГИЧЕСКИ ПРЕДПОЛОЖЕНО] Проценты выпадения на скриншотах не показаны —
+    вес рассчитывается из value (чем дороже предмет, тем он реже), формула в
+    bot/services/cases_service.py помечена как предположение.
+    """
+
+    __tablename__ = "case_items"
+
+    id: Mapped[int] = mapped_column(primary_key=True)
+    case_id: Mapped[int] = mapped_column(ForeignKey("cases.id"))
+    name: Mapped[str] = mapped_column(String(128))
+    value: Mapped[int] = mapped_column(Integer)
+    sort_order: Mapped[int] = mapped_column(Integer, default=0)
+
+
+class InventoryItem(Base):
+    """Предмет, выпавший пользователю из кейса (коллекционная запись, не валюта)."""
+
+    __tablename__ = "inventory_items"
+
+    id: Mapped[int] = mapped_column(primary_key=True)
+    user_id: Mapped[int] = mapped_column(ForeignKey("users.id"))
+    case_id: Mapped[int | None] = mapped_column(ForeignKey("cases.id"), nullable=True)
+    case_name: Mapped[str] = mapped_column(String(128))
+    item_name: Mapped[str] = mapped_column(String(128))
+    value: Mapped[int] = mapped_column(Integer)
+    obtained_at: Mapped[datetime] = mapped_column(DateTime, server_default=func.now())
 
 
 class StarsDeposit(Base):

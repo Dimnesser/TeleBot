@@ -6,7 +6,9 @@ from aiogram.fsm.context import FSMContext
 from aiogram.types import CallbackQuery
 
 from bot.database.engine import async_session
+from bot.database.models import CaseCategory
 from bot.database.repo.users import get_user_by_tg_id
+from bot.handlers.cases.catalog import open_cases_home
 from bot.handlers.deposit.catalog import DEFAULT_CATALOG_STATE, open_catalog
 from bot.keyboards.callbacks import MainMenuCB
 from bot.keyboards.main_menu import main_menu_keyboard
@@ -22,6 +24,10 @@ async def handle_menu(callback: CallbackQuery, callback_data: MainMenuCB, state:
     if section == "deposit":
         await state.set_data(dict(DEFAULT_CATALOG_STATE))
         await open_catalog(callback, state, category="brainrot")
+        return
+
+    if section == "cases":
+        await open_cases_home(callback, state, category=CaseCategory.CASES, page=0)
         return
 
     if section == "home":
