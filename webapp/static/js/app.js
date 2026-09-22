@@ -94,14 +94,22 @@ function prestigeTile(brainrot, sizeClass = '') {
   const rarity = brainrot.rarity || 'common';
   const rc = brainrot.rarity_color || '#8a93a8';
   const rca = brainrot.rarity_color_accent || '#5c6478';
-  const glyph = glyphFor(brainrot.name);
   const mono = monogramFor(brainrot.name);
   const imgUrl = brainrot.image_url || `/static/assets/brainrots/${brainrot.slug || ''}.png`;
+  // Ручные SVG-иллюстрации для персонажей из подтверждённых скриншотом
+  // дроп-пулов «Драгон»/«Тако» (см. webapp/static/js/character-art.js) —
+  // единственный источник реальной уникальной графики, доступный без сети
+  // и без Figma (оба варианта скачивания настоящих рендеров недоступны в
+  // этом окружении, см. README в webapp/static/assets/).
+  const customArt = window.CHARACTER_ART && window.CHARACTER_ART[brainrot.name];
+  const artOrGlyph = customArt
+    ? `<div class="p-tile-art">${customArt}</div>`
+    : `<span class="p-tile-glyph">${glyphFor(brainrot.name)}</span>`;
   return `
-    <div class="p-tile r-${rarity} ${sizeClass}" style="--rc:${rc};--rca:${rca}">
+    <div class="p-tile r-${rarity} ${sizeClass} ${customArt ? 'has-art' : ''}" style="--rc:${rc};--rca:${rca}">
       <div class="p-tile-facets"></div>
       <span class="p-tile-mono">${escapeHtml(mono)}</span>
-      <span class="p-tile-glyph">${glyph}</span>
+      ${artOrGlyph}
       <img src="${imgUrl}" alt="" loading="lazy" onerror="this.remove()" onload="this.parentElement.classList.add('has-photo')" />
     </div>`;
 }
