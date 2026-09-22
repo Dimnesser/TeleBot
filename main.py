@@ -4,7 +4,11 @@ from __future__ import annotations
 import asyncio
 import logging
 
-from bot.app import main
+from bot.env_loader import load_dotenv
+
+load_dotenv()  # должно отработать раньше первого импорта bot.config
+
+from bot.app import main  # noqa: E402 — сознательно после load_dotenv()
 
 if __name__ == "__main__":
     try:
