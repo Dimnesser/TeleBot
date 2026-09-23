@@ -204,9 +204,9 @@ html, body {
   transition: transform 0.2s ease; line-height: 1;
 }
 .p-tile:active .p-tile-glyph { transform: scale(0.88) rotate(-4deg); }
-.p-tile img { position: absolute; inset: 0; width: 100%; height: 100%; object-fit: cover; z-index: 3; opacity: 0; transition: opacity 0.25s ease; }
+.p-tile img { position: absolute; inset: 4%; width: 92%; height: 92%; object-fit: contain; z-index: 3; opacity: 0; transition: opacity 0.25s ease; }
 .p-tile.has-photo img { opacity: 1; }
-.p-tile.has-photo .p-tile-glyph, .p-tile.has-photo .p-tile-facets { opacity: 0; }
+.p-tile.has-photo .p-tile-glyph, .p-tile.has-photo .p-tile-facets, .p-tile.has-photo .p-tile-art { opacity: 0; }
 .p-tile.r-rare, .p-tile.r-epic, .p-tile.r-legendary { box-shadow: 0 0 0 1px color-mix(in srgb, var(--rc) 28%, transparent), 0 6px 16px -6px color-mix(in srgb, var(--rc) 55%, transparent); }
 .p-tile.r-mythic, .p-tile.r-secret, .p-tile.r-og {
   box-shadow: 0 0 0 1px color-mix(in srgb, var(--rc) 40%, transparent), 0 0 22px -2px color-mix(in srgb, var(--rc) 85%, transparent);
@@ -246,6 +246,12 @@ html, body {
 .case-card.locked { opacity: 0.5; }
 .case-art { height: 96px; font-size: 40px; position: relative; z-index: 1; }
 .case-art .p-tile { width: 100%; height: 100%; }
+.case-hero-wrap { position: relative; width: 100%; height: 100%; }
+.case-hero-wrap .p-tile { width: 100%; height: 100%; }
+.case-hero-img {
+  position: absolute; inset: 0; width: 100%; height: 100%; object-fit: contain;
+  z-index: 4; filter: drop-shadow(0 4px 10px rgba(0,0,0,0.5));
+}
 .case-name { font-weight: 800; font-size: 14px; line-height: 1.25; position: relative; z-index: 1; }
 .case-meta { display: flex; align-items: center; justify-content: space-between; font-size: 12px; color: var(--text-dim); position: relative; z-index: 1; }
 .case-price { color: var(--accent-gold); font-weight: 800; font-size: 14px; }

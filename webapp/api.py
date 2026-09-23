@@ -59,6 +59,7 @@ def _case_json(case: Case) -> dict:
         "is_openable": case.is_openable,
         "top_item_name": case.top_item_name,
         "top_item_slug": slugify(case.top_item_name) if case.top_item_name else None,
+        "case_image_url": f"/static/assets/cases/{case.code}.png",
         "best_rarity": case.best_rarity,
         "best_rarity_label": RARITY_LABEL_RU.get(Rarity(case.best_rarity), "?") if case.best_rarity else None,
         "best_rarity_color": color[0],

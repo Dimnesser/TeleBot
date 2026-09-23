@@ -114,6 +114,24 @@ function prestigeTile(brainrot, sizeClass = '') {
     </div>`;
 }
 
+/* Иконка САМОГО КЕЙСА (сундук) — отдельная сущность от арта персонажа
+ * внутри него: пользователь прислал референс с уникальным сундуком под
+ * тему каждого кейса (см. webapp/static/assets/cases/). Для 8 кейсов,
+ * чьи сундуки реально вырезаны из присланных скриншотов, картинка
+ * подхватится по тому же onerror/onload-паттерну, что и у prestigeTile;
+ * для остальных — img не найдётся (404), останется только запасной
+ * prestigeTile с артом топового персонажа, как было раньше. */
+function caseHeroArt(c, sizeClass = '') {
+  const fallback = prestigeTile(
+    { name: c.top_item_name || c.name, rarity: c.best_rarity || 'common', rarity_color: c.best_rarity_color, rarity_color_accent: c.best_rarity_color_accent, slug: c.top_item_slug || '' },
+    sizeClass
+  );
+  return `<div class="case-hero-wrap ${sizeClass}">
+    ${fallback}
+    <img class="case-hero-img" src="${c.case_image_url}" alt="" loading="lazy" onerror="this.remove()" />
+  </div>`;
+}
+
 function rarityBadge(brainrot) {
   const rc = brainrot.rarity_color || '#8a93a8';
   return `<span class="rarity-badge" style="--rc:${rc}">${escapeHtml(brainrot.rarity_label || '?')}</span>`;
@@ -295,21 +313,10 @@ async function renderCasesScreen(root, params = {}) {
   const cards = data.cases.map((c, idx) => {
     const price = c.price_tokens !== null ? `${c.price_tokens} 🎫` : 'по условию';
     const count = c.item_count_label !== null ? `${c.item_count_label} шт.` : '? шт.';
-    // Иконка карточки — арт САМОГО ЦЕННОГО предмета из дроп-пула (top_item_name),
-    // а не хэш от имени кейса: имя кейса («Драгон») не персонаж и не совпадает
-    // ни с одним ключом в CHARACTER_ART, из-за чего раньше подставлялась
-    // случайная не по теме эмодзи (напр. 🐢 для кейса «Драгон»).
-    const caseAsBrainrot = {
-      name: c.top_item_name || c.name,
-      rarity: c.best_rarity || 'common',
-      rarity_color: c.best_rarity_color,
-      rarity_color_accent: c.best_rarity_color_accent,
-      slug: c.top_item_slug || 'case-' + c.id,
-    };
     return `
       <button class="case-card fade-in-up ${c.is_openable ? '' : 'locked'}" style="${caseCardStyle(c)};animation-delay:${Math.min(idx * 35, 350)}ms" data-case-id="${c.id}">
         ${c.is_openable ? '' : '<span class="lock-badge">🔒</span>'}
-        <div class="case-art">${prestigeTile(caseAsBrainrot)}</div>
+        <div class="case-art">${caseHeroArt(c)}</div>
         <div class="case-name">${escapeHtml(c.name)}</div>
         ${c.best_rarity_label ? `<span class="rarity-badge" style="--rc:${c.best_rarity_color}">до ${escapeHtml(c.best_rarity_label)}</span>` : ''}
         <div class="case-meta"><span>${count}</span><span class="case-price">${price}</span></div>
@@ -387,16 +394,11 @@ function renderCaseDetailModal(c, qty) {
     </div>`).join('') || '<div class="empty-state">Дроп-пул этого кейса пока не подтверждён.</div>';
   const totalCost = c.price_tokens !== null ? c.price_tokens * qty : null;
 
-  // Иконка-герой — арт самого ценного предмета дроп-пула (items уже
-  // отсортированы по value desc выше), а не хэш от имени кейса — см.
-  // renderCasesScreen для того же исправления на карточках главного экрана.
-  const heroBrainrot = items[0]
-    ? items[0]
-    : { name: c.top_item_name || c.name, rarity: c.best_rarity, rarity_color: c.best_rarity_color, rarity_color_accent: c.best_rarity_color_accent, slug: '' };
   const overlay = openModal(`
     <button class="modal-close" onclick="closeModal()">✕</button>
-    <div style="display:flex;justify-content:center">${prestigeTile(heroBrainrot, '')}</div>
-    <style>#active-modal .p-tile:first-of-type{width:120px;height:120px;font-size:44px;margin-bottom:12px}</style>
+    <div style="display:flex;justify-content:center">${caseHeroArt(c, '')}</div>
+    <style>#active-modal .p-tile:first-of-type{width:120px;height:120px;font-size:44px;margin-bottom:12px}
+    #active-modal .case-hero-wrap{width:120px;height:120px;margin-bottom:12px}</style>
     <h2 style="margin:6px 0 4px;text-align:center">${escapeHtml(c.name)}</h2>
     <div class="muted" style="text-align:center">${price} · ${c.item_count_label ?? '?'} предм. ${c.best_rarity_label ? `· до <span style="color:${c.best_rarity_color}">${escapeHtml(c.best_rarity_label)}</span>` : ''}</div>
     ${c.note ? `<div class="muted" style="margin-top:6px;text-align:center">${escapeHtml(c.note)}</div>` : ''}
