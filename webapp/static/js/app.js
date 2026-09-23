@@ -234,8 +234,22 @@ const SCREENS = {
   inventory: renderInventoryScreen,
 };
 
+// navigate() рендерит экран сама, с полными params (напр. category кейсов).
+// location.hash при этом меняется и триггерит свой hashchange-листенер ниже
+// — тот рендерит ТОТ ЖЕ экран, но без params (там их неоткуда взять — в
+// hash пишется только имя экрана). Гонка двух async-рендеров, и чей fetch
+// вернётся позже — тот и остаётся на экране: переключение вкладок категорий
+// на кейсах visually откатывалось обратно на «Кейсы» почти в 100% случаев.
+// Помечаем свой собственный переход, чтобы слушатель его не задваивал.
+let ignoreNextHashChange = false;
+
 function navigate(screen, params = {}) {
+  ignoreNextHashChange = true;
   location.hash = '#' + screen;
+  // Если hash не изменился (напр. клик по вкладке текущего экрана),
+  // hashchange не срослась бы вообще — флаг иначе завис бы true навсегда
+  // и проглотил бы следующий настоящий внешний переход хэша.
+  setTimeout(() => { ignoreNextHashChange = false; }, 0);
   renderScreen(screen, params);
 }
 
@@ -256,6 +270,10 @@ async function renderScreen(screen, params = {}) {
 }
 
 window.addEventListener('hashchange', () => {
+  if (ignoreNextHashChange) {
+    ignoreNextHashChange = false;
+    return;
+  }
   const screen = (location.hash || '#home').slice(1);
   renderScreen(screen);
 });
