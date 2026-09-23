@@ -27,7 +27,7 @@ from dataclasses import dataclass, field
 from bot.data.brainrot_roster import RARITY_DROP_WEIGHT, RARITY_ORDER, ROSTER, ROSTER_BY_RARITY, infer_rarity
 from bot.database.models import CaseCategory
 
-CASES_CONTENT_VERSION = "4-steal-a-brainrot-roster-best-rarity"
+CASES_CONTENT_VERSION = "5-top-item-name"
 
 
 @dataclass(frozen=True)

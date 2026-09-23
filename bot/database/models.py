@@ -124,6 +124,11 @@ class Case(Base):
     # карточка кейса в общем списке могла подсветиться цветом старшего
     # возможного дропа без N+1 запроса за items на каждую карточку.
     best_rarity: Mapped[str | None] = mapped_column(String(16), nullable=True)
+    # Имя самого ценного предмета из дроп-пула — карточка кейса и его модалка
+    # показывают иконку/арт ЭТОГО персонажа, а не хэш от имени самого кейса
+    # (имя кейса вроде «Драгон» не персонаж и не совпадает ни с одним ключом
+    # в CHARACTER_ART, из-за чего раньше подставлялась случайная эмодзи-заглушка).
+    top_item_name: Mapped[str | None] = mapped_column(String(128), nullable=True)
     sort_order: Mapped[int] = mapped_column(Integer, default=0)
 
 

@@ -277,7 +277,17 @@ async function renderCasesScreen(root, params = {}) {
   const cards = data.cases.map((c, idx) => {
     const price = c.price_tokens !== null ? `${c.price_tokens} 🎫` : 'по условию';
     const count = c.item_count_label !== null ? `${c.item_count_label} шт.` : '? шт.';
-    const caseAsBrainrot = { name: c.name, rarity: c.best_rarity || 'common', rarity_color: c.best_rarity_color, rarity_color_accent: c.best_rarity_color_accent, slug: 'case-' + c.id };
+    // Иконка карточки — арт САМОГО ЦЕННОГО предмета из дроп-пула (top_item_name),
+    // а не хэш от имени кейса: имя кейса («Драгон») не персонаж и не совпадает
+    // ни с одним ключом в CHARACTER_ART, из-за чего раньше подставлялась
+    // случайная не по теме эмодзи (напр. 🐢 для кейса «Драгон»).
+    const caseAsBrainrot = {
+      name: c.top_item_name || c.name,
+      rarity: c.best_rarity || 'common',
+      rarity_color: c.best_rarity_color,
+      rarity_color_accent: c.best_rarity_color_accent,
+      slug: c.top_item_slug || 'case-' + c.id,
+    };
     return `
       <button class="case-card fade-in-up ${c.is_openable ? '' : 'locked'}" style="${caseCardStyle(c)};animation-delay:${Math.min(idx * 35, 350)}ms" data-case-id="${c.id}">
         ${c.is_openable ? '' : '<span class="lock-badge">🔒</span>'}
@@ -359,9 +369,15 @@ function renderCaseDetailModal(c, qty) {
     </div>`).join('') || '<div class="empty-state">Дроп-пул этого кейса пока не подтверждён.</div>';
   const totalCost = c.price_tokens !== null ? c.price_tokens * qty : null;
 
+  // Иконка-герой — арт самого ценного предмета дроп-пула (items уже
+  // отсортированы по value desc выше), а не хэш от имени кейса — см.
+  // renderCasesScreen для того же исправления на карточках главного экрана.
+  const heroBrainrot = items[0]
+    ? items[0]
+    : { name: c.top_item_name || c.name, rarity: c.best_rarity, rarity_color: c.best_rarity_color, rarity_color_accent: c.best_rarity_color_accent, slug: '' };
   const overlay = openModal(`
     <button class="modal-close" onclick="closeModal()">✕</button>
-    <div style="display:flex;justify-content:center">${prestigeTile({ name: c.name, rarity: c.best_rarity, rarity_color: c.best_rarity_color, rarity_color_accent: c.best_rarity_color_accent, slug: '' }, '')}</div>
+    <div style="display:flex;justify-content:center">${prestigeTile(heroBrainrot, '')}</div>
     <style>#active-modal .p-tile:first-of-type{width:120px;height:120px;font-size:44px;margin-bottom:12px}</style>
     <h2 style="margin:6px 0 4px;text-align:center">${escapeHtml(c.name)}</h2>
     <div class="muted" style="text-align:center">${price} · ${c.item_count_label ?? '?'} предм. ${c.best_rarity_label ? `· до <span style="color:${c.best_rarity_color}">${escapeHtml(c.best_rarity_label)}</span>` : ''}</div>

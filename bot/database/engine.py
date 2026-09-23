@@ -50,6 +50,7 @@ async def _migrate_add_missing_columns() -> None:
         ("case_items", "rarity", "VARCHAR(16)"),
         ("inventory_items", "rarity", "VARCHAR(16)"),
         ("cases", "best_rarity", "VARCHAR(16)"),
+        ("cases", "top_item_name", "VARCHAR(128)"),
     ]
     async with engine.begin() as conn:
         for table, column, coltype in columns_to_add:
@@ -100,11 +101,13 @@ async def _seed_cases_reconcile() -> None:
 
         for seed_case in SEED_CASES:
             best_rarity = None
+            top_item_name = None
             if seed_case.items:
                 best_index = max(
                     (RARITY_ORDER.index(Rarity(i.rarity)) for i in seed_case.items if i.rarity), default=None
                 )
                 best_rarity = RARITY_ORDER[best_index].value if best_index is not None else None
+                top_item_name = max(seed_case.items, key=lambda i: i.value).name
             case = Case(
                 category=seed_case.category,
                 code=seed_case.code,
@@ -114,6 +117,7 @@ async def _seed_cases_reconcile() -> None:
                 note=seed_case.note,
                 is_openable=seed_case.is_openable,
                 best_rarity=best_rarity,
+                top_item_name=top_item_name,
                 sort_order=seed_case.sort_order,
             )
             session.add(case)
