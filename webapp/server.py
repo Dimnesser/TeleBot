@@ -6,6 +6,7 @@ bot/app.py) — оба используют один и тот же async_sessio
 from __future__ import annotations
 
 import logging
+import subprocess
 from pathlib import Path
 
 from aiogram import Bot
@@ -20,6 +21,28 @@ from webapp.auth import InitDataError, WebAppUser, validate_init_data
 logger = logging.getLogger(__name__)
 
 STATIC_DIR = Path(__file__).parent / "static"
+
+
+def _build_version() -> str:
+    """Версия для cache-busting query-параметров у статики.
+
+    Telegram WebView кэширует HTML/JS/CSS мини-аппа по URL очень агрессивно
+    (сильнее обычного мобильного браузера) — без версии в URL пользователь
+    после редеплоя продолжает видеть старый JS/CSS, пока сам не почистит
+    кэш Telegram. git-хэш меняется на каждый коммит, что и нужно."""
+    try:
+        return subprocess.run(
+            ["git", "rev-parse", "--short", "HEAD"],
+            cwd=Path(__file__).resolve().parent.parent,
+            capture_output=True,
+            text=True,
+            timeout=5,
+        ).stdout.strip() or "0"
+    except Exception:
+        return "0"
+
+
+BUILD_VERSION = _build_version()
 
 
 def _extract_init_data(request: web.Request) -> str:
@@ -65,8 +88,22 @@ def create_app(bot: Bot) -> web.Application:
     app.add_routes(routes)
     app.router.add_static("/static/", STATIC_DIR, show_index=False)
 
-    async def index(_request: web.Request) -> web.FileResponse:
-        return web.FileResponse(STATIC_DIR / "index.html")
+    index_html = (STATIC_DIR / "index.html").read_text(encoding="utf-8")
+    index_html = index_html.replace(
+        'href="/static/css/app.css"', f'href="/static/css/app.css?v={BUILD_VERSION}"'
+    ).replace(
+        'src="/static/js/character-art.js"',
+        f'src="/static/js/character-art.js?v={BUILD_VERSION}"',
+    ).replace(
+        'src="/static/js/app.js"', f'src="/static/js/app.js?v={BUILD_VERSION}"'
+    )
+
+    async def index(_request: web.Request) -> web.Response:
+        return web.Response(
+            text=index_html,
+            content_type="text/html",
+            headers={"Cache-Control": "no-store, must-revalidate"},
+        )
 
     app.router.add_get("/", index)
     app.router.add_get("/webapp", index)
