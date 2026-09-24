@@ -12,6 +12,7 @@ from bot.database.repo import deposit_items as items_repo
 from bot.database.repo import deposit_requests as requests_repo
 from bot.keyboards.callbacks import DepositAdminCB
 from bot.services.notify import notify_admins_new_request
+from bot.services.partner_service import deposit_bonus
 from bot.services.referral_service import credit_referral_commission
 from bot.utils.texts import (
     ADMIN_REQUEST_ALREADY_RESOLVED,
@@ -41,11 +42,12 @@ async def handle_admin_decision(callback: CallbackQuery, callback_data: DepositA
         user = await session.get(User, request.user_id)
 
         if callback_data.action == "approve":
-            user.balance += request.total_b
+            bonus = deposit_bonus(user, request.total_b)  # бонус от партнёрского кода
+            user.balance += request.total_b + bonus
             await requests_repo.resolve_request(session, request, DepositRequestStatus.APPROVED, callback.from_user.id)
             await credit_referral_commission(session, user, request.total_b)
             admin_text = ADMIN_REQUEST_APPROVED.format(request_id=request.id)
-            user_text = USER_DEPOSIT_APPROVED.format(total=request.total_b, balance=user.balance)
+            user_text = USER_DEPOSIT_APPROVED.format(total=request.total_b + bonus, balance=user.balance)
         else:
             await requests_repo.resolve_request(session, request, DepositRequestStatus.REJECTED, callback.from_user.id)
             admin_text = ADMIN_REQUEST_REJECTED.format(request_id=request.id)

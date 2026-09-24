@@ -44,7 +44,7 @@ from bot.database.repo import quests as quests_repo
 from bot.database.repo import staking as staking_repo
 from bot.database.repo.known_items import list_known_items
 from bot.database.repo.users import add_balance, add_game_tokens, count_referrals, find_user
-from bot.services import quest_service
+from bot.services import partner_service, quest_service
 from bot.services.battle_service import run_battle
 from bot.services.cases_service import REEL_REVEAL_INDEX, build_reel, draw_items, total_cost
 from bot.services.dice_service import COLORS, MATCH_PAYOUT_TABLE, resolve_roll
@@ -194,6 +194,8 @@ async def _user_json(request: web.Request) -> dict:
         "is_admin": is_admin(user.tg_id),
         "case_credits": await rewards_repo.case_credits(session, user),
         "partner_percent": user.partner_percent,
+        "deposit_bonus_percent": user.deposit_bonus_percent,
+        "partner_code": pc.code if (pc := await partner_service.get_partner_code_of(session, user)) and pc.is_active else None,
         "tg_id": user.tg_id,
         "username": user.username,
         "first_name": user.first_name,
@@ -283,6 +285,14 @@ async def get_cases(request: web.Request) -> web.Response:
     return web.json_response({"collections": collections})
 
 
+@routes.get("/api/cases/by-code/{code}")
+async def get_case_by_code(request: web.Request) -> web.Response:
+    case = await cases_repo.get_case_by_code(request["session"], request.match_info["code"])
+    if case is None:
+        return web.json_response({"error": "not_found"}, status=404)
+    return web.json_response(_case_json(case))
+
+
 @routes.get("/api/cases/{case_id}")
 async def get_case_detail(request: web.Request) -> web.Response:
     session = request["session"]
@@ -317,6 +327,8 @@ async def post_case_open(request: web.Request) -> web.Response:
     free = bool(body.get("use_credits")) and await rewards_repo.use_case_credits(session, user, case.code, qty)
     if free:
         cost = 0
+    elif case.category == CaseCategory.REFERRAL:
+        return web.json_response({"error": "referral_only", "message": "Этот кейс только выдаётся"}, status=400)
     elif user.game_tokens < cost:
         return web.json_response({"error": "not_enough_tokens", "cost": cost, "balance": user.game_tokens}, status=400)
 
@@ -561,7 +573,7 @@ async def post_dice_roll(request: web.Request) -> web.Response:
 async def get_battle_cases(request: web.Request) -> web.Response:
     session = request["session"]
     openable = []
-    for category in CaseCategory:
+    for category in (CaseCategory.STARTER, CaseCategory.SIGNATURE, CaseCategory.APEX):
         cases = await cases_repo.list_cases(session, category)
         openable.extend(c for c in cases if c.is_openable and c.price_tokens is not None)
     return web.json_response([_case_json(c) for c in openable])
@@ -815,9 +827,28 @@ async def post_promo_redeem(request: web.Request) -> web.Response:
     try:
         promo = await rewards_repo.redeem_promo(session, user, code)
     except rewards_repo.PromoError as err:
-        return web.json_response({"error": err.code, "message": PROMO_ERRORS[err.code]}, status=400)
+        if err.code != "not_found":
+            return web.json_response({"error": err.code, "message": PROMO_ERRORS[err.code]}, status=400)
+        # Не промокод — возможно, личный код партнёра.
+        try:
+            pc = await partner_service.apply_partner_code(session, user, code)
+        except partner_service.PartnerError as perr:
+            if perr.code == "not_found":
+                return web.json_response({"error": "not_found", "message": PROMO_ERRORS["not_found"]}, status=400)
+            return web.json_response({"error": perr.code, "message": PARTNER_ERRORS[perr.code]}, status=400)
+        await session.refresh(user)
+        return web.json_response({
+            "partner": {"deposit_bonus_percent": pc.deposit_bonus_percent, "case_code": pc.case_code, "case_amount": pc.case_amount},
+            "me": await _user_json(request),
+        })
     await session.refresh(user)
     return web.json_response({"promo": _promo_json(promo), "me": await _user_json(request)})
+
+
+PARTNER_ERRORS = {
+    "own_code": "Это твой собственный партнёрский код",
+    "already_partner_ref": "Партнёрский код уже активирован",
+}
 
 
 # ------------------------------------------------------------ админ-панель
@@ -945,10 +976,87 @@ async def post_admin_promo(request: web.Request) -> web.Response:
     custom = str(body.get("code") or "").strip().upper() or None
     if custom and (len(custom) > 32 or not custom.replace("_", "").replace("-", "").isalnum()):
         return web.json_response({"error": "bad_code", "message": "Код: буквы/цифры, до 32 символов"}, status=400)
-    if custom and await rewards_repo.get_promo(session, custom):
+    if custom and (await rewards_repo.get_promo(session, custom) or await partner_service.get_partner_code(session, custom)):
         return web.json_response({"error": "code_taken", "message": "Такой код уже есть"}, status=400)
     promo = await rewards_repo.create_promo(
         session, kind=kind, amount=amount, max_uses=max_uses, case_code=case_code,
         code=custom, created_by_tg_id=request["user"].tg_id,
     )
     return web.json_response(_promo_json(promo))
+
+
+# -------------------------------------------------------- админ: партнёрки
+
+
+def _partner_code_json(pc, partner) -> dict:
+    return {
+        "code": pc.code,
+        "is_active": pc.is_active,
+        "uses": pc.uses,
+        "deposit_bonus_percent": pc.deposit_bonus_percent,
+        "case_code": pc.case_code,
+        "case_amount": pc.case_amount,
+        "commission_percent": partner.partner_percent,
+        "partner": {"tg_id": partner.tg_id, "username": partner.username, "first_name": partner.first_name},
+    }
+
+
+@routes.get("/api/admin/partners")
+async def get_admin_partners(request: web.Request) -> web.Response:
+    if (denied := _require_admin(request)) is not None:
+        return denied
+    rows = await partner_service.list_partner_codes(request["session"])
+    return web.json_response([_partner_code_json(pc, u) for pc, u in rows])
+
+
+def _num(value, default=None):
+    try:
+        return float(value)
+    except (TypeError, ValueError):
+        return default
+
+
+@routes.post("/api/admin/partners")
+async def post_admin_partner_grant(request: web.Request) -> web.Response:
+    if (denied := _require_admin(request)) is not None:
+        return denied
+    session = request["session"]
+    body = await request.json()
+    target, err = await _admin_target(request, str(body.get("user", "")))
+    if err is not None:
+        return err
+    commission = _num(body.get("commission_percent"))
+    bonus = _num(body.get("deposit_bonus_percent"), 0)
+    case_amount = int(_num(body.get("case_amount"), 1))
+    case_code = body.get("case_code") or None
+    if commission is None or not 0 < commission <= 50:
+        return web.json_response({"error": "bad_percent", "message": "% партнёра — от 0 до 50"}, status=400)
+    if not 0 <= bonus <= 100:
+        return web.json_response({"error": "bad_bonus", "message": "Бонус к пополнению — от 0 до 100%"}, status=400)
+    if case_code is not None and case_code not in CASE_THEMES:
+        return web.json_response({"error": "bad_case", "message": "Неизвестный кейс"}, status=400)
+    if not 0 <= case_amount <= 100:
+        return web.json_response({"error": "bad_amount", "message": "Кейсов — от 0 до 100"}, status=400)
+    code = str(body.get("code") or "").strip().upper() or None
+    if code:
+        if len(code) > 32 or not code.replace("_", "").replace("-", "").isalnum():
+            return web.json_response({"error": "bad_code", "message": "Код: буквы/цифры, до 32 символов"}, status=400)
+        taken = await partner_service.get_partner_code(session, code)
+        if (taken and taken.user_id != target.id) or await rewards_repo.get_promo(session, code):
+            return web.json_response({"error": "code_taken", "message": "Такой код уже занят"}, status=400)
+    pc = await partner_service.grant_partnership(
+        session, target, commission_percent=commission, deposit_bonus_percent=bonus,
+        case_code=case_code, case_amount=case_amount, code=code,
+    )
+    return web.json_response(_partner_code_json(pc, target))
+
+
+@routes.post("/api/admin/partners/revoke")
+async def post_admin_partner_revoke(request: web.Request) -> web.Response:
+    if (denied := _require_admin(request)) is not None:
+        return denied
+    target, err = await _admin_target(request, str((await request.json()).get("user", "")))
+    if err is not None:
+        return err
+    await partner_service.revoke_partnership(request["session"], target)
+    return web.json_response({"ok": True})

@@ -15,6 +15,7 @@ from bot.database.models import StarsDeposit, User
 from bot.database.repo.users import get_or_create_user
 from bot.keyboards.callbacks import StarsCreateInvoiceCB, StarsSkipPromoCB
 from bot.keyboards.deposit import stars_amount_keyboard, stars_invoice_keyboard, stars_promo_keyboard
+from bot.services.partner_service import deposit_bonus
 from bot.services.referral_service import credit_referral_commission
 from bot.states.deposit import DepositStars
 from bot.utils.texts import (
@@ -122,10 +123,12 @@ async def handle_successful_payment(message: Message, state: FSMContext) -> None
 
         user = await session.get(User, deposit.user_id)
         credited = deposit.stars_amount * config.stars_to_balance_rate
-        user.balance += credited
+        bonus = deposit_bonus(user, credited)  # бонус от партнёрского кода
+        user.balance += credited + bonus
         await session.commit()
         await credit_referral_commission(session, user, credited)
         balance = user.balance
+        credited += bonus
 
     await state.clear()
     await message.answer(STARS_PAYMENT_SUCCESS.format(credited=credited, balance=balance))

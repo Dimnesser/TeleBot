@@ -23,3 +23,8 @@ async def list_case_items(session: AsyncSession, case_id: int) -> list[CaseItem]
         select(CaseItem).where(CaseItem.case_id == case_id).order_by(CaseItem.value.desc())
     )
     return list(result.scalars().all())
+
+
+async def get_case_by_code(session: AsyncSession, code: str) -> Case | None:
+    result = await session.execute(select(Case).where(Case.code == code))
+    return result.scalar_one_or_none()

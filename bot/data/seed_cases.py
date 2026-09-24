@@ -22,7 +22,7 @@ from bot.data.brainrot_roster import ROSTER_BY_NAME
 from bot.database.models import CaseCategory
 from bot.services.cases_service import CASE_WEIGHT_EXPONENT
 
-CASES_CONTENT_VERSION = "10-harder-odds"
+CASES_CONTENT_VERSION = "11-referral-case"
 
 TARGET_RTP = 0.6
 
@@ -179,6 +179,19 @@ SEED_CASES: list[SeedCase] = [
         ),
         ["Antonio", "Griffin", "Love Love Bear", "Arcadragon", "Elefanto Frigo", "Skibidi Toilet",
          "John Pork", "Meowl", "Signore Carapace", "Strawberry Elephant"],
+    ),
+    # ------------------------------------------------------------ РЕФЕРАЛЬНЫЙ
+    # Не продаётся: открывается только бесплатными открытиями, которые
+    # выдаёт партнёрский код (bot.services.partner_service).
+    _case(
+        CaseCategory.REFERRAL, "referral_gift", "Реферальный кейс", 1,
+        CaseTheme(
+            tagline="Подарок от партнёра BrainCore",
+            lore="Выдаётся за активацию партнёрского кода. Внутри — Secret-тир, с шансом на Dragon Cannelloni.",
+            shape="gift", particles="confetti", colors=("#c6ff3d", "#5dffb0", "#07160c"),
+        ),
+        ["Sammyni Fattini", "Spooky and Pumpky", "Cerberus", "Reinito Sleighito", "Los Amigos",
+         "Fortunu and Cashuru", "Foxini Lanternini", "Rosey and Teddy", "Bunny and Eggy", "Dragon Cannelloni"],
     ),
 ]
 

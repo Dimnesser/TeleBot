@@ -863,10 +863,24 @@ async function renderProfileScreen(root) {
       <button class="btn btn-ghost" onclick="navigate('inventory')">🎒 Инвентарь</button>
       <button class="btn btn-primary" onclick="navigate('home')">Открыть кейс</button>
     </div>
+    <div id="my-cases"></div>
+    ${me.partner_code ? `
+      <div class="panel partner-self">
+        <div class="panel-title">Ты партнёр BrainCore</div>
+        <div class="admin-stats"><span>код <b>${escapeHtml(me.partner_code)}</b></span><span>${me.partner_percent}% с пополнений рефералов</span></div>
+        <button class="btn-chip" id="copy-partner-link" style="margin-top:10px;width:100%">Скопировать ссылку</button>
+      </div>` : ''}
+    ${me.deposit_bonus_percent ? `<div class="panel"><div class="panel-title">Бонус к пополнению</div><div class="admin-stats"><span class="hl">+${me.deposit_bonus_percent}% к каждому пополнению</span></div></div>` : ''}
     ${promoCardHtml()}
     ${me.is_admin ? adminPanelHtml() : ''}
   `;
   bindPromoForm(root);
+  renderMyCases(root, me);
+  root.querySelector('#copy-partner-link')?.addEventListener('click', async () => {
+    const base = await api('/api/referral').then((r) => r.link.split('?')[0]).catch(() => 'https://t.me/BrainCorre_bot');
+    const link = `${base}?start=${me.partner_code}`;
+    try { await navigator.clipboard.writeText(link); toast('Ссылка скопирована', 'success'); } catch (_) { toast(link); }
+  });
   if (me.is_admin) bindAdminPanel(root);
 }
 // =================================================================== ПРОМОКОД + АДМИНКА
@@ -893,10 +907,14 @@ function bindPromoForm(root) {
     btn.disabled = true;
     try {
       const res = await api('/api/promo/redeem', { method: 'POST', body: JSON.stringify({ code: input.value }) });
-      const p = res.promo;
-      const what = p.kind === 'tokens' ? `+${fmt(p.amount)} 🎫` : p.kind === 'balance' ? `+${fmt(p.amount)} 🪙` : `🎁 ${p.amount} бесплатн. открытий кейса`;
       haptic.success();
-      toast(`Промокод активирован: ${what}`, 'success');
+      if (res.partner) {
+        toast(`Партнёрский код активирован: 🎁 реферальный кейс ×${res.partner.case_amount} и +${res.partner.deposit_bonus_percent}% к пополнениям`, 'success');
+      } else {
+        const p = res.promo;
+        const what = p.kind === 'tokens' ? `+${fmt(p.amount)} 🎫` : p.kind === 'balance' ? `+${fmt(p.amount)} 🪙` : `🎁 ${p.amount} бесплатн. открытий кейса`;
+        toast(`Промокод активирован: ${what}`, 'success');
+      }
       input.value = '';
       await refreshMe();
       renderProfileScreen(root);
@@ -920,6 +938,18 @@ function adminPanelHtml() {
         <button class="btn-chip" type="submit">Найти</button>
       </form>
       <div id="admin-user"></div>
+
+      <div class="admin-sub">Партнёрки</div>
+      <form class="admin-grid" id="admin-partner" autocomplete="off">
+        <input class="field full" id="p-user" placeholder="Партнёр: @username или ID" />
+        <input class="field" id="p-code" placeholder="Реф-код (необязательно)" maxlength="32" />
+        <input class="field" id="p-commission" type="number" min="0.1" max="50" step="0.1" placeholder="% партнёру" />
+        <input class="field" id="p-bonus" type="number" min="0" max="100" step="0.1" placeholder="Бонус к пополнению %" />
+        <input class="field" id="p-cases" type="number" min="0" max="100" value="1" placeholder="Кейсов" />
+        <select class="field full" id="p-case"></select>
+        <button class="btn-chip" type="submit">Выдать партнёрку</button>
+      </form>
+      <div id="admin-partners" class="promo-list"></div>
 
       <div class="admin-sub">Промокод</div>
       <form class="admin-grid" id="admin-promo" autocomplete="off">
@@ -965,7 +995,6 @@ function adminUserHtml(u) {
         <div class="inline-form"><input class="field" id="g-tokens" type="number" min="1" placeholder="🎫" /><button class="btn-chip" data-grant="tokens">Выдать 🎫</button></div>
         <div class="inline-form"><input class="field" id="g-balance" type="number" min="1" placeholder="🪙 B" /><button class="btn-chip" data-grant="balance">Выдать B</button></div>
         <div class="inline-form"><select class="field" id="g-case">${caseOptions()}</select><input class="field narrow" id="g-case-n" type="number" min="1" value="1" /><button class="btn-chip" data-grant="case">Выдать кейс</button></div>
-        <div class="inline-form"><input class="field" id="g-partner" type="number" min="0.1" max="50" step="0.1" placeholder="% партнёрки" value="${u.partner_percent ?? ''}" /><button class="btn-chip" id="g-partner-set">Партнёрка</button>${u.partner_percent != null ? '<button class="btn-chip ghost" id="g-partner-off">Снять</button>' : ''}</div>
       </div>
     </div>`;
 }
@@ -973,8 +1002,64 @@ function adminUserHtml(u) {
 async function bindAdminPanel(root) {
   const panel = root.querySelector('.admin-panel');
   if (!panel) return;
-  if (!adminCases) adminCases = (await api('/api/cases')).collections.flatMap((col) => col.cases);
+  if (!adminCases) {
+    const [catalog, referral] = await Promise.all([api('/api/cases'), api('/api/cases/by-code/referral_gift').catch(() => null)]);
+    adminCases = [...(referral ? [referral] : []), ...catalog.collections.flatMap((col) => col.cases)];
+  }
   panel.querySelector('#promo-case').innerHTML = caseOptions();
+  panel.querySelector('#p-case').innerHTML = caseOptions();
+  const botLink = await api('/api/referral').then((r) => r.link.split('?')[0]).catch(() => 'https://t.me/BrainCorre_bot');
+
+  async function loadPartners() {
+    const list = await api('/api/admin/partners');
+    const box = panel.querySelector('#admin-partners');
+    box.innerHTML = list.map((pc) => {
+      const who = pc.partner.username ? '@' + pc.partner.username : (pc.partner.first_name || pc.partner.tg_id);
+      const caseName = ((adminCases || []).find((c) => c.code === pc.case_code) || {}).name;
+      return `
+        <div class="partner-row ${pc.is_active ? '' : 'off'}">
+          <div class="partner-head"><code>${escapeHtml(pc.code)}</code><b>${escapeHtml(String(who))}</b><span class="muted">${pc.uses} акт.</span></div>
+          <div class="admin-stats">
+            <span>${pc.commission_percent ?? '—'}% партнёру</span>
+            <span>+${pc.deposit_bonus_percent}% к пополнению</span>
+            ${pc.case_code ? `<span>🎁 ${escapeHtml(caseName || pc.case_code)} ×${pc.case_amount}</span>` : ''}
+            ${pc.is_active ? '' : '<span>снята</span>'}
+          </div>
+          ${pc.is_active ? `<div class="partner-actions">
+            <button class="btn-chip ghost" data-copy="${botLink}?start=${escapeHtml(pc.code)}">Ссылка</button>
+            <button class="btn-chip ghost" data-copy="${escapeHtml(pc.code)}">Код</button>
+            <button class="btn-chip danger" data-revoke="${pc.partner.tg_id}">Снять</button>
+          </div>` : ''}
+        </div>`;
+    }).join('') || '<div class="muted">Партнёров пока нет</div>';
+    box.querySelectorAll('[data-copy]').forEach((b) => b.addEventListener('click', async () => {
+      try { await navigator.clipboard.writeText(b.dataset.copy); toast('Скопировано', 'success'); } catch (_) { toast(b.dataset.copy); }
+    }));
+    box.querySelectorAll('[data-revoke]').forEach((b) => b.addEventListener('click', async () => {
+      try { await api('/api/admin/partners/revoke', { method: 'POST', body: JSON.stringify({ user: b.dataset.revoke }) }); toast('Партнёрка снята', 'success'); loadPartners(); }
+      catch (err) { toast('Ошибка: ' + err.message, 'error'); }
+    }));
+  }
+  loadPartners();
+
+  panel.querySelector('#admin-partner').addEventListener('submit', async (e) => {
+    e.preventDefault();
+    const body = {
+      user: panel.querySelector('#p-user').value,
+      code: panel.querySelector('#p-code').value,
+      commission_percent: panel.querySelector('#p-commission').value,
+      deposit_bonus_percent: panel.querySelector('#p-bonus').value || 0,
+      case_code: panel.querySelector('#p-case').value,
+      case_amount: panel.querySelector('#p-cases').value || 0,
+    };
+    try {
+      const pc = await api('/api/admin/partners', { method: 'POST', body: JSON.stringify(body) });
+      toast(`Партнёрка выдана · код ${pc.code}`, 'success');
+      haptic.success();
+      panel.querySelector('#p-code').value = '';
+      loadPartners();
+    } catch (err) { toast('Ошибка: ' + err.message, 'error'); }
+  });
   let current = null;
 
   const userBox = panel.querySelector('#admin-user');
@@ -992,14 +1077,6 @@ async function bindAdminPanel(root) {
         toast('Выдано', 'success'); haptic.success();
       } catch (err) { toast('Ошибка: ' + err.message, 'error'); }
     }));
-    const setPartner = async (percent) => {
-      try {
-        showUser(await api('/api/admin/partner', { method: 'POST', body: JSON.stringify({ user: String(current.tg_id), percent }) }));
-        toast(percent == null ? 'Партнёрка снята' : `Партнёрка ${percent}%`, 'success');
-      } catch (err) { toast('Ошибка: ' + err.message, 'error'); }
-    };
-    userBox.querySelector('#g-partner-set').addEventListener('click', () => setPartner(userBox.querySelector('#g-partner').value));
-    userBox.querySelector('#g-partner-off')?.addEventListener('click', () => setPartner(null));
   }
 
   panel.querySelector('#admin-find').addEventListener('submit', async (e) => {
@@ -1995,3 +2072,25 @@ window.openCaseStage = openCaseStage;
     document.getElementById('screen').innerHTML = `<div class="empty-state">Не удалось загрузить: ${escapeHtml(err.message)}</div>`;
   }
 })();
+
+
+/** «Мои кейсы»: бесплатные открытия (от промокода, партнёрки, админа). */
+async function renderMyCases(root, me) {
+  const box = root.querySelector('#my-cases');
+  const entries = Object.entries(me.case_credits || {});
+  if (!box || !entries.length) return;
+  const cases = await Promise.all(entries.map(([code]) => api('/api/cases/by-code/' + code).catch(() => null)));
+  box.innerHTML = `
+    <div class="panel">
+      <div class="panel-title">Мои кейсы</div>
+      <div class="my-cases">
+        ${cases.map((c, i) => c ? `
+          <button class="my-case" style="${caseThemeVars(c)}" data-open="${c.id}">
+            ${CaseArt.artifact(c, 'artifact-sm')}
+            <div class="my-case-name">${escapeHtml(c.name)}</div>
+            <span class="my-case-count">×${entries[i][1]}</span>
+          </button>` : '').join('')}
+      </div>
+    </div>`;
+  box.querySelectorAll('[data-open]').forEach((b) => b.addEventListener('click', () => openCaseStage(Number(b.dataset.open))));
+}

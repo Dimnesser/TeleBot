@@ -54,6 +54,9 @@ class User(Base):
     # Партнёр: персональный % реферальной комиссии, выданный админом;
     # перекрывает тир по числу рефералов. None — обычный пользователь.
     partner_percent: Mapped[float | None] = mapped_column(Float, nullable=True)
+    # Бонус % к каждому пополнению — даёт активированный партнёрский код.
+    deposit_bonus_percent: Mapped[float | None] = mapped_column(Float, nullable=True)
+    partner_code_id: Mapped[int | None] = mapped_column(Integer, nullable=True)
     created_at: Mapped[datetime] = mapped_column(DateTime, server_default=func.now())
 
 
@@ -97,6 +100,8 @@ class CaseCategory(str, enum.Enum):
     STARTER = "starter"
     SIGNATURE = "signature"
     APEX = "apex"
+    # Не продаётся: открывается только бесплатными открытиями (партнёрский код).
+    REFERRAL = "referral"
 
 
 class Case(Base):
@@ -322,3 +327,25 @@ class PromoRedemption(Base):
     promo_id: Mapped[int] = mapped_column(ForeignKey("promo_codes.id"))
     user_id: Mapped[int] = mapped_column(ForeignKey("users.id"))
     redeemed_at: Mapped[datetime] = mapped_column(DateTime, server_default=func.now())
+
+
+class PartnerCode(Base):
+    """Личный реф-код партнёра (выдаётся админом).
+
+    Кто активирует код: становится рефералом партнёра, получает
+    case_amount открытий кейса case_code и deposit_bonus_percent к каждому
+    своему пополнению. Партнёр получает commission_percent с депозитов
+    рефералов (хранится в User.partner_percent).
+    """
+
+    __tablename__ = "partner_codes"
+
+    id: Mapped[int] = mapped_column(primary_key=True)
+    code: Mapped[str] = mapped_column(String(32), unique=True, index=True)
+    user_id: Mapped[int] = mapped_column(ForeignKey("users.id"), unique=True)
+    deposit_bonus_percent: Mapped[float] = mapped_column(Float, default=0)
+    case_code: Mapped[str | None] = mapped_column(String(64), nullable=True)
+    case_amount: Mapped[int] = mapped_column(Integer, default=1)
+    uses: Mapped[int] = mapped_column(Integer, default=0)
+    is_active: Mapped[bool] = mapped_column(default=True)
+    created_at: Mapped[datetime] = mapped_column(DateTime, server_default=func.now())

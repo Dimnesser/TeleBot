@@ -435,3 +435,56 @@ async def test_promo_tokens_and_unknown_code(client, auth_headers, admin_headers
     assert (await r.json())["me"]["game_tokens"] == before + 300
     r = await client.post("/api/promo/redeem", headers=auth_headers, json={"code": "NOPE1234"})
     assert r.status == 400 and (await r.json())["error"] == "not_found"
+
+
+
+async def test_partner_code_gives_referral_case_bonus_and_commission(client, auth_headers, admin_headers) -> None:
+    from bot.database.engine import async_session as real_session  # noqa: F401  (сессия теста — та же in-memory)
+    from bot.database.repo.users import get_user_by_tg_id
+    from bot.services.partner_service import deposit_bonus
+    from bot.services.referral_service import credit_referral_commission
+    import webapp.server as server_module
+
+    await client.get("/api/me", headers=admin_headers)  # партнёр = 777000
+    await client.get("/api/me", headers=auth_headers)  # игрок = 999111
+
+    r = await client.post("/api/admin/partners", headers=admin_headers, json={
+        "user": "777000", "code": "boss10", "commission_percent": 10,
+        "deposit_bonus_percent": 20, "case_code": "referral_gift", "case_amount": 2,
+    })
+    assert r.status == 200 and (await r.json())["code"] == "BOSS10"
+    listing = await (await client.get("/api/admin/partners", headers=admin_headers)).json()
+    assert listing[0]["commission_percent"] == 10
+
+    # свой код активировать нельзя
+    r = await client.post("/api/promo/redeem", headers=admin_headers, json={"code": "boss10"})
+    assert r.status == 400 and (await r.json())["error"] == "own_code"
+
+    r = await client.post("/api/promo/redeem", headers=auth_headers, json={"code": "Boss10"})
+    assert r.status == 200
+    me = (await r.json())["me"]
+    assert me["case_credits"] == {"referral_gift": 2}
+    assert me["deposit_bonus_percent"] == 20
+    r = await client.post("/api/promo/redeem", headers=auth_headers, json={"code": "boss10"})
+    assert (await r.json())["error"] == "already_partner_ref"
+
+    # реферальный кейс: купить нельзя, открыть бесплатно — можно
+    case = await (await client.get("/api/cases/by-code/referral_gift", headers=auth_headers)).json()
+    r = await client.post(f"/api/cases/{case['id']}/open", headers=auth_headers, json={"qty": 1})
+    assert r.status == 400 and (await r.json())["error"] == "referral_only"
+    r = await client.post(f"/api/cases/{case['id']}/open", headers=auth_headers, json={"qty": 1, "use_credits": True})
+    assert r.status == 200 and (await r.json())["free"] is True
+
+    # бонус к пополнению и комиссия партнёру
+    async with server_module.async_session() as session:
+        player = await get_user_by_tg_id(session, 999111)
+        partner = await get_user_by_tg_id(session, 777000)
+        assert deposit_bonus(player, 1000) == 200
+        before = partner.balance
+        assert await credit_referral_commission(session, player, 1000) == 100
+        await session.refresh(partner)
+        assert partner.balance == before + 100
+
+    # снятие партнёрки — код больше не активируется
+    r = await client.post("/api/admin/partners/revoke", headers=admin_headers, json={"user": "777000"})
+    assert r.status == 200
