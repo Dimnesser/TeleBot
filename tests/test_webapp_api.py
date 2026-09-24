@@ -621,6 +621,8 @@ async def test_deposit_stars_creates_invoice(client, auth_headers) -> None:
     assert r.status == 200 and body["invoice_url"].startswith("https://t.me/$invoice_stars_dep:999111:")
     assert client.server.app["bot"].last_invoice["currency"] == "XTR"
     r = await client.post("/api/deposit/stars", headers=auth_headers, json={"amount": 1})
+    assert r.status == 200  # минимума нет — от 1 ⭐
+    r = await client.post("/api/deposit/stars", headers=auth_headers, json={"amount": 0})
     assert r.status == 400
 
 
@@ -690,3 +692,93 @@ async def test_stars_rate_and_code_bonus(client, auth_headers, admin_headers) ->
     r = await client.post("/api/deposit/stars", headers=auth_headers, json={"amount": 100, "code": "stars10"})
     assert (await r.json())["credited"] == 192
     assert "192 B" in client.server.app["bot"].last_invoice["description"]
+
+
+async def test_withdraw_exchange_flow(client, auth_headers, admin_headers, in_memory_db) -> None:
+    from bot.database.models import User
+    from bot.database.repo import inventory as inventory_repo
+    from sqlalchemy import select
+
+    async with in_memory_db() as session:
+        user = (await session.execute(select(User).where(User.tg_id == 999111))).scalar_one()
+        await inventory_repo.add_items(session, user, "test", [("Dragon Cannelloni", 973)])
+    inv = await (await client.get("/api/inventory", headers=auth_headers)).json()
+    dragon = next(i for i in inv if i["name"] == "Dragon Cannelloni")
+
+    # стока нет — вариантов нет
+    assert (await (await client.get(f"/api/withdraw/options/{dragon['id']}", headers=auth_headers)).json())["options"] == []
+    assert (await client.post("/api/admin/stock", headers=auth_headers, json={"name": "Garama and Madundung", "delta": 1})).status == 403
+    r = await client.post("/api/admin/stock", headers=admin_headers, json={"name": "Garama and Madundung", "delta": 30})
+    assert (await r.json())["count"] == 30
+    stock = await (await client.get("/api/withdraw/stock", headers=auth_headers)).json()
+    assert stock[0]["name"] == "Garama and Madundung" and stock[0]["count"] == 30
+
+    opts = (await (await client.get(f"/api/withdraw/options/{dragon['id']}", headers=auth_headers)).json())["options"]
+    opt = opts[0]
+    assert opt["items"][0]["qty"] == 23 and opt["topup_b"] == 30
+    r = await client.post("/api/withdraw", headers=auth_headers, json={"item_id": dragon["id"], "option_key": opt["key"], "nickname": "dimon"})
+    req = await r.json()
+    assert r.status == 200 and req["status"] == "pending"
+    # брейнрот ушёл из инвентаря, сток зарезервирован
+    assert all(i["id"] != dragon["id"] for i in await (await client.get("/api/inventory", headers=auth_headers)).json())
+    assert (await (await client.get("/api/withdraw/stock", headers=auth_headers)).json())[0]["count"] == 7
+
+    before = (await (await client.get("/api/me", headers=auth_headers)).json())["balance"]
+    queue = await (await client.get("/api/admin/withdrawals", headers=admin_headers)).json()
+    assert queue[0]["id"] == req["id"]
+    r = await client.post(f"/api/admin/withdrawals/{req['id']}", headers=admin_headers, json={"action": "done"})
+    assert (await r.json())["status"] == "done"
+    assert (await (await client.get("/api/me", headers=auth_headers)).json())["balance"] == before + 30
+    assert any("Вывод" in t and "выдан" in t for _, t in client.server.app["bot"].sent)
+
+
+async def test_withdraw_cancel_returns_item_and_stock(client, auth_headers, admin_headers, in_memory_db) -> None:
+    from bot.database.models import User
+    from bot.database.repo import inventory as inventory_repo
+    from sqlalchemy import select
+
+    async with in_memory_db() as session:
+        user = (await session.execute(select(User).where(User.tg_id == 999111))).scalar_one()
+        await inventory_repo.add_items(session, user, "test", [("Kraken", 3077)])
+    await client.post("/api/admin/stock", headers=admin_headers, json={"name": "Kraken", "delta": 1})
+    kraken = next(i for i in await (await client.get("/api/inventory", headers=auth_headers)).json() if i["name"] == "Kraken")
+    opts = (await (await client.get(f"/api/withdraw/options/{kraken['id']}", headers=auth_headers)).json())["options"]
+    assert opts[0]["direct"] and opts[0]["topup_b"] == 0
+    req = await (await client.post("/api/withdraw", headers=auth_headers,
+                                   json={"item_id": kraken["id"], "option_key": opts[0]["key"], "nickname": "dimon"})).json()
+    r = await client.post(f"/api/admin/withdrawals/{req['id']}", headers=admin_headers, json={"action": "cancel"})
+    assert (await r.json())["status"] == "cancelled"
+    assert any(i["name"] == "Kraken" for i in await (await client.get("/api/inventory", headers=auth_headers)).json())
+    assert (await (await client.get("/api/withdraw/stock", headers=auth_headers)).json())[0]["count"] == 1
+
+
+async def test_approved_brainrot_deposit_fills_stock(client, auth_headers, admin_headers) -> None:
+    catalog = await (await client.get("/api/deposit/catalog", headers=auth_headers)).json()
+    garama = next(i for i in catalog["brainrot"] if i["name"] == "Garama and Madundung")
+    r = await client.post("/api/deposit/request", headers=auth_headers,
+                          json={"category": "brainrot", "items": {garama["id"]: 4}, "nickname": "dimon"})
+    req = await r.json()
+    assert r.status == 200, req
+    await client.post(f"/api/admin/deposits/{req['request']['id']}", headers=admin_headers, json={"action": "approve"})
+    stock = await (await client.get("/api/withdraw/stock", headers=auth_headers)).json()
+    assert {"name": "Garama and Madundung", "count": 4}.items() <= stock[0].items()
+
+
+async def test_upgrader_stake_up_to_five(client, auth_headers, in_memory_db) -> None:
+    from bot.database.models import User
+    from bot.database.repo import inventory as inventory_repo
+    from sqlalchemy import select
+
+    async with in_memory_db() as session:
+        user = (await session.execute(select(User).where(User.tg_id == 999111))).scalar_one()
+        await inventory_repo.add_items(session, user, "test", [("Garama and Madundung", 41)] * 6)
+    ids = [i["id"] for i in await (await client.get("/api/inventory", headers=auth_headers)).json()]
+    r = await client.post("/api/upgrader/spin", headers=auth_headers, json={"contribution_item_ids": ids[:6], "target_name": "Kraken"})
+    assert r.status == 400 and (await r.json())["error"] == "too_many_items"
+    targets = await (await client.get("/api/upgrader/targets?min_value=205", headers=auth_headers)).json()
+    target = targets[0]["name"]
+    r = await client.post("/api/upgrader/spin", headers=auth_headers, json={"contribution_item_ids": ids[:5], "target_name": target})
+    body = await r.json()
+    assert r.status == 200 and body["stake_value"] == 205 and len(body["contributions"]) == 5
+    left = await (await client.get("/api/inventory", headers=auth_headers)).json()
+    assert len([i for i in left if i["id"] in ids[:5]]) == 0

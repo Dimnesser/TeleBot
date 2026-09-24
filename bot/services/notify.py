@@ -33,3 +33,13 @@ async def notify_admins_new_request(
         total=request.total_b,
     )
     await bot.send_message(config.admin_chat_id, text, reply_markup=admin_request_keyboard(request.id))
+
+
+async def notify_admins_text(bot: Bot, text: str) -> None:
+    """Короткое уведомление в чат админов (например, новая заявка на вывод)."""
+    if not config.admin_chat_id:
+        return
+    try:
+        await bot.send_message(config.admin_chat_id, text)
+    except Exception:  # noqa: BLE001 — уведомление не должно ломать заявку
+        pass

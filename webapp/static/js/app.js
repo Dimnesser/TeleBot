@@ -173,6 +173,7 @@ const ICONS = {
   bonuses: '<rect x="3" y="8" width="18" height="13" rx="2"/><path d="M3 12h18M12 8v13"/><path d="M12 8S8.5 3 7 5.5 12 8 12 8zM12 8s3.5-5 5-2.5S12 8 12 8z"/>',
   menu: '<path d="M4 7h16M4 12h16M4 17h10"/>',
   user: '<circle cx="12" cy="8" r="4"/><path d="M4 21a8 8 0 0 1 16 0"/>',
+  withdraw: '<path d="M12 3v12"/><path d="m7 10 5 5 5-5"/><path d="M4 17v2.5A1.5 1.5 0 0 0 5.5 21h13a1.5 1.5 0 0 0 1.5-1.5V17"/>',
   wallet: '<path d="M4 7.5A2.5 2.5 0 0 1 6.5 5H18v3"/><rect x="3" y="8" width="18" height="12" rx="2.5"/><path d="M16 14h2"/>',
 };
 function icon(name, cls = '') {
@@ -190,6 +191,7 @@ const DRAWER_SECTIONS = [
   ['giveaways', 'Розыгрыши'],
   ['bonuses', 'Бонусы'],
   ['deposit', 'Пополнить баланс'],
+  ['withdraw', 'Вывод брейнротов'],
   ['faq', 'FAQ'],
 ];
 
@@ -235,6 +237,7 @@ const SCREENS = {
   faq: renderFaqScreen,
   bonuses: renderBonusesScreen,
   deposit: renderDepositScreen,
+  withdraw: renderWithdrawScreen,
   inventory: renderInventoryScreen,
 };
 
@@ -599,6 +602,7 @@ function paintStars(body) {
     const code = codeInput.value.trim();
     const my = ++seq;
     quoted = null; pay.disabled = true;
+    pay.textContent = n >= min && n <= max ? `Оплатить ⭐ ${fmt(n)}` : 'Создать счёт в Stars';
     if (n < min || n > max) {
       body.querySelector('#stars-get').innerHTML = '';
       body.querySelector('#stars-hint').textContent = input.value ? `От ${fmt(min)} до ${fmt(max)} ⭐` : 'Введи количество Stars выше.';
@@ -638,6 +642,90 @@ function paintStars(body) {
       if (tg && tg.openInvoice) tg.openInvoice(res.invoice_url, done);
       else { window.open(res.invoice_url, '_blank'); pay.disabled = false; }
     } catch (err) { toast(err.message, 'error'); pay.disabled = false; }
+  });
+}
+
+/* ------------------------------------------------------------------ ВЫВОД
+ * Сток админа + вывод брейнрота из инвентаря. Есть в стоке — выводится он
+ * сам; нет — обмен на брейнротов из стока примерно той же цены (можно
+ * несколькими штуками), недостающее бот доплачивает в B. */
+
+async function renderWithdrawScreen(root) {
+  const [stock, inventory, requests] = await Promise.all([
+    api('/api/withdraw/stock'), api('/api/inventory?limit=200'), api('/api/withdraw/requests').catch(() => []),
+  ]);
+  const inStock = Object.fromEntries(stock.map((s) => [s.name, s.count]));
+  const inv = inventory.slice().sort((a, b) => b.value - a.value);
+  root.innerHTML = `
+    <section class="dep">
+      <button class="dep-close" aria-label="Закрыть" onclick="navigate('home')">✕</button>
+      <div class="dep-eyebrow">Вывод брейнротов</div>
+      <h1 class="dep-title">Сток на вывод</h1>
+      <p class="dep-hint">Выбери брейнрота из инвентаря. Если он есть в стоке — получишь его. Если нет — обмен на брейнротов из стока примерно той же цены, а разницу бот доплатит${coinIcon()} на баланс.</p>
+      ${stock.length ? `<div class="dep-grid">${stock.map((s) => `
+        <div class="dep-item">
+          <span class="stock-count">×${s.count}</span>
+          <div class="dep-img">${dropImg(s)}</div>
+          <div class="dep-name">${escapeHtml(s.name)}</div>
+          <div class="dep-price">${fmt(s.value)}${coinIcon()}</div>
+        </div>`).join('')}</div>` : '<div class="empty-state">Сток пока пуст — загляни позже.</div>'}
+    </section>
+    <section class="dep">
+      <div class="dep-eyebrow">Твой инвентарь</div>
+      <h1 class="dep-title">Что вывести</h1>
+      ${inv.length ? `<div class="dep-grid">${inv.map((i) => `
+        <button class="dep-item wd-item" data-id="${i.id}">
+          ${inStock[i.name] ? '<span class="stock-badge">в стоке</span>' : ''}
+          <div class="dep-img">${dropImg(i)}</div>
+          <div class="dep-name">${escapeHtml(i.name)}</div>
+          <div class="dep-price">${fmt(i.value)}${coinIcon()}</div>
+        </button>`).join('')}</div>` : '<div class="empty-state">Инвентарь пуст — открой кейс.</div>'}
+    </section>
+    ${requests.length ? `<section class="dep-history">
+      <div class="drops-title">Мои выводы</div>
+      ${requests.map((r) => `
+        <div class="dep-req st-${r.status === 'done' ? 'approved' : r.status === 'cancelled' ? 'rejected' : 'pending'}">
+          <div><b>#${r.id}</b> · ${escapeHtml(r.item.name)} → ${r.payout.map((p) => `${escapeHtml(p.name)} ×${p.qty}`).join(', ')}${r.topup_b ? ` + ${fmt(r.topup_b)} B` : ''}</div>
+          <div class="dep-req-foot"><span>ник ${escapeHtml(r.nickname)}</span><span class="dep-status">${escapeHtml(r.status_label)}</span></div>
+        </div>`).join('')}
+    </section>` : ''}`;
+  root.querySelectorAll('.wd-item').forEach((el) => el.addEventListener('click', () => openWithdrawSheet(root, Number(el.dataset.id))));
+}
+
+async function openWithdrawSheet(root, itemId) {
+  const { item, options } = await api(`/api/withdraw/options/${itemId}`);
+  const optHtml = (o, idx) => `
+    <button class="wd-opt ${idx === 0 ? 'picked' : ''}" data-idx="${idx}">
+      <div class="wd-opt-items">${o.items.map((b) => `
+        <div class="wd-opt-item"><div class="wd-opt-img">${dropImg(b)}</div><span>${escapeHtml(b.name)}</span><b>×${b.qty}</b></div>`).join('')}</div>
+      <div class="wd-opt-foot">${o.direct ? 'Этот же брейнрот' : `Обмен · ${fmt(o.items.reduce((s, b) => s + b.value * b.qty, 0))}${coinIcon()}`}${o.topup_b ? `<span class="wd-topup">+${fmt(o.topup_b)} B на баланс</span>` : ''}</div>
+    </button>`;
+  const overlay = openModal(`
+    <button class="modal-close" onclick="closeModal()">✕</button>
+    <div class="dep-confirm">
+      <div class="subscribe-title">Вывод: ${escapeHtml(item.name)}</div>
+      <div class="muted" style="text-align:center">Ценность ${fmt(item.value)} B${options.length && !options[0].direct ? ' · нет в стоке, выбери обмен' : ''}</div>
+      ${options.length ? `<div class="wd-opts">${options.map(optHtml).join('')}</div>
+        <input class="field" id="wd-nick" maxlength="32" placeholder="Твой ник в Steal a Brainrot" autocomplete="off">
+        <button class="open-btn" id="wd-send">Вывести</button>`
+        : '<div class="empty-state">В стоке сейчас нет ничего подходящего — загляни позже.</div>'}
+    </div>`);
+  if (!options.length) return;
+  let chosen = 0;
+  overlay.querySelectorAll('.wd-opt').forEach((el) => el.addEventListener('click', () => {
+    chosen = Number(el.dataset.idx); haptic.tick();
+    overlay.querySelectorAll('.wd-opt').forEach((o) => o.classList.toggle('picked', o === el));
+  }));
+  overlay.querySelector('#wd-send').addEventListener('click', async (e) => {
+    const btn = e.currentTarget; btn.disabled = true;
+    try {
+      const r = await api('/api/withdraw', { method: 'POST', body: JSON.stringify({
+        item_id: itemId, option_key: options[chosen].key, nickname: overlay.querySelector('#wd-nick').value.trim(),
+      }) });
+      closeModal(); haptic.success();
+      toast(`Вывод #${r.id} создан — жди трейд от админа`, 'success');
+      renderWithdrawScreen(root);
+    } catch (err) { toast(err.message, 'error'); btn.disabled = false; }
   });
 }
 
@@ -1196,6 +1284,13 @@ function adminPanelHtml() {
       <div class="admin-sub">Заявки на пополнение</div>
       <div id="admin-deposits" class="promo-list"><div class="muted">Загрузка…</div></div>
 
+      <div class="admin-sub">Заявки на вывод</div>
+      <div id="admin-withdrawals" class="promo-list"><div class="muted">Загрузка…</div></div>
+
+      <div class="admin-sub">Сток на вывод</div>
+      <input class="field" id="stock-search" placeholder="Найти брейнрота…" autocomplete="off" />
+      <div id="admin-stock" class="stock-list"></div>
+
       <div class="admin-sub">Бесплатный кейс</div>
       <form class="admin-grid" id="admin-settings" autocomplete="off">
         <input class="field full" id="s-channel" placeholder="Канал подписки: @username или t.me/… (пусто — без подписки)" />
@@ -1310,6 +1405,51 @@ async function bindAdminPanel(root) {
     }));
   }
   loadDeposits();
+
+  const wdBox = panel.querySelector('#admin-withdrawals');
+  async function loadWithdrawals() {
+    const list = await api('/api/admin/withdrawals').catch(() => []);
+    wdBox.innerHTML = list.map((r) => `
+      <div class="admin-dep">
+        <div class="admin-dep-head"><b>#${r.id}</b><span>${escapeHtml(r.player)}</span><span class="dep-status">ник ${escapeHtml(r.nickname)}</span></div>
+        <div class="admin-dep-items">${escapeHtml(r.item.name)} (${fmt(r.item.value)} B) → <b>${r.payout.map((p) => `${escapeHtml(p.name)} ×${p.qty}`).join(', ')}</b>${r.topup_b ? ` + ${fmt(r.topup_b)} B` : ''}</div>
+        <div class="admin-dep-foot"><span></span><span class="admin-dep-actions">
+          <button class="btn-chip" data-wd="${r.id}" data-act="done">Выдано</button>
+          <button class="btn-chip ghost" data-wd="${r.id}" data-act="cancel">Отменить</button>
+        </span></div>
+      </div>`).join('') || '<div class="muted">Заявок на вывод нет</div>';
+    wdBox.querySelectorAll('[data-wd]').forEach((b) => b.addEventListener('click', async () => {
+      if (b.dataset.act === 'cancel' && !confirm(`Отменить вывод #${b.dataset.wd}? Брейнрот вернётся игроку.`)) return;
+      b.disabled = true;
+      try {
+        await api(`/api/admin/withdrawals/${b.dataset.wd}`, { method: 'POST', body: JSON.stringify({ action: b.dataset.act }) });
+        toast(b.dataset.act === 'done' ? 'Отмечено как выдано' : 'Вывод отменён', 'success');
+      } catch (err) { toast(err.message, 'error'); }
+      loadWithdrawals(); loadStock();
+    }));
+  }
+  const stockBox = panel.querySelector('#admin-stock');
+  let stockAll = [];
+  const paintStock = () => {
+    const q = panel.querySelector('#stock-search').value.trim().toLowerCase();
+    const list = stockAll.filter((s) => (q ? s.name.toLowerCase().includes(q) : s.count > 0));
+    stockBox.innerHTML = list.map((s) => `
+      <div class="stock-row ${s.count ? '' : 'zero'}">
+        <span class="stock-img">${s.image_url ? `<img src="${s.image_url}" alt="">` : ''}</span>
+        <span class="stock-name">${escapeHtml(s.name)}<small>${fmt(s.value)} B</small></span>
+        <span class="dep-qty"><button data-stock="${escapeHtml(s.name)}" data-d="-1">−</button><b>${s.count}</b><button data-stock="${escapeHtml(s.name)}" data-d="1">+</button></span>
+      </div>`).join('') || `<div class="muted">${q ? 'Не найдено' : 'Сток пуст — найди брейнрота поиском и нажми +'}</div>`;
+    stockBox.querySelectorAll('[data-stock]').forEach((b) => b.addEventListener('click', async () => {
+      try {
+        const r = await api('/api/admin/stock', { method: 'POST', body: JSON.stringify({ name: b.dataset.stock, delta: Number(b.dataset.d) }) });
+        const row = stockAll.find((s) => s.name === r.name); if (row) row.count = r.count;
+        haptic.tick(); paintStock();
+      } catch (err) { toast(err.message, 'error'); }
+    }));
+  };
+  async function loadStock() { stockAll = await api('/api/admin/stock').catch(() => []); paintStock(); }
+  panel.querySelector('#stock-search').addEventListener('input', paintStock);
+  loadWithdrawals(); loadStock();
 
   const settingsForm = panel.querySelector('#admin-settings');
   const paintSettings = (st) => {
@@ -1455,7 +1595,10 @@ async function bindAdminPanel(root) {
 
 // =================================================================== АПГРЕЙДЕР
 
-let upgraderState = { contribution: null, target: null };
+// Вклад — до 5 брейнротов инвентаря; сервер считает шанс по их сумме.
+const UPG_MAX_STAKE = 5;
+let upgraderState = { stake: [], target: null };
+const stakeValue = (stake) => stake.reduce((sum, b) => sum + b.value, 0);
 let upgraderSpinning = false;
 let upgraderFx = null;
 
@@ -1467,9 +1610,19 @@ function ringArc(pct) {
 
 async function renderUpgraderScreen(root) {
   if (upgraderFx) { upgraderFx.stop(); upgraderFx = null; }
-  const { contribution, target } = upgraderState;
-  const chance = contribution && target ? (target.chance_percent || computeChance(contribution.value, target.value)) : 0;
-  const mult = contribution && target ? (target.value / contribution.value).toFixed(2) : null;
+  const { stake, target } = upgraderState;
+  const sv = stakeValue(stake);
+  const ready = stake.length && target;
+  const chance = ready ? computeChance(sv, target.value) : 0;
+  const mult = ready ? (target.value / sv).toFixed(2) : null;
+  const stakeSlot = `
+    <button class="upg-slot ${stake.length ? 'filled' : ''}" id="slot-contribution" style="${stake.length ? glowVars({ value: sv }) : ''}">
+      ${stake.length ? `
+        <div class="upg-stack n${stake.length}">${stake.map((b) => brainrotArt(b)).join('')}</div>
+        <div class="upg-slot-name">${stake.length === 1 ? escapeHtml(stake[0].name) : `${stake.length} ${stake.length === 5 ? 'брейнротов' : 'брейнрота'}`}</div>
+        <div class="upg-slot-value">${fmt(sv)}${coinIcon()}</div>`
+        : `<div class="upg-slot-plus">+</div><div class="upg-slot-hint">до ${UPG_MAX_STAKE} шт</div>`}
+    </button>`;
 
   const slot = (b, label, id) => `
     <button class="upg-slot ${b ? 'filled' : ''}" id="${id}" style="${b ? glowVars(b) : ''}">
@@ -1490,22 +1643,27 @@ async function renderUpgraderScreen(root) {
         <div class="upg-needle" id="upg-needle"><i class="upg-trail"></i><span></span></div>
         <div class="upg-center" id="upg-center">
           ${target ? `<div class="upg-center-art">${brainrotArt(target)}</div>` : ''}
-          <div class="upg-chance" id="upg-chance">${contribution && target ? chance + '%' : '—'}</div>
+          <div class="upg-chance" id="upg-chance">${ready ? chance + '%' : '—'}</div>
           <div class="upg-label" id="upg-label">${mult ? '×' + mult : 'ШАНС'}</div>
         </div>
       </div>
       <div class="upg-slots">
-        ${slot(contribution, 'Твой брейнрот', 'slot-contribution')}
+        ${stakeSlot}
         <div class="upg-arrow">➜</div>
         ${slot(target, 'Цель · шанс 75%…1%', 'slot-target')}
       </div>
     </div>
     <div id="upg-actions">
-      <button class="open-btn upg-btn" id="btn-spin" ${contribution && target ? '' : 'disabled'} style="--c1:#c6ff3d;--c2:#5dffb0">
-        <span class="open-btn-shine"></span>
-        <span class="open-btn-label">Прокачать</span>
-        <span class="open-btn-price">${contribution && target ? chance + '%' : '—'}</span>
-      </button>
+      <div class="upg-row">
+        <button class="open-btn upg-btn" id="btn-spin" ${ready ? '' : 'disabled'} style="--c1:#c6ff3d;--c2:#5dffb0">
+          <span class="open-btn-shine"></span>
+          <span class="open-btn-label">Прокачать</span>
+          <span class="open-btn-price">${ready ? chance + '%' : '—'}</span>
+        </button>
+        <button class="quick-btn" id="btn-spin-fast" aria-label="Мгновенный прокрут" ${ready ? '' : 'disabled'}>
+          <svg viewBox="0 0 24 24" class="ic"><path d="M13 2 4 14h7l-1 8 9-12h-7z" fill="currentColor"/></svg>
+        </button>
+      </div>
       <button class="btn btn-ghost" style="margin-top:8px" id="btn-reset">Сбросить</button>
     </div>
   `;
@@ -1514,40 +1672,40 @@ async function renderUpgraderScreen(root) {
   root.querySelector('#slot-contribution').addEventListener('click', async () => {
     if (upgraderSpinning) return;
     const [items, all] = await Promise.all([api('/api/inventory?limit=200'), api('/api/upgrader/targets?min_value=0')]);
-    // Вклад без хотя бы одной цели с шансом 1–75% выбрать нельзя — иначе
-    // игрок упрётся в пустой список целей.
+    // Вклад без хотя бы одной цели с шансом 1–75% не подходит — иначе игрок
+    // упрётся в пустой список целей.
     const hasTarget = (v) => all.some((t) => t.value * 75 >= v * 100 && t.value <= v * 100);
-    openBrainrotPicker('Твой брейнрот', items.slice().sort((a, b) => b.value - a.value),
-      'Инвентарь пуст — сначала открой кейс.',
-      (item) => { upgraderState = { contribution: item, target: null }; renderUpgraderScreen(root); },
-      (b) => (hasTarget(b.value) ? null : 'нет целей'));
+    openStakePicker(items.slice().sort((a, b) => b.value - a.value), upgraderState.stake, hasTarget, (stake) => {
+      upgraderState = { stake, target: null }; renderUpgraderScreen(root);
+    });
   });
   root.querySelector('#slot-target').addEventListener('click', async () => {
     if (upgraderSpinning) return;
-    const c = upgraderState.contribution;
-    if (!c) { toast('Сначала выбери своего брейнрота', 'error'); return; }
-    const targets = await api(`/api/upgrader/targets?min_value=${c.value}&exclude_name=${encodeURIComponent(c.name)}`);
+    const st = upgraderState.stake;
+    if (!st.length) { toast('Сначала выбери своих брейнротов', 'error'); return; }
+    const targets = await api(`/api/upgrader/targets?min_value=${stakeValue(st)}${st.length === 1 ? '&exclude_name=' + encodeURIComponent(st[0].name) : ''}`);
     openBrainrotPicker('Во что прокачать', targets,
       'Для этого брейнрота нет целей с шансом 75%…1% — выбери другого.',
       (t) => { upgraderState.target = t; renderUpgraderScreen(root); });
   });
   root.querySelector('#btn-reset').addEventListener('click', () => {
     if (upgraderSpinning) return;
-    upgraderState = { contribution: null, target: null };
+    upgraderState = { stake: [], target: null };
     renderUpgraderScreen(root);
   });
 
   const spinBtn = root.querySelector('#btn-spin');
-  spinBtn.addEventListener('click', async () => {
-    if (upgraderSpinning || !contribution || !target) return;
+  const fastBtn = root.querySelector('#btn-spin-fast');
+  const spin = async (fast) => {
+    if (upgraderSpinning || !ready) return;
     upgraderSpinning = true;
-    spinBtn.disabled = true;
+    spinBtn.disabled = true; fastBtn.disabled = true;
     haptic.impact('medium');
     let res;
     try {
-      res = await api('/api/upgrader/spin', { method: 'POST', body: JSON.stringify({ contribution_item_id: contribution.id, target_name: target.name }) });
+      res = await api('/api/upgrader/spin', { method: 'POST', body: JSON.stringify({ contribution_item_ids: stake.map((b) => b.id), target_name: target.name }) });
     } catch (err) {
-      upgraderSpinning = false; spinBtn.disabled = false;
+      upgraderSpinning = false; spinBtn.disabled = false; fastBtn.disabled = false;
       toast('Ошибка: ' + err.message, 'error');
       return;
     }
@@ -1557,7 +1715,7 @@ async function renderUpgraderScreen(root) {
     stage.classList.add('spinning');
     // 6 оборотов + точка остановки; кривая — быстрый разгон, долгое мягкое торможение.
     const finalDeg = 360 * 6 + (res.roll_point / 100) * 360;
-    const duration = CaseArt.REDUCED ? 300 : 5200;
+    const duration = CaseArt.REDUCED || fast ? 350 : 5200;
     const start = performance.now();
     const ease = (t) => 1 - Math.pow(1 - t, 5);
     let lastTick = 0, lastDeg = 0;
@@ -1577,15 +1735,58 @@ async function renderUpgraderScreen(root) {
     });
     stage.classList.remove('spinning');
     upgraderSpinning = false;
-    upgraderState = { contribution: null, target: null };
+    upgraderState = { stake: [], target: null };
     refreshMe().catch(() => {});
-    showUpgradeOnWheel(root, res, contribution, target);
+    showUpgradeOnWheel(root, res, stake, target);
+  };
+  spinBtn.addEventListener('click', () => spin(false));
+  fastBtn.addEventListener('click', () => spin(true));
+}
+
+/** Выбор вклада: до UPG_MAX_STAKE брейнротов, внизу — сумма и «Готово». */
+function openStakePicker(items, current, hasTarget, onDone) {
+  const picked = new Set(current.map((b) => b.id));
+  const overlay = openModal(`
+    <button class="modal-close" onclick="closeModal()">✕</button>
+    <div class="picker-title">Твои брейнроты <span class="muted">· до ${UPG_MAX_STAKE}</span></div>
+    ${items.length ? `<div class="pick-grid">${items.map((b) => `
+      <button class="pick-tile" data-id="${b.id}" style="${glowVars(b)}">
+        ${brainrotArt(b)}
+        <div class="pick-name">${escapeHtml(b.name)}</div>
+        <div class="pick-value">${fmt(b.value)}${coinIcon()}</div>
+      </button>`).join('')}</div>` : '<div class="empty-state">Инвентарь пуст — сначала открой кейс.</div>'}
+    <div class="stake-bar">
+      <span id="stake-sum"></span>
+      <button class="open-btn" id="stake-done">Готово</button>
+    </div>`);
+  const byId = Object.fromEntries(items.map((b) => [b.id, b]));
+  const paint = () => {
+    const sel = [...picked].map((id) => byId[id]).filter(Boolean);
+    const sum = stakeValue(sel);
+    overlay.querySelectorAll('.pick-tile').forEach((el) => {
+      const on = picked.has(Number(el.dataset.id));
+      el.classList.toggle('picked', on);
+      el.disabled = !on && picked.size >= UPG_MAX_STAKE;
+    });
+    overlay.querySelector('#stake-sum').innerHTML = sel.length
+      ? `${sel.length}/${UPG_MAX_STAKE} · ${fmt(sum)}${coinIcon()}${hasTarget(sum) ? '' : ' <span class="stake-warn">нет целей</span>'}`
+      : 'Выбери брейнротов';
+    overlay.querySelector('#stake-done').disabled = !sel.length || !hasTarget(sum);
+  };
+  overlay.querySelectorAll('.pick-tile').forEach((el) => el.addEventListener('click', () => {
+    const id = Number(el.dataset.id);
+    if (picked.has(id)) picked.delete(id); else if (picked.size < UPG_MAX_STAKE) picked.add(id);
+    haptic.tick(); paint();
+  }));
+  overlay.querySelector('#stake-done').addEventListener('click', () => {
+    closeModal(); onDone([...picked].map((id) => byId[id]).filter(Boolean));
   });
+  paint();
 }
 
 /** Результат прямо на колесе, без модалок. Выигрыш — цель в центре и
  * вспышка частиц; проигрыш — просто надпись «ФЕЙЛ». */
-function showUpgradeOnWheel(root, res, contribution, target) {
+function showUpgradeOnWheel(root, res, stake, target) {
   const stage = root.querySelector('#upg-stage');
   const center = root.querySelector('#upg-center');
   if (res.success) {

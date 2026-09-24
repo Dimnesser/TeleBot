@@ -18,6 +18,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from bot.database.models import DepositCategory, DepositItem, DepositRequest, DepositRequestStatus, User
 from bot.database.repo import deposit_items as items_repo
 from bot.database.repo import deposit_requests as requests_repo
+from bot.services import withdraw_service
 from bot.services.deposit_service import cart_total, get_buff
 from bot.services.notify import notify_admins_new_request
 from bot.services.partner_service import deposit_bonus
@@ -97,6 +98,12 @@ async def resolve_deposit(
     if approve:
         credited = request.total_b + deposit_bonus(user, request.total_b)  # бонус партнёрского кода
         user.balance += credited
+        if request.category == DepositCategory.BRAINROT:
+            # принятые брейнроты теперь у админа — сразу в сток для вывода
+            for item_id, qty in request.items.items():
+                item = await items_repo.get_item(session, int(item_id))
+                if item is not None:
+                    await withdraw_service.add_stock(session, item.name, int(qty))
         await requests_repo.resolve_request(session, request, DepositRequestStatus.APPROVED, admin_tg_id)
         await credit_referral_commission(session, user, request.total_b)
         text = USER_DEPOSIT_APPROVED.format(total=credited, balance=user.balance)

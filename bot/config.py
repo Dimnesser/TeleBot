@@ -15,7 +15,8 @@ class Config:
     admin_ids: list[int] = field(default_factory=lambda: _parse_admin_ids(os.getenv("ADMIN_IDS", "")))
     admin_chat_id: int = int(os.getenv("ADMIN_CHAT_ID", "0") or 0)
     database_url: str = os.getenv("DATABASE_URL", "sqlite+aiosqlite:///./data/brainrot_battle.db")
-    min_stars_amount: int = int(os.getenv("MIN_STARS_AMOUNT", "50"))
+    # Пополнение Stars — от 1 ⭐ (минимума нет); MIN_STARS_AMOUNT в .env больше не читается.
+    min_stars_amount: int = 1
     max_stars_amount: int = int(os.getenv("MAX_STARS_AMOUNT", "100000"))
     # Апгрейдер: шанс всегда режется в этот диапазон, чтобы не было 0%/100% исходов.
     upgrader_min_chance_percent: int = int(os.getenv("UPGRADER_MIN_CHANCE_PERCENT", "1"))

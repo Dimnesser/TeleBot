@@ -353,3 +353,46 @@ class PartnerCode(Base):
     uses: Mapped[int] = mapped_column(Integer, default=0)
     is_active: Mapped[bool] = mapped_column(default=True)
     created_at: Mapped[datetime] = mapped_column(DateTime, server_default=func.now())
+
+
+class WithdrawStock(Base):
+    """Сток брейнротов для вывода: сколько штук каждого есть у админа.
+
+    Меняет админ (+/− в Mini App); одобренные депозиты брейнротами
+    пополняют его автоматически (bot/services/deposit_moderation.py).
+    """
+
+    __tablename__ = "withdraw_stock"
+
+    name: Mapped[str] = mapped_column(String(128), primary_key=True)
+    count: Mapped[int] = mapped_column(Integer, default=0)
+
+
+class WithdrawStatus(str, enum.Enum):
+    PENDING = "pending"  # ждёт трейда от админа
+    DONE = "done"  # выдано (доплата зачислена)
+    CANCELLED = "cancelled"  # отменено: брейнрот вернулся в инвентарь, сток — обратно
+
+
+class WithdrawRequest(Base):
+    """Заявка на вывод брейнрота из инвентаря.
+
+    payout — что реально выдаётся из стока: [{"name", "value", "qty"}]
+    (тот же брейнрот или обмен на другие примерно той же цены); topup_b —
+    разница в B, которую бот зачислит на баланс при выдаче.
+    """
+
+    __tablename__ = "withdraw_requests"
+
+    id: Mapped[int] = mapped_column(primary_key=True)
+    user_id: Mapped[int] = mapped_column(ForeignKey("users.id"))
+    item_name: Mapped[str] = mapped_column(String(128))
+    item_value: Mapped[int] = mapped_column(Integer)
+    item_rarity: Mapped[str | None] = mapped_column(String(16), nullable=True)
+    payout: Mapped[list] = mapped_column(JSON)
+    topup_b: Mapped[int] = mapped_column(Integer, default=0)
+    game_nickname: Mapped[str] = mapped_column(String(64))
+    status: Mapped[WithdrawStatus] = mapped_column(SAEnum(WithdrawStatus), default=WithdrawStatus.PENDING)
+    admin_id: Mapped[int | None] = mapped_column(BigInteger, nullable=True)
+    created_at: Mapped[datetime] = mapped_column(DateTime, server_default=func.now())
+    resolved_at: Mapped[datetime | None] = mapped_column(DateTime, nullable=True)

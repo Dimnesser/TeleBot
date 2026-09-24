@@ -19,6 +19,7 @@ from bot.data.brainrot_roster import (
     RARITY_COLOR,
     RARITY_LABEL,
     RARITY_ORDER,
+    ROSTER,
     ROSTER_BY_NAME,
     WIKI_SNAPSHOT_DATE,
     Rarity,
@@ -48,7 +49,15 @@ from bot.database.models import (
     StakeStatus,
     User,
 )
-from bot.database.models import DepositCategory, DepositRequest, DepositRequestStatus, PromoKind, StarsDeposit
+from bot.database.models import (
+    DepositCategory,
+    DepositRequest,
+    DepositRequestStatus,
+    PromoKind,
+    StarsDeposit,
+    WithdrawRequest,
+    WithdrawStatus,
+)
 from bot.database.repo import cases as cases_repo
 from bot.database.repo import deposit_items as deposit_items_repo
 from bot.database.repo import deposit_requests as deposit_requests_repo
@@ -59,7 +68,8 @@ from bot.database.repo import quests as quests_repo
 from bot.database.repo import staking as staking_repo
 from bot.database.repo.known_items import list_known_items
 from bot.database.repo.users import add_balance, count_referrals, find_user
-from bot.services import deposit_moderation, partner_service, quest_service, settings_service, stars_service
+from bot.services import deposit_moderation, partner_service, quest_service, settings_service, stars_service, withdraw_service
+from bot.services.notify import notify_admins_text
 from bot.services.deposit_service import cart_is_valid
 from bot.services.battle_service import run_battle
 from bot.services.cases_service import REEL_REVEAL_INDEX, build_reel, draw_items, total_cost
@@ -481,6 +491,135 @@ async def post_deposit_stars(request: web.Request) -> web.Response:
     return web.json_response({"invoice_url": link, "credited": q.credited, "bonus_percent": q.bonus_percent})
 
 
+# ----------------------------------------------------------------------- вывод
+# Вывод брейнротов через сток админа (bot/services/withdraw_service.py).
+
+
+def _withdraw_request_json(r: WithdrawRequest, owner: User | None = None) -> dict:
+    data = {
+        "id": r.id,
+        "item": _brainrot_json(r.item_name, r.item_value, r.item_rarity),
+        "payout": [{**_brainrot_json(p["name"], p["value"]), "qty": p["qty"]} for p in r.payout],
+        "topup_b": r.topup_b,
+        "nickname": r.game_nickname,
+        "status": r.status.value,
+        "status_label": {"pending": "Ждёт трейда", "done": "Выдано", "cancelled": "Отменено"}[r.status.value],
+    }
+    if owner is not None:
+        data["player"] = f"@{owner.username}" if owner.username else (owner.first_name or str(owner.tg_id))
+    return data
+
+
+@routes.get("/api/withdraw/stock")
+async def get_withdraw_stock(request: web.Request) -> web.Response:
+    stock = await withdraw_service.stock(request["session"])
+    items = [{**_brainrot_json(n, withdraw_service.stock_value(n)), "count": c} for n, c in stock.items() if withdraw_service.stock_value(n)]
+    return web.json_response(sorted(items, key=lambda i: -i["value"]))
+
+
+@routes.get("/api/withdraw/options/{item_id}")
+async def get_withdraw_options(request: web.Request) -> web.Response:
+    session, user = request["session"], request["user"]
+    item = await inventory_repo.get_by_id(session, int(request.match_info["item_id"]))
+    if item is None or item.user_id != user.id:
+        return web.json_response({"error": "item_gone", "message": "Этого брейнрота уже нет в инвентаре"}, status=404)
+    options = withdraw_service.options_for(item.item_name, item.value, await withdraw_service.stock(session))
+    return web.json_response({
+        "item": _brainrot_json(item.item_name, item.value, item.rarity),
+        "options": [{
+            "key": o.key, "direct": o.items[0][0] == item.item_name, "topup_b": o.topup,
+            "items": [{**_brainrot_json(n, v), "qty": q} for n, v, q in o.items],
+        } for o in options],
+    })
+
+
+@routes.post("/api/withdraw")
+async def post_withdraw(request: web.Request) -> web.Response:
+    session, user = request["session"], request["user"]
+    body = await request.json()
+    nickname = str(body.get("nickname") or "").strip()
+    if not 2 <= len(nickname) <= 32:
+        return web.json_response({"error": "bad_nickname", "message": "Ник в игре: от 2 до 32 символов"}, status=400)
+    try:
+        item = await inventory_repo.get_by_id(session, int(body.get("item_id")))
+    except (TypeError, ValueError):
+        item = None
+    if item is None:
+        return web.json_response({"error": "item_gone", "message": "Этого брейнрота уже нет в инвентаре"}, status=404)
+    try:
+        req = await withdraw_service.create_request(session, user, item, str(body.get("option_key") or ""), nickname)
+    except withdraw_service.WithdrawError as exc:
+        return web.json_response({"error": exc.code, "message": exc.message}, status=400)
+    await notify_admins_text(request.app["bot"], (
+        f"📤 Вывод №{req.id} от {('@' + user.username) if user.username else user.tg_id} (ник {nickname}): "
+        + ", ".join(f"{p['name']} ×{p['qty']}" for p in req.payout)
+        + (f" + {req.topup_b} B доплаты" if req.topup_b else "")
+    ))
+    return web.json_response(_withdraw_request_json(req))
+
+
+@routes.get("/api/withdraw/requests")
+async def get_withdraw_requests(request: web.Request) -> web.Response:
+    session, user = request["session"], request["user"]
+    rows = (await session.execute(
+        select(WithdrawRequest).where(WithdrawRequest.user_id == user.id).order_by(WithdrawRequest.id.desc()).limit(10)
+    )).scalars().all()
+    return web.json_response([_withdraw_request_json(r) for r in rows])
+
+
+@routes.get("/api/admin/stock")
+async def get_admin_stock(request: web.Request) -> web.Response:
+    """Все брейнроты ростера с количеством в стоке (0 — нет)."""
+    if (denied := _require_admin(request)) is not None:
+        return denied
+    stock = await withdraw_service.stock(request["session"])
+    items = [{"name": b.name, "value": b.value, "count": stock.get(b.name, 0), "image_url": _brainrot_image_url(b.name)} for b in ROSTER]
+    return web.json_response(sorted(items, key=lambda i: (i["count"] == 0, -i["value"])))
+
+
+@routes.post("/api/admin/stock")
+async def post_admin_stock(request: web.Request) -> web.Response:
+    if (denied := _require_admin(request)) is not None:
+        return denied
+    body = await request.json()
+    name = body.get("name")
+    if name not in ROSTER_BY_NAME:
+        return web.json_response({"error": "unknown_brainrot"}, status=400)
+    try:
+        delta = int(body.get("delta", 0))
+    except (TypeError, ValueError):
+        delta = 0
+    count = await withdraw_service.add_stock(request["session"], name, delta)
+    await request["session"].commit()
+    return web.json_response({"name": name, "count": count})
+
+
+@routes.get("/api/admin/withdrawals")
+async def get_admin_withdrawals(request: web.Request) -> web.Response:
+    if (denied := _require_admin(request)) is not None:
+        return denied
+    session = request["session"]
+    rows = (await session.execute(
+        select(WithdrawRequest).where(WithdrawRequest.status == WithdrawStatus.PENDING).order_by(WithdrawRequest.id)
+    )).scalars().all()
+    return web.json_response([_withdraw_request_json(r, await session.get(User, r.user_id)) for r in rows])
+
+
+@routes.post("/api/admin/withdrawals/{request_id}")
+async def post_admin_withdrawal(request: web.Request) -> web.Response:
+    if (denied := _require_admin(request)) is not None:
+        return denied
+    body = await request.json()
+    try:
+        r = await withdraw_service.resolve(
+            request["session"], request.app["bot"], int(request.match_info["request_id"]),
+            done=body.get("action") == "done", admin_tg_id=request["user"].tg_id,
+        )
+    except withdraw_service.WithdrawError as exc:
+        return web.json_response({"error": exc.code, "message": exc.message}, status=400)
+    return web.json_response(_withdraw_request_json(r))
+
+
 # ----------------------------------------------------------------------- кейсы
 
 
@@ -643,37 +782,50 @@ async def get_upgrader_targets(request: web.Request) -> web.Response:
     return web.json_response(payload)
 
 
+UPGRADER_MAX_STAKE_ITEMS = 5
+
+
 @routes.post("/api/upgrader/spin")
 async def post_upgrader_spin(request: web.Request) -> web.Response:
+    """Вклад — от 1 до 5 брейнротов инвентаря (ценность — их сумма); при
+    любом исходе вклад сгорает, при успехе выдаётся цель."""
     session, user = request["session"], request["user"]
     body = await request.json()
-    item_id = body.get("contribution_item_id")
+    raw_ids = body.get("contribution_item_ids") or ([body["contribution_item_id"]] if body.get("contribution_item_id") else [])
     target_name = body.get("target_name")
-    if not item_id or not target_name:
+    try:
+        ids = list(dict.fromkeys(int(i) for i in raw_ids))
+    except (TypeError, ValueError):
+        ids = []
+    if not ids or not target_name:
         return web.json_response({"error": "missing_fields"}, status=400)
+    if len(ids) > UPGRADER_MAX_STAKE_ITEMS:
+        return web.json_response({"error": "too_many_items", "message": f"Не больше {UPGRADER_MAX_STAKE_ITEMS} брейнротов"}, status=400)
 
-    item = await inventory_repo.get_by_id(session, int(item_id))
-    if item is None or item.user_id != user.id:
+    items = [await inventory_repo.get_by_id(session, i) for i in ids]
+    if any(it is None or it.user_id != user.id for it in items):
         return web.json_response({"error": "item_gone"}, status=404)
+    stake_value = sum(it.value for it in items)
 
     # Ценность цели берётся из каталога, а не из запроса: иначе клиент мог
     # бы сам назначить цели любую цену.
     known = {i.name: i.value for i in await list_known_items(session) if i.name in ROSTER_BY_NAME}
-    if target_name not in known or known[target_name] <= item.value:
+    if target_name not in known or known[target_name] <= stake_value:
         return web.json_response({"error": "invalid_target"}, status=400)
-    raw_chance = item.value * 100 / known[target_name]
+    raw_chance = stake_value * 100 / known[target_name]
     if not 1 <= raw_chance <= config.upgrader_max_target_chance_percent:
         return web.json_response({"error": "target_out_of_range"}, status=400)
     target_value = known[target_name]
 
-    chance = chance_percent(item.value, target_value)
+    chance = chance_percent(stake_value, target_value)
     success = roll_success(chance)
     # Точка остановки стрелки (0..100): внутри зоны шанса при успехе, вне — при
     # проигрыше. Чисто визуальная, исход уже решён выше.
     roll_point = random.uniform(0, chance) if success else random.uniform(chance, 100)
 
-    contribution_label = _brainrot_json(item.item_name, item.value, item.rarity)
-    await inventory_repo.delete(session, item)
+    contributions = [_brainrot_json(it.item_name, it.value, it.rarity) for it in items]
+    for it in items:
+        await inventory_repo.delete(session, it)
     won_item = None
     if success:
         won_item = _brainrot_json(target_name, int(target_value))
@@ -685,7 +837,9 @@ async def post_upgrader_spin(request: web.Request) -> web.Response:
             "success": success,
             "chance": chance,
             "roll_point": round(roll_point, 2),
-            "contribution": contribution_label,
+            "stake_value": stake_value,
+            "contribution": contributions[0],
+            "contributions": contributions,
             "won_item": won_item,
         }
     )
