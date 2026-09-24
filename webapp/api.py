@@ -7,6 +7,7 @@ from __future__ import annotations
 
 import random
 import time
+from datetime import datetime, timedelta
 from pathlib import Path
 
 from aiohttp import web
@@ -21,6 +22,15 @@ from bot.data.brainrot_roster import (
     Rarity,
     rarity_for,
     slugify,
+)
+from bot.data.coins import COIN_RARITY, coin_amount
+from bot.data.market import (
+    COLD_DEMAND,
+    HOT_DEMAND,
+    MARKET_SNAPSHOT_DATE,
+    MARKET_SOURCES,
+    market_info,
+    names_with_demand,
 )
 from bot.data.seed_cases import CASE_THEMES
 from bot.data.referral_tiers import next_tier_for_count, tier_for_count
@@ -66,10 +76,20 @@ BRAINROT_ASSETS_DIR = Path(__file__).parent / "static" / "assets" / "brainrots"
 AVAILABLE_BRAINROT_IMAGES = {p.stem for p in BRAINROT_ASSETS_DIR.glob("*.webp")}
 
 COLLECTIONS = [
-    {"key": CaseCategory.STARTER.value, "title": "Старт", "subtitle": "Secret-тир по цене пары сотен 🎫"},
-    {"key": CaseCategory.SIGNATURE.value, "title": "Легенды", "subtitle": "Драконы, морские и праздничные секреты"},
-    {"key": CaseCategory.APEX.value, "title": "Вершина", "subtitle": "Единственный путь к OG"},
+    {"key": "free", "title": "Бесплатные кейсы", "categories": [CaseCategory.FREE, CaseCategory.REFERRAL]},
+    {"key": CaseCategory.ECONOMY.value, "title": "Эконом", "categories": [CaseCategory.ECONOMY]},
+    {"key": CaseCategory.STARTER.value, "title": "Рынок", "categories": [CaseCategory.STARTER]},
+    {"key": CaseCategory.SIGNATURE.value, "title": "Кейсы", "categories": [CaseCategory.SIGNATURE]},
+    {"key": CaseCategory.APEX.value, "title": "All-in", "categories": [CaseCategory.APEX]},
 ]
+
+
+def free_case_wait_seconds(user) -> int:
+    """Сколько ждать до следующего бесплатного открытия (0 — можно сейчас)."""
+    if user.free_case_at is None:
+        return 0
+    ready = user.free_case_at + timedelta(minutes=config.free_case_cooldown_minutes)
+    return max(0, int((ready - datetime.utcnow()).total_seconds()))
 
 
 def _brainrot_image_url(name: str) -> str | None:
@@ -101,11 +121,18 @@ def _case_json(case: Case) -> dict:
             "shape": theme.shape,
             "particles": theme.particles,
             "colors": list(theme.colors),
+            "badge": theme.badge,
         } if theme else None,
     }
 
 
 def _brainrot_json(name: str, value: int, rarity: str | None = None) -> dict:
+    if (coins := coin_amount(name)) is not None:
+        return {
+            "name": f"{coins} 🎫", "value": coins, "coins": True, "rarity": COIN_RARITY, "rarity_rank": -1,
+            "rarity_label": "Монеты", "rarity_color": "#ffd24d", "rarity_color_accent": "#b8861a",
+            "slug": "coins", "image_url": None, "game": None, "market": None,
+        }
     roster_entry = ROSTER_BY_NAME.get(name)
     # Реальный тир из ростера важнее сохранённого: старые записи инвентаря
     # получали rarity угадыванием по ценности.
@@ -121,6 +148,7 @@ def _brainrot_json(name: str, value: int, rarity: str | None = None) -> dict:
         "rarity_color_accent": color[1],
         "slug": slugify(name),
         "image_url": _brainrot_image_url(name),
+        "market": market_info(name),
         "game": {
             "cost": roster_entry.cost,
             "income": roster_entry.income,
@@ -263,6 +291,22 @@ async def get_recent_wins(request: web.Request) -> web.Response:
     return web.json_response(payload)
 
 
+@routes.get("/api/market")
+async def get_market(_request: web.Request) -> web.Response:
+    """Рыночный пульс: самые востребованные и самые неликвидные брейнроты
+    ростера по снимку bot.data.market (источники — в MARKET_SOURCES)."""
+    def pack(levels):
+        names = sorted(names_with_demand(levels), key=lambda n: -ROSTER_BY_NAME[n].value)
+        return [_brainrot_json(n, ROSTER_BY_NAME[n].value) for n in names]
+
+    return web.json_response({
+        "hot": pack(HOT_DEMAND),
+        "cold": pack(COLD_DEMAND),
+        "as_of": MARKET_SNAPSHOT_DATE,
+        "sources": list(MARKET_SOURCES),
+    })
+
+
 # ----------------------------------------------------------------------- кейсы
 
 
@@ -280,9 +324,15 @@ async def get_cases(request: web.Request) -> web.Response:
 
     collections = []
     for meta in COLLECTIONS:
-        cases = await cases_repo.list_cases(session, CaseCategory(meta["key"]))
-        collections.append({**meta, "cases": [_case_json(c) for c in cases]})
-    return web.json_response({"collections": collections})
+        cases = []
+        for category in meta["categories"]:
+            cases.extend(await cases_repo.list_cases(session, category))
+        collections.append({"key": meta["key"], "title": meta["title"], "cases": [_case_json(c) for c in cases]})
+    return web.json_response({
+        "collections": collections,
+        "free_wait_seconds": free_case_wait_seconds(request["user"]),
+        "free_cooldown_minutes": config.free_case_cooldown_minutes,
+    })
 
 
 @routes.get("/api/cases/by-code/{code}")
@@ -325,6 +375,14 @@ async def post_case_open(request: web.Request) -> web.Response:
         return web.json_response({"error": "no_price"}, status=400)
     # Бесплатные открытия (от админа/промокода) тратятся первыми, целиком на qty.
     free = bool(body.get("use_credits")) and await rewards_repo.use_case_credits(session, user, case.code, qty)
+    if case.category == CaseCategory.FREE and not free:
+        wait = free_case_wait_seconds(user)
+        if qty != 1:
+            return web.json_response({"error": "free_single", "message": "Бесплатный — по одному"}, status=400)
+        if wait > 0:
+            return web.json_response({"error": "free_cooldown", "wait_seconds": wait, "message": "Ещё рано"}, status=400)
+        user.free_case_at = datetime.utcnow()
+        free, cost = True, 0
     if free:
         cost = 0
     elif case.category == CaseCategory.REFERRAL:
@@ -343,14 +401,24 @@ async def post_case_open(request: web.Request) -> web.Response:
     await session.commit()
     await session.refresh(user)
 
-    entries = await inventory_repo.add_items(session, user, case.name, [(i.name, i.value) for i in won], case_id=case.id)
+    # Монеты — сразу на демо-баланс; брейнроты — в инвентарь.
+    coins_won = sum(coin_amount(i.name) or 0 for i in won)
+    if coins_won:
+        user = await add_game_tokens(session, user, coins_won)
+    brainrots = [i for i in won if coin_amount(i.name) is None]
+    entries = iter(await inventory_repo.add_items(
+        session, user, case.name, [(i.name, i.value) for i in brainrots], case_id=case.id
+    ))
     await quest_service.record_progress(session, user, f"open_case:{case.code}")
 
     won_payload = []
-    for item, entry in zip(won, entries):
+    for item in won:
         data = _case_item_json(item)
-        data["inventory_id"] = entry.id
-        data["sell_payout"] = round(item.value * SELL_RATE)
+        if data.get("coins"):
+            data["inventory_id"], data["sell_payout"] = None, 0
+        else:
+            data["inventory_id"] = next(entries).id
+            data["sell_payout"] = round(item.value * SELL_RATE)
         won_payload.append(data)
 
     reels = [[_case_item_json(i) for i in build_reel(items, w)] for w in won]
@@ -359,6 +427,7 @@ async def post_case_open(request: web.Request) -> web.Response:
         "cost": cost,
         "free": free,
         "credits_left": (await rewards_repo.case_credits(session, user)).get(case.code, 0),
+        "free_wait_seconds": free_case_wait_seconds(user),
         "game_tokens": user.game_tokens,
         "reels": reels,
         "reveal_index": REEL_REVEAL_INDEX,
@@ -573,7 +642,7 @@ async def post_dice_roll(request: web.Request) -> web.Response:
 async def get_battle_cases(request: web.Request) -> web.Response:
     session = request["session"]
     openable = []
-    for category in (CaseCategory.STARTER, CaseCategory.SIGNATURE, CaseCategory.APEX):
+    for category in (CaseCategory.ECONOMY, CaseCategory.STARTER, CaseCategory.SIGNATURE, CaseCategory.APEX):
         cases = await cases_repo.list_cases(session, category)
         openable.extend(c for c in cases if c.is_openable and c.price_tokens is not None)
     return web.json_response([_case_json(c) for c in openable])

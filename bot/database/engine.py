@@ -8,6 +8,7 @@ from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker, create_asyn
 
 from bot.config import config
 from bot.data.brainrot_roster import RARITY_ORDER, Rarity
+from bot.data.coins import COIN_RARITY
 from bot.data.seed_cases import CASES_CONTENT_VERSION, SEED_CASES, SEED_CASES_BY_CODE
 from bot.data.seed_items import SEED_ITEMS
 from bot.data.seed_quests import SEED_QUESTS
@@ -54,6 +55,7 @@ async def _migrate_add_missing_columns() -> None:
         ("users", "partner_percent", "FLOAT"),
         ("users", "deposit_bonus_percent", "FLOAT"),
         ("users", "partner_code_id", "INTEGER"),
+        ("users", "free_case_at", "DATETIME"),
     ]
     async with engine.begin() as conn:
         for table, column, coltype in columns_to_add:
@@ -105,12 +107,13 @@ async def _seed_cases_reconcile() -> None:
         for seed_case in SEED_CASES:
             best_rarity = None
             top_item_name = None
-            if seed_case.items:
+            brainrots = [i for i in seed_case.items if i.rarity != COIN_RARITY]  # монеты — не персонажи
+            if brainrots:
                 best_index = max(
-                    (RARITY_ORDER.index(Rarity(i.rarity)) for i in seed_case.items if i.rarity), default=None
+                    (RARITY_ORDER.index(Rarity(i.rarity)) for i in brainrots if i.rarity), default=None
                 )
                 best_rarity = RARITY_ORDER[best_index].value if best_index is not None else None
-                top_item_name = max(seed_case.items, key=lambda i: i.value).name
+                top_item_name = max(brainrots, key=lambda i: i.value).name
             case = Case(
                 category=seed_case.category,
                 code=seed_case.code,

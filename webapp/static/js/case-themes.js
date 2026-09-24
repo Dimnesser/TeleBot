@@ -40,6 +40,21 @@
     star: () => `<path d="M0 -13 L3.8 -4 L13 -4 L5.6 1.8 L8.4 11 L0 5.4 L-8.4 11 L-5.6 1.8 L-13 -4 L-3.8 -4 Z" fill="#fff36b" stroke="#ff4f8b" stroke-width="1.5"/>`,
     crown: () => `<path d="M-12 7 L-12 -6 L-6 0 L0 -10 L6 0 L12 -6 L12 7 Z" fill="#ffd84d" stroke="#fff6c4" stroke-width="1.2"/>
       <circle cx="0" cy="2" r="2.6" fill="#ff4fd8"/><circle cx="-7" cy="3" r="1.8" fill="#7cf3ff"/><circle cx="7" cy="3" r="1.8" fill="#7cf3ff"/>`,
+    diamond: (c) => `<path d="M-12 -4 L-6 -11 L6 -11 L12 -4 L0 12 Z" fill="${c}" stroke="#fff" stroke-width="1.2"/>
+      <path d="M-12 -4 L12 -4 M-6 -11 L-3 -4 L0 12 L3 -4 L6 -11" fill="none" stroke="#fff" stroke-width=".9" opacity=".7"/>`,
+    chart: (c) => `<g fill="none" stroke="${c}" stroke-width="3" stroke-linecap="round" stroke-linejoin="round"><path d="M-11 9 L-4 1 L1 5 L10 -8"/><path d="M4 -8 L10 -8 L10 -2"/></g>`,
+    snow: (c) => `<g stroke="${c}" stroke-width="2.4" stroke-linecap="round">${[0, 60, 120].map((r) => `<g transform="rotate(${r})"><line x1="0" y1="-12" x2="0" y2="12"/><path d="M-3 -9 L0 -6 L3 -9 M-3 9 L0 6 L3 9" fill="none"/></g>`).join('')}</g>`,
+    coin: () => `<circle r="12" fill="#ffd24d" stroke="#b8861a" stroke-width="2"/><circle r="8" fill="none" stroke="#b8861a" stroke-width="1.2"/>
+      <text y="4.5" text-anchor="middle" font-size="12" font-weight="900" fill="#8a5a00" font-family="Unbounded,sans-serif">B</text>`,
+    question: (c) => `<text y="8" text-anchor="middle" font-size="24" font-weight="900" fill="${c}" font-family="Unbounded,sans-serif">?</text>`,
+    moon: () => `<path d="M4 -12 A12 12 0 1 0 12 6 A9 9 0 1 1 4 -12 Z" fill="#fff3b0"/><circle cx="-6" cy="-6" r="1.2" fill="#fff"/><circle cx="8" cy="-10" r="1" fill="#fff"/>`,
+    bolt: (c) => `<path d="M3 -13 L-8 2 L-1 2 L-4 13 L8 -3 L1 -3 Z" fill="${c}" stroke="#fff" stroke-width="1"/>`,
+    recycle: (c) => `<g fill="none" stroke="${c}" stroke-width="3" stroke-linecap="round"><path d="M-8 6 L-11 0 L-5 -9"/><path d="M-1 -11 L6 -11 L10 -3"/><path d="M11 3 L7 10 L-3 10"/></g>
+      <g fill="${c}"><path d="M-5 -9 L-9 -9 L-5 -4 Z"/><path d="M10 -3 L12 -7 L6 -6 Z"/><path d="M-3 10 L0 13 L0 7 Z"/></g>`,
+    wrench: (c) => `<path d="M8 -12 A6 6 0 0 0 1 -4 L-10 7 A2.5 2.5 0 0 0 -6 11 L5 0 A6 6 0 0 0 12 -8 L8 -5 L5 -8 Z" fill="${c}" stroke="#fff" stroke-width=".8"/>`,
+    bow: (c) => `<g fill="${c}" stroke="#fff" stroke-width="1"><path d="M0 0 Q-14 -12 -13 0 Q-14 12 0 0 Z"/><path d="M0 0 Q14 -12 13 0 Q14 12 0 0 Z"/><circle r="3.5"/></g>`,
+    apple: () => `<path d="M0 -6 C-8 -12 -14 -4 -11 4 C-8 12 -3 12 0 9 C3 12 8 12 11 4 C14 -4 8 -12 0 -6 Z" fill="#ff5a4a"/><path d="M0 -6 Q2 -12 6 -13" fill="none" stroke="#6b3a14" stroke-width="2"/><path d="M1 -9 Q6 -13 9 -9 Q5 -7 1 -9 Z" fill="#5ed36a"/>`,
+    key: (c) => `<circle cx="-5" cy="-4" r="6" fill="none" stroke="${c}" stroke-width="3"/><path d="M-1 0 L10 11 M5 6 L8 3 M8 9 L11 6" stroke="${c}" stroke-width="3" stroke-linecap="round"/>`,
   };
 
   // Скины: body (светлый/тёмный), trim (окантовка), lidIn (внутренняя сторона крышки),
@@ -98,7 +113,76 @@
         <g>${[[52, 128, '#7cf3ff'], [148, 128, '#ff4fd8'], [52, 174, '#ff4fd8'], [148, 174, '#7cf3ff']].map(([x, y, c]) => `<path d="M${x} ${y - 6} L${x + 5} ${y} L${x} ${y + 6} L${x - 5} ${y} Z" fill="${c}" stroke="#fff" stroke-width=".8"/>`).join('')}</g>`,
       lidDeco: () => `<path d="M80 46 L84 30 L92 40 L100 24 L108 40 L116 30 L120 46 Z" fill="#ffd84d" stroke="#fff6c4" stroke-width="1.2"/>`,
     },
+    // --- рыночные кейсы
+    hype: {
+      body: ['#ff5b3a', '#8a1a06'], trim: '#2a0700', lidIn: '#4a0e02', glow: '#ffc14d', emblem: 'flame', plate: '#2a0700',
+      pattern: () => stripes('#ffc14d', .22) + `<g fill="none" stroke="#ffc14d" stroke-width="2.5" stroke-linecap="round" opacity=".8"><path d="M44 176 L60 160 L72 168 L92 146"/><path d="M84 146 L92 146 L92 154"/></g>`,
+      backDeco: () => `<g class="art-flame" fill="#ff5b3a" opacity=".6"><path d="M34 118 Q26 86 46 66 Q46 90 60 96 Q58 70 78 50 Q80 80 92 90 L92 118 Z"/><path d="M166 118 Q174 86 154 66 Q154 90 140 96 Q142 70 122 50 Q120 80 108 90 L108 118 Z"/></g>`,
+    },
+    chips: {
+      body: ['#4d8dff', '#122a66'], trim: '#050c1f', lidIn: '#0a1a44', glow: '#b9d4ff', emblem: 'diamond', plate: '#050c1f',
+      pattern: () => `<g fill="#b9d4ff" opacity=".22">${Array.from({ length: 12 }, (_, i) => `<path d="M${40 + (i % 6) * 24} ${126 + Math.floor(i / 6) * 40} l6 -8 l6 8 l-6 8 z"/>`).join('')}</g>`,
+      frontDeco: () => `<g>${[[40, 188, '#4d8dff'], [58, 192, '#fff'], [146, 190, '#b9d4ff'], [164, 187, '#4d8dff']].map(([x, y, c]) => `<ellipse cx="${x}" cy="${y}" rx="9" ry="4" fill="${c}" stroke="#050c1f" stroke-width="1.5"/>`).join('')}</g>`,
+    },
+    runners: {
+      body: ['#2fe3a0', '#0c6b47'], trim: '#03140d', lidIn: '#063a26', glow: '#c4ffe6', emblem: 'chart', plate: '#03140d',
+      pattern: () => stripes('#c4ffe6', .16) + `<g stroke="#03140d" stroke-width="2" opacity=".5"><line x1="30" y1="137" x2="170" y2="137"/><line x1="30" y1="162" x2="170" y2="162"/></g>`,
+    },
+    illiquid: {
+      body: ['#b9c7d6', '#4a5a6c'], trim: '#141c26', lidIn: '#26323f', glow: '#e3f3ff', emblem: 'snow', plate: '#141c26',
+      pattern: () => `<g fill="#fff" opacity=".35"><path d="M30 112 L170 112 L168 120 Q150 128 140 118 Q124 130 108 118 Q92 130 78 118 Q60 130 46 118 Q38 126 30 120 Z"/></g>
+        <g stroke="#fff" stroke-width="1.2" opacity=".3"><path d="M50 140 l14 10 l-6 16 M150 150 l-12 8 l4 14"/></g>`,
+      frontDeco: () => `<g fill="#e3f3ff" opacity=".9">${[[36, 112, 10], [60, 112, 7], [150, 112, 9], [168, 112, 6]].map(([x, y, h]) => `<path d="M${x - 3} ${y} L${x + 3} ${y} L${x} ${y + h} Z"/>`).join('')}</g>`,
+    },
+    // --- бесплатные и эконом
+    freebie: {
+      body: ['#8fd3ff', '#2a6f9e'], trim: '#07121c', lidIn: '#12344c', glow: '#e6f6ff', emblem: 'bow', plate: '#07121c',
+      pattern: () => `<rect x="90" y="112" width="20" height="76" fill="#e6f6ff" opacity=".85"/><rect x="30" y="140" width="140" height="14" fill="#e6f6ff" opacity=".85"/>`,
+    },
+    partner: {
+      body: ['#c6ff3d', '#4f7a0a'], trim: '#0b1206', lidIn: '#233a05', glow: '#eaffb0', emblem: 'bolt', plate: '#0b1206',
+      pattern: () => stripes('#0b1206', .18),
+    },
+    cardboard: {
+      body: ['#d9aa6a', '#8a5f2c'], trim: '#5a3a14', lidIn: '#6e4a1e', glow: '#f3dcae', emblem: 'question', plate: '#b98748',
+      pattern: () => `<rect x="30" y="140" width="140" height="12" fill="#e9d3a8" opacity=".75"/><g stroke="#6e4a1e" stroke-width="1" opacity=".5"><path d="M40 170 L70 170 M44 176 L64 176"/></g>
+        <g fill="none" stroke="#6e4a1e" stroke-width="1.6" opacity=".6"><path d="M136 166 l6 -8 l6 8 M142 158 L142 176"/></g>`,
+    },
+    bin: {
+      body: ['#6fae7f', '#2a5a37'], trim: '#08120b', lidIn: '#173320', glow: '#d8f0de', emblem: 'recycle', plate: '#08120b',
+      pattern: () => `<g stroke="#08120b" stroke-width="3" opacity=".35">${[52, 76, 124, 148].map((x) => `<line x1="${x}" y1="122" x2="${x}" y2="182"/>`).join('')}</g>`,
+    },
+    lunchbox: {
+      body: ['#ff8a5c', '#a3401a'], trim: '#1a0b05', lidIn: '#4a1c0a', glow: '#ffe0c2', emblem: 'apple', plate: '#fff4e8',
+      pattern: () => `<g fill="#fff" opacity=".25">${Array.from({ length: 14 }, (_, i) => `<circle cx="${40 + (i % 7) * 20}" cy="${128 + Math.floor(i / 7) * 44}" r="4"/>`).join('')}</g>`,
+    },
+    toolbox: {
+      body: ['#ff4d5e', '#8a0f1c'], trim: '#170506', lidIn: '#3a0a10', glow: '#ffd0d4', emblem: 'wrench', plate: '#2a2d33',
+      pattern: () => `<g fill="#170506" opacity=".35"><rect x="40" y="122" width="30" height="6" rx="3"/><rect x="130" y="122" width="30" height="6" rx="3"/></g>
+        <g fill="#c9ced6">${[[38, 120], [162, 120], [38, 180], [162, 180]].map(([x, y]) => `<circle cx="${x}" cy="${y}" r="3.2"/>`).join('')}</g>`,
+    },
+    piggy: {
+      body: ['#ff8fc7', '#b33d78'], trim: '#1a0712', lidIn: '#4a1230', glow: '#ffe3f1', emblem: 'coin', plate: '#4a1230',
+      pattern: () => `<rect x="84" y="118" width="32" height="5" rx="2.5" fill="#1a0712" opacity=".6"/>`,
+      frontDeco: () => `<g>${[[40, 190], [60, 194], [148, 191], [166, 187]].map(([x, y], i) => `<ellipse cx="${x}" cy="${y}" rx="8" ry="3.6" fill="#ffd24d" stroke="#b8861a" stroke-width="1.2" transform="rotate(${i % 2 ? 12 : -10} ${x} ${y})"/>`).join('')}</g>`,
+    },
+    sahur: {
+      body: ['#4a57c9', '#161b52'], trim: '#070a1f', lidIn: '#0e1236', glow: '#dfe3ff', emblem: 'moon', plate: '#070a1f',
+      pattern: () => `<g fill="#fff">${[[44, 126], [150, 132], [64, 172], [138, 176], [118, 124], [52, 150]].map(([x, y], i) => `<circle cx="${x}" cy="${y}" r="${i % 2 ? 1 : 1.6}" opacity=".7"/>`).join('')}</g>`,
+    },
+    mystery: {
+      body: ['#8a63d6', '#321a66'], trim: '#0d0719', lidIn: '#1d0f3a', glow: '#efe4ff', emblem: 'question', plate: '#0d0719',
+      pattern: () => `<g fill="#efe4ff" opacity=".16" font-family="Unbounded,sans-serif" font-weight="900" font-size="18">${[[40, 136], [140, 136], [58, 178], [128, 180]].map(([x, y]) => `<text x="${x}" y="${y}">?</text>`).join('')}</g>`,
+    },
+    firstsecret: {
+      body: ['#3a3322', '#12100a'], trim: '#ffd84d', lidIn: '#221d0e', glow: '#fff4c2', emblem: 'key', plate: '#171002',
+      pattern: () => `<g stroke="#ffd84d" stroke-width="2" fill="none" opacity=".4"><rect x="38" y="120" width="124" height="60" rx="6"/></g>`,
+    },
   };
+
+  function stripes(color, opacity) {
+    return `<g stroke="${color}" stroke-width="6" opacity="${opacity}">${Array.from({ length: 9 }, (_, i) => `<line x1="${10 + i * 22}" y1="190" x2="${50 + i * 22}" y2="110"/>`).join('')}</g>`;
+  }
 
   function chest(id, skinKey, colors) {
     const s = SKINS[skinKey] || SKINS.vault;

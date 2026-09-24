@@ -23,6 +23,8 @@ class Config:
     # Демо-валюта игровых разделов (кейсы и т.п.) — НЕ связана с депозитами.
     demo_starting_tokens: int = int(os.getenv("DEMO_STARTING_TOKENS", "2000"))
     demo_topup_tokens: int = int(os.getenv("DEMO_TOPUP_TOKENS", "1000"))
+    # Бесплатный кейс: одно открытие раз в N минут.
+    free_case_cooldown_minutes: int = int(os.getenv("FREE_CASE_COOLDOWN_MINUTES", "10"))
     # Апгрейдер: шанс всегда режется в этот диапазон, чтобы не было 0%/100% исходов.
     upgrader_min_chance_percent: int = int(os.getenv("UPGRADER_MIN_CHANCE_PERCENT", "1"))
     # Mini App: в список целей апгрейдера попадают только брейнроты, для

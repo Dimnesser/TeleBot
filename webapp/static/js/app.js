@@ -4,8 +4,8 @@ const tg = window.Telegram && window.Telegram.WebApp;
 if (tg) {
   tg.ready();
   tg.expand();
-  if (tg.setHeaderColor) try { tg.setHeaderColor('#07060c'); } catch (e) {}
-  if (tg.setBackgroundColor) try { tg.setBackgroundColor('#07060c'); } catch (e) {}
+  if (tg.setHeaderColor) try { tg.setHeaderColor('#0a0f1e'); } catch (e) {}
+  if (tg.setBackgroundColor) try { tg.setBackgroundColor('#0a0f1e'); } catch (e) {}
 }
 
 // Диагностическая страховка: любая необработанная ошибка/rejection раньше
@@ -80,6 +80,7 @@ function glowVars(b) {
 /** Официальный рендер брейнрота (из вики, см. webapp/static/assets/brainrots).
  * Если ассета нет — честный плейсхолдер, никакой подменной картинки. */
 function brainrotArt(b, sizeClass = '') {
+  if (b.coins) return `<div class="p-tile is-coins ${sizeClass}" style="${glowVars(b)}">${COIN_SVG}</div>`;
   const img = b.image_url
     ? `<img src="${b.image_url}" alt="${escapeHtml(b.name)}" loading="lazy" draggable="false">`
     : '<span class="p-tile-missing">нет ассета</span>';
@@ -279,87 +280,165 @@ function caseThemeVars(c) {
   return `--c1:${c1};--c2:${c2};--c3:${c3}`;
 }
 
+const COIN_SVG = `<svg viewBox="0 0 40 40" class="coin-art" aria-hidden="true"><circle cx="20" cy="20" r="17" fill="#ffd24d" stroke="#b8861a" stroke-width="2.5"/><circle cx="20" cy="20" r="12" fill="none" stroke="#b8861a" stroke-width="1.5"/><text x="20" y="26" text-anchor="middle" font-size="16" font-weight="900" fill="#8a5a00" font-family="Unbounded,sans-serif">B</text></svg>`;
+const DEMAND_LABEL = { 'Very High': 'спрос ↑↑', High: 'спрос ↑', Medium: 'спрос =', Low: 'спрос ↓', 'Very Low': 'спрос ↓↓' };
+
+function coinIcon() { return '<i class="b-coin"></i>'; }
+function priceHtml(n) { return `<span class="price">${fmt(n)}${coinIcon()}</span>`; }
+
+function marketChips(b) {
+  if (!b.market) return '';
+  const { tier, demand } = b.market;
+  const hot = demand === 'Very High' || demand === 'High';
+  const cold = demand === 'Very Low' || demand === 'Low';
+  return `${tier ? `<span class="mk-tier">${tier}</span>` : ''}${demand ? `<span class="mk-demand ${hot ? 'hot' : cold ? 'cold' : ''}" title="${escapeHtml(demand)}">${hot ? '▲' : cold ? '▼' : '•'}</span>` : ''}`;
+}
+
+function freeWaitLabel(sec) {
+  const h = Math.floor(sec / 3600), m = Math.floor((sec % 3600) / 60), s = sec % 60;
+  return h ? `${h}ч ${m}м` : m ? `${m}м ${String(s).padStart(2, '0')}с` : `${s}с`;
+}
+
+let freeTimer = null;
+let freeReadyAt = 0;
+
+function caseFootRight(c) {
+  if (c.category === 'free') {
+    const left = Math.max(0, Math.ceil((freeReadyAt - Date.now()) / 1000));
+    return left ? `<span class="case-status" data-free-timer>${freeWaitLabel(left)}</span>` : '<span class="case-status ready">Доступен</span>';
+  }
+  if (c.category === 'referral') {
+    const n = caseCreditsLeft(c);
+    return n ? `<span class="case-status ready">Осталось ${n}</span>` : '<span class="case-status">По коду</span>';
+  }
+  return priceHtml(c.price_tokens);
+}
+
 function caseCard(c, idx) {
+  const badge = c.theme && c.theme.badge;
   return `
-    <button class="case-card fade-in-up" style="${caseThemeVars(c)};animation-delay:${Math.min(idx * 45, 400)}ms" data-case-id="${c.id}">
-      <div class="case-card-glow"></div>
+    <button class="case-card fade-in-up" style="${caseThemeVars(c)};animation-delay:${Math.min(idx * 35, 350)}ms" data-case-id="${c.id}" data-name="${escapeHtml(c.name.toLowerCase())}" data-price="${c.price_tokens}" data-cat="${c.category}">
+      ${badge ? `<span class="case-badge">${escapeHtml(badge)}</span>` : ''}
       <div class="case-card-art">${CaseArt.artifact(c, 'artifact-sm')}</div>
-      <div class="case-card-body">
-        <div class="case-card-name">${escapeHtml(c.name)}</div>
-        <div class="case-card-tagline">${escapeHtml(c.theme ? c.theme.tagline : '')}</div>
-        <div class="case-card-foot">
-          <span class="case-card-count"></span>
-          <span class="price-chip">${fmt(c.price_tokens)} 🎫</span>
-        </div>
+      <div class="case-card-name">${escapeHtml(c.name)}</div>
+      <div class="case-card-foot">
+        <span class="case-card-count">${c.item_count_label} предм.</span>
+        ${caseFootRight(c)}
       </div>
     </button>`;
 }
 
+const CASE_FILTERS = [
+  ['all', 'Все кейсы', () => true],
+  ['free', 'Бесплатные', (c) => c.category === 'free' || c.category === 'referral'],
+  ['10', 'До 10', (c) => c.price_tokens > 0 && c.price_tokens <= 10],
+  ['100', 'До 100', (c) => c.price_tokens > 10 && c.price_tokens <= 100],
+  ['500', 'До 500', (c) => c.price_tokens > 100 && c.price_tokens <= 500],
+  ['max', '500+', (c) => c.price_tokens > 500],
+];
+let caseFilter = 'all';
+
 async function renderCasesScreen(root) {
-  const [data, me, recentWins] = await Promise.all([
+  const [data, , market] = await Promise.all([
     api('/api/cases'),
     refreshMe(),
-    api('/api/recent-wins?limit=14').catch(() => []),
+    api('/api/market').catch(() => null),
   ]);
+  freeReadyAt = Date.now() + (data.free_wait_seconds || 0) * 1000;
   const all = data.collections.flatMap((col) => col.cases);
-  const featured = all.slice().sort((a, b) => b.price_tokens - a.price_tokens)[0];
+  const freeCase = all.find((c) => c.category === 'free');
 
-  const hero = featured ? `
-    <button class="hero-case fade-in-up" style="${caseThemeVars(featured)}" data-case-id="${featured.id}">
-      <div class="hero-case-bg"></div>
-      <div class="hero-case-text">
-        <div class="eyebrow">Главный кейс</div>
-        <div class="hero-case-name">${escapeHtml(featured.name)}</div>
-        <div class="hero-case-tagline">${escapeHtml(featured.theme ? featured.theme.tagline : '')}</div>
-        <span class="price-chip price-chip-lg">${fmt(featured.price_tokens)} 🎫</span>
+  const banner = freeCase ? `
+    <button class="free-banner fade-in-up" data-case-id="${freeCase.id}" style="${caseThemeVars(freeCase)}">
+      <div class="free-banner-text">
+        <div class="free-banner-title">БЕСПЛАТНЫЙ КЕЙС</div>
+        <div class="free-banner-sub" id="free-banner-sub"></div>
       </div>
-      <div class="hero-case-art">${CaseArt.artifact(featured, 'artifact-float')}</div>
+      <div class="free-banner-art">${CaseArt.artifact(freeCase, 'artifact-sm')}</div>
     </button>` : '';
 
-  const ticker = recentWins.length ? `
-    <div class="live-strip">
-      <div class="live-label"><span class="live-dot"></span>Live-дропы</div>
-      <div class="live-row">
-        ${recentWins.map((w) => `
-          <div class="live-card" style="${glowVars(w)}" title="${escapeHtml(w.name)}">
-            ${brainrotArt(w)}
-            <div class="live-player">${escapeHtml(w.player)}</div>
-            <div class="live-value">${fmt(w.value)}</div>
-          </div>`).join('')}
+  const pulse = market && (market.hot.length || market.cold.length) ? `
+    <section class="pulse fade-in-up">
+      <div class="pulse-head"><span class="live-dot"></span>ПУЛЬС РЫНКА<span class="pulse-date">${escapeHtml(market.as_of)}</span></div>
+      <div class="pulse-row">
+        ${market.hot.slice(0, 8).map((b) => pulseChip(b, 'hot')).join('')}
+        ${market.cold.slice(0, 8).map((b) => pulseChip(b, 'cold')).join('')}
       </div>
-    </div>` : '';
+    </section>` : '';
 
-  const sections = data.collections.map((col) => `
-    <section class="collection">
-      <div class="collection-head">
-        <h2 class="collection-title">${escapeHtml(col.title)}</h2>
-      </div>
-      <div class="case-grid ${col.cases.length === 1 ? 'single' : ''}">${col.cases.map(caseCard).join('')}</div>
+  const sections = data.collections.filter((col) => col.cases.length).map((col) => `
+    <section class="collection" data-collection="${col.key}">
+      <h2 class="section-head"><span>${escapeHtml(col.title)}</span></h2>
+      <div class="case-grid">${col.cases.map(caseCard).join('')}</div>
     </section>`).join('');
 
   root.innerHTML = `
-    <div class="wallet-row">
-      <div class="wallet"><span class="wallet-label">Демо-баланс</span><span class="wallet-value" id="home-tokens">${fmt(me.game_tokens)} 🎫</span></div>
-      <button class="btn-chip" id="btn-topup">+ ${'Пополнить'}</button>
-      <button class="btn-chip ghost" id="btn-inventory">Инвентарь</button>
+    ${banner}
+    <div class="case-tools">
+      <label class="select-wrap">
+        <select id="case-filter">${CASE_FILTERS.map(([k, t]) => `<option value="${k}" ${k === caseFilter ? 'selected' : ''}>${t}</option>`).join('')}</select>
+      </label>
+      <label class="search-wrap"><input id="case-search" type="search" placeholder="Поиск кейса" autocomplete="off"></label>
     </div>
-    ${hero}
-    ${ticker}
-    ${sections}`;
+    ${pulse}
+    ${sections}
+    <div class="empty-state hidden" id="cases-empty">Ничего не найдено</div>`;
 
   root.querySelectorAll('[data-case-id]').forEach((el) =>
     el.addEventListener('click', () => openCaseStage(Number(el.dataset.caseId)))
   );
-  root.querySelector('#btn-inventory').addEventListener('click', () => navigate('inventory'));
-  root.querySelector('#btn-topup').addEventListener('click', async () => {
-    const res = await api('/api/demo-topup', { method: 'POST' });
-    toast(`+${fmt(res.amount)} 🎫`, 'success');
-    ME.game_tokens = res.game_tokens;
-    const el = root.querySelector('#home-tokens');
-    el.textContent = `${fmt(res.game_tokens)} 🎫`;
-    popNumber(el);
-    refreshMe();
-  });
+  root.querySelectorAll('[data-pulse]').forEach((el) =>
+    el.addEventListener('click', () => openBrainrotSheet(JSON.parse(el.dataset.pulse)))
+  );
+  const byId = Object.fromEntries(all.map((c) => [c.id, c]));
+  const applyFilter = () => {
+    const q = root.querySelector('#case-search').value.trim().toLowerCase();
+    const test = CASE_FILTERS.find(([k]) => k === caseFilter)[2];
+    let shown = 0;
+    root.querySelectorAll('.collection').forEach((sec) => {
+      let n = 0;
+      sec.querySelectorAll('.case-card').forEach((el) => {
+        const ok = test(byId[el.dataset.caseId]) && (!q || el.dataset.name.includes(q));
+        el.classList.toggle('hidden', !ok);
+        n += ok;
+      });
+      sec.classList.toggle('hidden', !n);
+      shown += n;
+    });
+    root.querySelector('#cases-empty').classList.toggle('hidden', !!shown);
+    const p = root.querySelector('.pulse');
+    if (p) p.classList.toggle('hidden', !!q || caseFilter !== 'all');
+  };
+  root.querySelector('#case-filter').addEventListener('change', (e) => { caseFilter = e.target.value; applyFilter(); });
+  root.querySelector('#case-search').addEventListener('input', applyFilter);
+  applyFilter();
+  startFreeTimer();
+}
+
+function pulseChip(b, kind) {
+  return `
+    <button class="pulse-chip ${kind}" data-pulse="${escapeHtml(JSON.stringify(b))}">
+      ${brainrotArt(b)}
+      <span class="pulse-arrow">${kind === 'hot' ? '▲' : '▼'}</span>
+      <span class="pulse-val">${fmt(b.value)}${coinIcon()}</span>
+    </button>`;
+}
+
+/** Тикает таймер бесплатного кейса на главной (баннер + карточка). */
+function startFreeTimer() {
+  if (freeTimer) clearInterval(freeTimer);
+  const paint = () => {
+    const sub = document.getElementById('free-banner-sub');
+    if (!sub) { clearInterval(freeTimer); freeTimer = null; return; }
+    const left = Math.max(0, Math.ceil((freeReadyAt - Date.now()) / 1000));
+    sub.innerHTML = left ? `Следующий через <b>${freeWaitLabel(left)}</b>` : '<b class="ok">Можно открыть</b>';
+    document.querySelectorAll('[data-free-timer]').forEach((el) => {
+      if (left) el.textContent = freeWaitLabel(left);
+      else { el.textContent = 'Доступен'; el.classList.add('ready'); el.removeAttribute('data-free-timer'); }
+    });
+  };
+  paint();
+  freeTimer = setInterval(paint, 1000);
 }
 
 function renderDepositPlaceholder(root) {
@@ -417,24 +496,27 @@ async function openCaseStage(caseId, qty = 1) {
     <div class="stage-flash"></div>
     <div class="stage-scroll">
       <header class="stage-top">
-        <button class="stage-close" aria-label="Закрыть">✕</button>
-        <div class="stage-wallet"><span id="stage-tokens">${fmt(ME ? ME.game_tokens : 0)}</span> 🎫</div>
+        <button class="stage-close" aria-label="Назад">‹</button>
+        <div class="stage-wallet"><span id="stage-tokens">${fmt(ME ? ME.game_tokens : 0)}</span>${coinIcon()}</div>
       </header>
       <div class="stage-hero" id="stage-hero">
         <div class="stage-art">${CaseArt.artifact(c, 'artifact-lg artifact-float')}</div>
         <h1 class="stage-name">${escapeHtml(c.name)}</h1>
-        <p class="stage-lore">${escapeHtml(c.theme ? c.theme.lore : '')}</p>
+        ${c.theme && c.theme.badge && c.theme.badge.toLowerCase() !== c.name.toLowerCase() ? `<span class="case-badge static">${escapeHtml(c.theme.badge)}</span>` : ''}
       </div>
       <div class="stage-reels hidden" id="stage-reels"></div>
       <div class="stage-controls" id="stage-controls"></div>
       <section class="stage-contents">
-        <div class="contents-head"><h3>Что внутри</h3></div>
+        <h2 class="section-head"><span>Что может выпасть</span></h2>
         <div class="contents-grid">
           ${c.items.map((i, idx) => `
-            <button class="content-tile fade-in-up" style="${glowVars(i)};animation-delay:${Math.min(idx * 30, 360)}ms" data-item="${idx}">
-              ${brainrotArt(i)}
-              <div class="content-name">${escapeHtml(i.name)}</div>
-              <div class="content-meta"><span class="content-value">${fmt(i.value)} 🎫</span></div>
+            <button class="content-tile fade-in-up" style="${glowVars(i)};animation-delay:${Math.min(idx * 25, 300)}ms" data-item="${idx}">
+              <div class="content-art">
+                ${brainrotArt(i)}
+                <span class="content-value">${fmt(i.value)}${coinIcon()}</span>
+                <span class="content-market">${marketChips(i)}</span>
+              </div>
+              <div class="content-name">${escapeHtml(i.coins ? 'Монеты' : i.name)}</div>
             </button>`).join('')}
         </div>
       </section>
@@ -443,7 +525,7 @@ async function openCaseStage(caseId, qty = 1) {
   stageFx = CaseArt.particles(stage.querySelector('.stage-fx'), c.theme ? c.theme.particles : 'dust', c.theme ? c.theme.colors : ['#fff', '#fff']);
   stage.querySelector('.stage-close').addEventListener('click', () => { closeStage(); navigate('home'); });
   stage.querySelectorAll('[data-item]').forEach((el) =>
-    el.addEventListener('click', () => openBrainrotSheet(c.items[Number(el.dataset.item)]))
+    el.addEventListener('click', () => { const it = c.items[Number(el.dataset.item)]; if (!it.coins) openBrainrotSheet(it); })
   );
   paintStageControls(stage, c, qty);
 }
@@ -460,34 +542,51 @@ function caseCreditsLeft(c) {
 
 function paintStageControls(stage, c, qty) {
   const controls = stage.querySelector('#stage-controls');
+  const isFree = c.category === 'free';
+  const isRef = c.category === 'referral';
+  if (isFree || isRef) qty = 1;
   const total = c.price_tokens * qty;
   const credits = caseCreditsLeft(c);
-  const free = credits >= qty;
-  const enough = free || (ME && ME.game_tokens >= total);
+  const byCredit = credits >= qty;
+  const freeLeft = isFree ? Math.max(0, Math.ceil((freeReadyAt - Date.now()) / 1000)) : 0;
+  let label = 'Открыть кейс', price = priceHtml(total), block = null;
+  if (byCredit) { label = 'Открыть бесплатно'; price = `<span class="price">×${credits}</span>`; }
+  else if (isFree) {
+    if (freeLeft) { label = 'Через ' + freeWaitLabel(freeLeft); price = ''; block = 'Бесплатный кейс ещё перезаряжается'; }
+    else { label = 'Открыть бесплатно'; price = ''; }
+  } else if (isRef) { label = 'Только по коду партнёра'; price = ''; block = 'Этот кейс выдаётся за код партнёра'; }
+  else if (!ME || ME.game_tokens < total) { block = `Нужно ${fmt(total)}, у тебя ${fmt(ME ? ME.game_tokens : 0)}. Пополни баланс.`; }
+
   controls.innerHTML = `
-    <div class="qty-switch" role="tablist">
-      ${[1, 3, 5].map((q) => `<button class="qty-opt ${q === qty ? 'active' : ''}" data-qty="${q}">×${q}</button>`).join('')}
-    </div>
-    <button class="open-btn ${free ? 'is-free' : ''}" id="btn-open" ${enough ? '' : 'data-poor="1"'}>
-      <span class="open-btn-shine"></span>
-      <span class="open-btn-label">${free ? 'Бесплатно' : enough ? 'Открыть' : 'Не хватает 🎫'}</span>
-      <span class="open-btn-price">${free ? `🎁 ${credits}` : fmt(total) + ' 🎫'}</span>
-    </button>`;
+    ${isFree || isRef ? '' : `<div class="qty-switch" role="tablist">
+      ${[1, 3, 5].map((q) => `<button class="qty-opt ${q === qty ? 'active' : ''}" data-qty="${q}">${q}</button>`).join('')}
+    </div>`}
+    <div class="open-row">
+      <button class="open-btn ${byCredit || isFree ? 'is-free' : ''}" id="btn-open" ${block ? 'data-poor="1"' : ''}>
+        <span class="open-btn-label">${label}</span>${price ? `<span class="open-btn-price">${price}</span>` : ''}
+      </button>
+      <button class="quick-btn" id="btn-quick" aria-label="Быстрое открытие" ${block ? 'data-poor="1"' : ''}>
+        <svg viewBox="0 0 24 24" class="ic"><path d="M13 2 4 14h7l-1 8 9-12h-7z" fill="currentColor"/></svg>
+      </button>
+    </div>`;
   controls.querySelectorAll('.qty-opt').forEach((el) =>
     el.addEventListener('click', () => { haptic.tick(); paintStageControls(stage, c, Number(el.dataset.qty)); })
   );
-  controls.querySelector('#btn-open').addEventListener('click', (e) => {
-    if (e.currentTarget.dataset.poor) {
-      toast(`Нужно ${fmt(total)} 🎫, у тебя ${fmt(ME.game_tokens)} 🎫. Пополни демо-баланс на главной.`, 'error');
-      return;
-    }
-    runOpening(stage, c, qty);
-  });
+  const go = (fast) => (e) => {
+    if (e.currentTarget.dataset.poor) { toast(block, 'error'); return; }
+    runOpening(stage, c, qty, fast);
+  };
+  controls.querySelector('#btn-open').addEventListener('click', go(false));
+  controls.querySelector('#btn-quick').addEventListener('click', go(true));
+  if (isFree && freeLeft && !byCredit) {
+    clearTimeout(stage._freeTick);
+    stage._freeTick = setTimeout(() => { if (document.body.contains(controls) && !controls.classList.contains('busy')) paintStageControls(stage, c, qty); }, 1000);
+  }
 }
 
 function sleep(ms) { return new Promise((r) => setTimeout(r, ms)); }
 
-async function runOpening(stage, c, qty) {
+async function runOpening(stage, c, qty, fast = false) {
   const controls = stage.querySelector('#stage-controls');
   controls.classList.add('busy');
   controls.querySelector('#btn-open').disabled = true;
@@ -499,7 +598,7 @@ async function runOpening(stage, c, qty) {
   try {
     [res] = await Promise.all([
       api(`/api/cases/${c.id}/open`, { method: 'POST', body: JSON.stringify({ qty, use_credits: caseCreditsLeft(c) >= qty }) }),
-      sleep(CaseArt.REDUCED ? 100 : 900),
+      sleep(CaseArt.REDUCED || fast ? 100 : 900),
     ]);
   } catch (err) {
     art.classList.remove('charging');
@@ -510,6 +609,7 @@ async function runOpening(stage, c, qty) {
   }
   ME.game_tokens = res.game_tokens;
   if (ME.case_credits) ME.case_credits[c.code] = res.credits_left;
+  if (c.category === 'free') freeReadyAt = Date.now() + (res.free_wait_seconds || 0) * 1000;
   const walletEl = stage.querySelector('#stage-tokens');
   walletEl.textContent = fmt(res.game_tokens);
   popNumber(walletEl);
@@ -538,7 +638,7 @@ async function runOpening(stage, c, qty) {
     </div>`).join('');
 
   const spins = [...reelsEl.querySelectorAll('.reel')].map((el, r) =>
-    spinReel(el, res.reveal_index, (CaseArt.REDUCED ? 700 : (multi ? 3600 : 5200)) + r * 450)
+    spinReel(el, res.reveal_index, CaseArt.REDUCED || fast ? 650 + r * 120 : (multi ? 3600 : 5200) + r * 450)
   );
   controls.querySelector('#btn-skip').addEventListener('click', () => spins.forEach((s) => s.skip()));
   await Promise.all(spins.map((s) => s.done));
@@ -551,7 +651,7 @@ async function runOpening(stage, c, qty) {
   const reelRect = reelsEl.getBoundingClientRect();
   stageFx && stageFx.burst(stage.clientWidth / 2, reelRect.top + reelRect.height / 2, bc, best.rarity === 'og' ? 2.2 : best.value >= 2500 ? 1.5 : 1);
   if (best.rarity === 'og' || best.value >= 10000) stage.classList.add('shake');
-  await sleep(CaseArt.REDUCED ? 100 : 750);
+  await sleep(CaseArt.REDUCED || fast ? 150 : 750);
   stage.classList.remove('shake');
   showReveal(stage, c, qty, res.won);
 }
@@ -629,33 +729,34 @@ function showReveal(stage, c, qty, won) {
   const controls = stage.querySelector('#stage-controls');
   const total = won.reduce((s, w) => s + w.value, 0);
   const payoutTotal = won.reduce((s, w) => s + w.sell_payout, 0);
+  const sellable = won.some((w) => !w.coins);
+  const again = c.category !== 'free' && c.category !== 'referral' || caseCreditsLeft(c) >= qty;
 
   const cards = won.map((w, i) => `
     <div class="reveal ${won.length > 1 ? 'reveal-sm' : ''} ${w.rarity === 'og' ? 'is-og' : ''}" style="${glowVars(w)};animation-delay:${i * 90}ms" data-won="${i}">
       <div class="reveal-rays"></div>
       <div class="reveal-art">${brainrotArt(w)}</div>
       ${rarityBadge(w)}
-      <div class="reveal-name">${escapeHtml(w.name)}</div>
-      <div class="reveal-value">${fmt(w.value)} 🎫</div>
+      <div class="reveal-name">${escapeHtml(w.coins ? 'Монеты на баланс' : w.name)}</div>
+      <div class="reveal-value">${w.coins ? '+' : ''}${fmt(w.value)}${coinIcon()}</div>
       ${won.length === 1 ? gameInfoHtml(w) : ''}
-      ${won.length > 1 ? `<button class="sell-mini" data-sell="${i}">↯ ${fmt(w.sell_payout)} 🎫</button>` : ''}
+      ${won.length > 1 && !w.coins ? `<button class="sell-mini" data-sell="${i}">↯ ${fmt(w.sell_payout)}${coinIcon()}</button>` : ''}
     </div>`).join('');
 
   reelsEl.innerHTML = `
     <div class="reveal-wrap ${won.length > 1 ? 'multi' : ''}">${cards}</div>
-    ${won.length > 1 ? `<div class="reveal-total">Итого: <b>${fmt(total)} 🎫</b></div>` : ''}`;
+    ${won.length > 1 ? `<div class="reveal-total">Итого: <b>${fmt(total)}${coinIcon()}</b></div>` : ''}`;
 
   controls.classList.remove('busy');
   controls.innerHTML = `
-    <div class="reveal-actions">
-      <button class="btn-chip ghost" id="btn-keep">Забрать${won.length > 1 ? ' всё' : ''}</button>
-      <button class="btn-chip ghost" id="btn-sell-all">Продать${won.length > 1 ? ' всё' : ''} · ${fmt(payoutTotal)} 🎫</button>
+    <div class="reveal-actions ${sellable ? '' : 'single'}">
+      <button class="btn-chip ghost" id="btn-keep">${sellable ? 'Забрать' + (won.length > 1 ? ' всё' : '') : 'Готово'}</button>
+      ${sellable ? `<button class="btn-chip ghost" id="btn-sell-all">Продать${won.length > 1 ? ' всё' : ''} · ${fmt(payoutTotal)}${coinIcon()}</button>` : ''}
     </div>
-    <button class="open-btn" id="btn-again">
-      <span class="open-btn-shine"></span>
+    ${again ? `<button class="open-btn" id="btn-again">
       <span class="open-btn-label">Ещё раз</span>
-      <span class="open-btn-price">${fmt(c.price_tokens * qty)} 🎫</span>
-    </button>`;
+      <span class="open-btn-price">${c.price_tokens ? priceHtml(c.price_tokens * qty) : ''}</span>
+    </button>` : ''}`;
 
   const sold = new Set();
   async function sell(i) {
@@ -667,29 +768,29 @@ function showReveal(stage, c, qty, won) {
     const card = reelsEl.querySelector(`[data-won="${i}"]`);
     card.classList.add('sold');
     const mini = card.querySelector('.sell-mini');
-    if (mini) { mini.disabled = true; mini.textContent = `+${fmt(res.payout)} 🎫`; }
+    if (mini) { mini.disabled = true; mini.textContent = `+${fmt(res.payout)}`; }
     return res.payout;
   }
 
   reelsEl.querySelectorAll('[data-sell]').forEach((el) =>
     el.addEventListener('click', async () => {
       el.disabled = true;
-      try { const p = await sell(Number(el.dataset.sell)); if (p) toast(`+${fmt(p)} 🎫`, 'success'); }
+      try { const p = await sell(Number(el.dataset.sell)); if (p) toast(`+${fmt(p)}`, 'success'); }
       catch (err) { toast('Ошибка: ' + err.message, 'error'); el.disabled = false; }
     })
   );
-  controls.querySelector('#btn-sell-all').addEventListener('click', async (e) => {
+  if (sellable) controls.querySelector('#btn-sell-all').addEventListener('click', async (e) => {
     e.currentTarget.disabled = true;
     let sum = 0;
-    for (let i = 0; i < won.length; i++) { try { sum += await sell(i); } catch (err) { /* уже продан */ } }
-    if (sum) toast(`Продано: +${fmt(sum)} 🎫`, 'success');
+    for (let i = 0; i < won.length; i++) { if (won[i].coins) continue; try { sum += await sell(i); } catch (err) { /* уже продан */ } }
+    if (sum) toast(`Продано: +${fmt(sum)}`, 'success');
     popNumber(stage.querySelector('#stage-tokens'));
   });
   controls.querySelector('#btn-keep').addEventListener('click', () => {
-    toast(won.length > 1 ? 'Брейнроты в инвентаре' : `${won[0].name} — в инвентаре`, 'success');
+    if (sellable) toast(won.length > 1 ? 'Брейнроты в инвентаре' : `${won[0].name} — в инвентаре`, 'success');
     resetStage(stage, c, qty);
   });
-  controls.querySelector('#btn-again').addEventListener('click', () => {
+  if (again) controls.querySelector('#btn-again').addEventListener('click', () => {
     resetStage(stage, c, qty);
     runOpening(stage, c, qty);
   });
@@ -714,7 +815,8 @@ function openBrainrotSheet(b) {
       <div class="reveal-art">${brainrotArt(b)}</div>
       ${rarityBadge(b)}
       <div class="reveal-name">${escapeHtml(b.name)}</div>
-      <div class="reveal-value">${fmt(b.value)} 🎫</div>
+      <div class="reveal-value">${fmt(b.value)}${coinIcon()}</div>
+      ${b.market ? `<div class="market-line">${b.market.tier ? `Тир трейдеров <b>${b.market.tier}</b>` : ''}${b.market.tier && b.market.demand ? ' · ' : ''}${b.market.demand ? `<b>${DEMAND_LABEL[b.market.demand] || escapeHtml(b.market.demand)}</b>` : ''}</div>` : ''}
       ${gameInfoHtml(b)}
     </div>`);
 }
@@ -1802,12 +1904,9 @@ async function renderBattleScreen(root) {
     <div class="case-grid battle-grid">
       ${cases.map((c, idx) => `
         <button class="case-card battle-card fade-in-up" style="${caseThemeVars(c)};animation-delay:${Math.min(idx * 40, 320)}ms" data-id="${c.id}">
-          <div class="case-card-glow"></div>
           <div class="case-card-art">${CaseArt.artifact(c, 'artifact-sm')}</div>
-          <div class="case-card-body">
-            <div class="case-card-name">${escapeHtml(c.name)}</div>
-            <div class="case-card-foot"><span class="case-card-count"></span><span class="price-chip">${fmt(c.price_tokens)} 🎫</span></div>
-          </div>
+          <div class="case-card-name">${escapeHtml(c.name)}</div>
+          <div class="case-card-foot"><span class="case-card-count">${c.item_count_label} предм.</span>${priceHtml(c.price_tokens)}</div>
         </button>`).join('') || '<div class="empty-state">Нет доступных кейсов для батла.</div>'}
     </div>`;
   root.querySelectorAll('[data-id]').forEach((el) =>

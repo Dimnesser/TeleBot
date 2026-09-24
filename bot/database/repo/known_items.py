@@ -12,6 +12,7 @@ from dataclasses import dataclass
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from bot.data.coins import coin_amount
 from bot.database.models import CaseItem, DepositItem
 
 
@@ -27,6 +28,8 @@ async def list_known_items(session: AsyncSession) -> list[KnownItem]:
 
     by_name: dict[str, int] = {}
     for name, value in [*deposit_result.all(), *case_result.all()]:
+        if coin_amount(name) is not None:
+            continue  # монеты из кейсов — не предмет
         # при дублях (одно и то же имя в разных источниках) берём большую цену
         by_name[name] = max(value, by_name.get(name, 0))
 

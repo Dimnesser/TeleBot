@@ -57,6 +57,7 @@ class User(Base):
     # Бонус % к каждому пополнению — даёт активированный партнёрский код.
     deposit_bonus_percent: Mapped[float | None] = mapped_column(Float, nullable=True)
     partner_code_id: Mapped[int | None] = mapped_column(Integer, nullable=True)
+    free_case_at: Mapped[datetime | None] = mapped_column(DateTime, nullable=True)
     created_at: Mapped[datetime] = mapped_column(DateTime, server_default=func.now())
 
 
@@ -102,6 +103,8 @@ class CaseCategory(str, enum.Enum):
     APEX = "apex"
     # Не продаётся: открывается только бесплатными открытиями (партнёрский код).
     REFERRAL = "referral"
+    FREE = "free"  # открывается бесплатно раз в FREE_CASE_COOLDOWN_MINUTES
+    ECONOMY = "economy"  # дешёвые кейсы с «нищими» брейнротами и монетами
 
 
 class Case(Base):
