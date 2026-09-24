@@ -3,6 +3,8 @@
 from __future__ import annotations
 
 COIN_PREFIX = "🪙 "
+# Старые записи каталога/ленты могли сохраниться с прежним префиксом.
+LEGACY_COIN_PREFIXES = ("🎫 ",)
 COIN_RARITY = "coins"
 
 
@@ -11,7 +13,8 @@ def coin_name(amount: int) -> str:
 
 
 def coin_amount(name: str) -> int | None:
-    if not name.startswith(COIN_PREFIX):
+    prefix = next((p for p in (COIN_PREFIX, *LEGACY_COIN_PREFIXES) if name.startswith(p)), None)
+    if prefix is None:
         return None
-    tail = name[len(COIN_PREFIX):]
+    tail = name[len(prefix):]
     return int(tail) if tail.isdigit() else None

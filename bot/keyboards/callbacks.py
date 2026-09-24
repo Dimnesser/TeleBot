@@ -21,10 +21,6 @@ class DepositSortCB(CallbackData, prefix="dsort"):
     direction: str  # asc | desc
 
 
-class DepositBuffCB(CallbackData, prefix="dbuff"):
-    pass
-
-
 class DepositSearchCB(CallbackData, prefix="dsearch"):
     pass
 
@@ -43,10 +39,6 @@ class DepositCloseCB(CallbackData, prefix="dclose"):
 
 class DepositConfirmCB(CallbackData, prefix="dconfirm"):
     action: str  # send | cancel
-
-
-class DepositQueueCB(CallbackData, prefix="dqueue"):
-    action: str  # join | close
 
 
 class DepositAdminCB(CallbackData, prefix="dadmin"):

@@ -7,35 +7,23 @@ from aiogram import Router
 from aiogram.fsm.context import FSMContext
 from aiogram.types import CallbackQuery, Message
 
-from bot.config import config
 from bot.database.engine import async_session
-from bot.database.models import DepositCategory, DepositRequestStatus
+from bot.database.models import DepositCategory
 from bot.database.repo import deposit_items as items_repo
-from bot.database.repo import deposit_requests as requests_repo
 from bot.database.repo.users import get_or_create_user
 from bot.keyboards.callbacks import (
-    DepositBuffCB,
     DepositCloseCB,
     DepositConfirmCB,
     DepositNextCB,
     DepositQtyCB,
-    DepositQueueCB,
     DepositResetFiltersCB,
     DepositSearchCB,
     DepositSortCB,
     DepositTabCB,
 )
-from bot.keyboards.deposit import catalog_keyboard, confirm_keyboard, deposit_unavailable_keyboard
-from bot.services.deposit_service import (
-    apply_delta,
-    cart_is_valid,
-    cart_total,
-    estimate_wait_seconds,
-    format_eta,
-    get_buff,
-    next_buff_code,
-)
-from bot.services.notify import notify_admins_new_request
+from bot.keyboards.deposit import catalog_keyboard, confirm_keyboard
+from bot.services.deposit_moderation import DepositAlreadyOpen, submit_deposit
+from bot.services.deposit_service import apply_delta, cart_is_valid, cart_total, get_buff
 from bot.states.deposit import DepositCatalog
 from bot.utils.texts import (
     CATALOG_DESCRIPTION,
@@ -48,19 +36,20 @@ from bot.utils.texts import (
     DEPOSIT_CLOSED_TEXT,
     DEPOSIT_CONFIRM_TEXT,
     DEPOSIT_NICKNAME_INVALID,
+    DEPOSIT_ALREADY_OPEN_TEXT,
     DEPOSIT_QUEUED_TEXT,
     DEPOSIT_SUBMITTED_TEXT,
-    DEPOSIT_UNAVAILABLE_TEXT,
 )
 
 router = Router(name="deposit_catalog")
+
+NO_BUFF = get_buff("none")  # бафы убраны: цена заявки — ровно цена предметов
 
 DEFAULT_CATALOG_STATE: dict[str, Any] = {
     "category": DepositCategory.BRAINROT.value,
     "cart": {},
     "sort_desc": False,
     "search": None,
-    "buff": "none",
 }
 
 
@@ -75,17 +64,15 @@ async def _render(message: Message, state: FSMContext, *, edit: bool) -> None:
     cart: dict[int, int] = {int(k): v for k, v in data["cart"].items()}
     sort_desc: bool = data["sort_desc"]
     search: str | None = data["search"]
-    buff = get_buff(data["buff"])
-
     async with async_session() as session:
         items = await items_repo.list_items(session, category, search=search, sort_desc=sort_desc)
 
-    total = cart_total(items, cart, buff)
+    total = cart_total(items, cart, NO_BUFF)
     can_submit = cart_is_valid(items, cart)
 
     body = CATALOG_TOTAL_LINE.format(total=total) if can_submit else CATALOG_HINT
     text = f"{CATALOG_HEADER[category]}\n\n{CATALOG_DESCRIPTION[category]}\n\n{body}"
-    markup = catalog_keyboard(items, cart, category.value, sort_desc, buff, can_submit)
+    markup = catalog_keyboard(items, cart, category.value, sort_desc, can_submit)
 
     if edit:
         await message.edit_text(text, reply_markup=markup)
@@ -148,17 +135,9 @@ async def handle_sort(callback: CallbackQuery, callback_data: DepositSortCB, sta
 @router.callback_query(DepositResetFiltersCB.filter())
 async def handle_reset(callback: CallbackQuery, state: FSMContext) -> None:
     data = await _load_state(state)
-    await state.update_data(search=None, sort_desc=False, cart={}, buff="none", category=data["category"])
+    await state.update_data(search=None, sort_desc=False, cart={}, category=data["category"])
     await _render(callback.message, state, edit=True)
     await callback.answer("Фильтры сброшены")
-
-
-@router.callback_query(DepositBuffCB.filter())
-async def handle_buff_cycle(callback: CallbackQuery, state: FSMContext) -> None:
-    data = await _load_state(state)
-    await state.update_data(buff=next_buff_code(data["buff"]))
-    await _render(callback.message, state, edit=True)
-    await callback.answer()
 
 
 @router.callback_query(DepositSearchCB.filter())
@@ -214,15 +193,13 @@ async def handle_nickname(message: Message, state: FSMContext) -> None:
     data = await _load_state(state)
     category = DepositCategory(data["category"])
     cart: dict[int, int] = {int(k): v for k, v in data["cart"].items()}
-    buff = get_buff(data["buff"])
-
     async with async_session() as session:
         items = await items_repo.list_items(session, category)
         if not cart_is_valid(items, cart):
             await message.answer(CATALOG_NEED_ITEM)
             await state.set_state(DepositCatalog.browsing)
             return
-        total = cart_total(items, cart, buff)
+        total = cart_total(items, cart, NO_BUFF)
 
     await state.update_data(nickname=nickname, total=total)
     await state.set_state(DepositCatalog.browsing)
@@ -247,24 +224,8 @@ async def handle_confirm(callback: CallbackQuery, callback_data: DepositConfirmC
     category = DepositCategory(data["category"])
     cart: dict[int, int] = {int(k): v for k, v in data["cart"].items()}
     nickname = data.get("nickname")
-    total = data.get("total")
-
-    if not nickname or total is None or not cart:
+    if not nickname or not cart:
         await callback.answer("Заявка устарела, начните заново.", show_alert=True)
-        return
-
-    async with async_session() as session:
-        active_count = await requests_repo.count_status(session, DepositRequestStatus.PENDING)
-        if active_count >= config.max_concurrent_trades:
-            queue_position = await requests_repo.count_status(session, DepositRequestStatus.QUEUED) + 1
-
-    if active_count >= config.max_concurrent_trades:
-        eta = format_eta(estimate_wait_seconds(queue_position, config.max_concurrent_trades, config.avg_trade_minutes))
-        await callback.message.edit_text(
-            DEPOSIT_UNAVAILABLE_TEXT.format(eta=eta),
-            reply_markup=deposit_unavailable_keyboard(),
-        )
-        await callback.answer()
         return
 
     async with async_session() as session:
@@ -272,57 +233,14 @@ async def handle_confirm(callback: CallbackQuery, callback_data: DepositConfirmC
             session, callback.from_user.id, callback.from_user.username, callback.from_user.first_name
         )
         items = await items_repo.list_items(session, category)
-        items_by_id = {item.id: item for item in items}
+        try:
+            request, position = await submit_deposit(session, callback.bot, user, category, cart, nickname, items)
+        except DepositAlreadyOpen as exc:
+            await callback.answer(DEPOSIT_ALREADY_OPEN_TEXT.format(request_id=exc.request.id), show_alert=True)
+            return
 
-        request = await requests_repo.create_request(
-            session,
-            user,
-            category,
-            cart,
-            buff=data["buff"],
-            game_nickname=nickname,
-            total_b=total,
-        )
-        await notify_admins_new_request(callback.bot, request, user, category, items_by_id)
-
-    await callback.message.edit_text(DEPOSIT_SUBMITTED_TEXT.format(request_id=request.id))
-    await callback.answer()
-    await state.set_data({**DEFAULT_CATALOG_STATE, "category": category.value})
-
-
-@router.callback_query(DepositQueueCB.filter())
-async def handle_queue_decision(callback: CallbackQuery, callback_data: DepositQueueCB, state: FSMContext) -> None:
-    data = await _load_state(state)
-    category = DepositCategory(data["category"])
-
-    if callback_data.action == "close":
-        await state.set_data({**DEFAULT_CATALOG_STATE, "category": category.value})
-        await open_catalog(callback, state, category=category.value)
-        return
-
-    cart: dict[int, int] = {int(k): v for k, v in data["cart"].items()}
-    nickname = data.get("nickname")
-    total = data.get("total")
-    if not nickname or total is None or not cart:
-        await callback.answer("Заявка устарела, начните заново.", show_alert=True)
-        return
-
-    async with async_session() as session:
-        user = await get_or_create_user(
-            session, callback.from_user.id, callback.from_user.username, callback.from_user.first_name
-        )
-        request = await requests_repo.create_request(
-            session,
-            user,
-            category,
-            cart,
-            buff=data["buff"],
-            game_nickname=nickname,
-            total_b=total,
-            status=DepositRequestStatus.QUEUED,
-        )
-        position = await requests_repo.count_status(session, DepositRequestStatus.QUEUED)
-
-    await callback.message.edit_text(DEPOSIT_QUEUED_TEXT.format(request_id=request.id, position=position))
+    text = (DEPOSIT_SUBMITTED_TEXT.format(request_id=request.id) if position == 1
+            else DEPOSIT_QUEUED_TEXT.format(request_id=request.id, position=position))
+    await callback.message.edit_text(text)
     await callback.answer()
     await state.set_data({**DEFAULT_CATALOG_STATE, "category": category.value})

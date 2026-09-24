@@ -84,3 +84,16 @@ def test_legacy_case_codes_point_to_existing_cases():
     from bot.database.engine import LEGACY_CASE_CODES
 
     assert set(LEGACY_CASE_CODES.values()) <= set(SEED_CASES_BY_CODE)
+
+
+def test_legacy_coin_names_still_parse():
+    from bot.data.coins import coin_amount
+
+    assert coin_amount("🎫 5") == 5 and coin_amount("🪙 10") == 10 and coin_amount("67") is None
+
+
+async def test_case_detail_survives_legacy_coin_rows():
+    from webapp.api import _brainrot_json
+
+    assert _brainrot_json("🎫 5", 5, "coins")["coins"] is True
+    assert _brainrot_json("Unknown Thing", 7, "coins")["rarity"]  # неизвестный тир — без 500

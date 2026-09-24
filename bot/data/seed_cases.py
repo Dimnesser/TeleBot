@@ -24,7 +24,7 @@ from bot.data.coins import COIN_RARITY, coin_name
 from bot.database.models import CaseCategory
 from bot.services.cases_service import CASE_WEIGHT_EXPONENT
 
-CASES_CONTENT_VERSION = "18-free-like-reference"
+CASES_CONTENT_VERSION = "19-coin-prefix"
 
 TARGET_RTP = 0.85
 

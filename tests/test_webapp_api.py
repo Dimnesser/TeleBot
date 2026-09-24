@@ -562,7 +562,9 @@ async def test_free_case_requires_channel_subscription(client, auth_headers, adm
     assert r.status == 400 and (await r.json())["error"] == "bot_not_in_channel"
     r = await client.post("/api/admin/settings", headers=admin_headers,
                           json={"required_channel": "https://t.me/braincore_news", "free_case_cooldown_hours": 12})
-    assert (await r.json()) == {"required_channel": "@braincore_news", "free_case_cooldown_hours": 12, "support_url": None}
+    body = await r.json()
+    assert (body["required_channel"], body["free_case_cooldown_hours"], body["support_url"]) == ("@braincore_news", 12, None)
+    assert body["stars_rate"] == 1.75
     # обычному игроку настройки недоступны
     assert (await client.get("/api/admin/settings", headers=auth_headers)).status == 403
 
@@ -622,29 +624,69 @@ async def test_deposit_stars_creates_invoice(client, auth_headers) -> None:
     assert r.status == 400
 
 
-async def test_admin_approves_and_rejects_deposit_requests(client, auth_headers, admin_headers) -> None:
+async def test_deposit_queue_one_by_one(client, auth_headers, admin_headers) -> None:
+    """Строгая очередь: одна заявка на игрока; в работе — первая; зачислить
+    можно только её; после решения в работу уходит следующая."""
     catalog = await (await client.get("/api/deposit/catalog", headers=auth_headers)).json()
+    assert "buffs" not in catalog  # бафы убраны
     kraken = next(i for i in catalog["brainrot"] if i["name"] == "Kraken")
     griffin = next(i for i in catalog["brainrot"] if i["name"] == "Griffin")
-    ids = []
-    for item in (kraken, griffin):
-        r = await client.post("/api/deposit/request", headers=auth_headers,
-                              json={"category": "brainrot", "items": {item["id"]: 1}, "nickname": "dimon"})
-        ids.append((await r.json())["request"]["id"])
+    second = {"Authorization": "tma " + _init_data(555777, username="second")}
+
+    r = await client.post("/api/deposit/request", headers=auth_headers,
+                          json={"category": "brainrot", "items": {kraken["id"]: 1}, "nickname": "dimon"})
+    first = await r.json()
+    assert first["queue_position"] == 1 and first["request"]["status"] == "pending"
+    r = await client.post("/api/deposit/request", headers=auth_headers,
+                          json={"category": "brainrot", "items": {griffin["id"]: 1}, "nickname": "dimon"})
+    assert r.status == 400 and (await r.json())["error"] == "already_open"
+    r = await client.post("/api/deposit/request", headers=second,
+                          json={"category": "brainrot", "items": {griffin["id"]: 1}, "nickname": "vasya"})
+    waiting = await r.json()
+    assert waiting["queue_position"] == 2 and waiting["request"]["status"] == "queued"
 
     assert (await client.get("/api/admin/deposits", headers=auth_headers)).status == 403
     queue = await (await client.get("/api/admin/deposits", headers=admin_headers)).json()
-    assert [q["id"] for q in queue] == ids and queue[0]["player_tg_id"] == 999111
+    assert [(q["id"], q["queue_position"]) for q in queue] == [(first["request"]["id"], 1), (waiting["request"]["id"], 2)]
+
+    # второго не зачислить, пока не решён первый
+    r = await client.post(f"/api/admin/deposits/{waiting['request']['id']}", headers=admin_headers, json={"action": "approve"})
+    assert r.status == 400 and (await r.json())["error"] == "not_your_turn"
 
     before = (await (await client.get("/api/me", headers=auth_headers)).json())["balance"]
-    r = await client.post(f"/api/admin/deposits/{ids[0]}", headers=admin_headers, json={"action": "approve"})
+    r = await client.post(f"/api/admin/deposits/{first['request']['id']}", headers=admin_headers, json={"action": "approve"})
     assert (await r.json())["credited"] == 3077
-    r = await client.post(f"/api/admin/deposits/{ids[1]}", headers=admin_headers, json={"action": "reject"})
-    assert (await r.json())["status"] == "rejected"
     assert (await (await client.get("/api/me", headers=auth_headers)).json())["balance"] == before + 3077
-    # повторно не обработать, игрок получил уведомления
-    r = await client.post(f"/api/admin/deposits/{ids[0]}", headers=admin_headers, json={"action": "approve"})
-    assert r.status == 400
-    sent = [t for chat, t in client.server.app["bot"].sent if chat == 999111]
-    assert any("Начислено 3077 B" in t for t in sent) and any("отклонена" in t for t in sent)
+    # следующий в работе, игрок получил сообщение
+    mine = await (await client.get("/api/deposit/requests", headers=second)).json()
+    assert mine[0]["status"] == "pending" and mine[0]["queue_position"] == 1
+    sent = client.server.app["bot"].sent
+    assert any(chat == 999111 and "Начислено 3077 B" in t for chat, t in sent)
+    assert any(chat == 555777 and "Место освободилось" in t for chat, t in sent)
+
+    r = await client.post(f"/api/admin/deposits/{waiting['request']['id']}", headers=admin_headers, json={"action": "reject"})
+    assert (await r.json())["status"] == "rejected"
+    r = await client.post(f"/api/admin/deposits/{first['request']['id']}", headers=admin_headers, json={"action": "approve"})
+    assert r.status == 400  # уже решена
     assert await (await client.get("/api/admin/deposits", headers=admin_headers)).json() == []
+
+
+async def test_stars_rate_and_code_bonus(client, auth_headers, admin_headers) -> None:
+    r = await client.post("/api/deposit/stars/quote", headers=auth_headers, json={"amount": 100})
+    assert (await r.json())["credited"] == 175  # 1 ⭐ = 1.75 B
+    r = await client.post("/api/deposit/stars/quote", headers=auth_headers, json={"amount": 100, "code": "NOPE"})
+    assert r.status == 400 and (await r.json())["error"] == "bad_code"
+    # любой код даёт бонус +10%: промокод…
+    await client.post("/api/admin/promos", headers=admin_headers, json={"kind": "balance", "amount": 1, "code": "stars10"})
+    r = await client.post("/api/deposit/stars/quote", headers=auth_headers, json={"amount": 100, "code": "stars10"})
+    assert (await r.json())["credited"] == 192
+    # …и реферальный код другого игрока (свой — нет)
+    other = await (await client.get("/api/me", headers={"Authorization": "tma " + _init_data(313131)})).json()
+    r = await client.post("/api/deposit/stars/quote", headers=auth_headers, json={"amount": 100, "code": other["referral_code"]})
+    assert (await r.json())["bonus_percent"] == 10
+    me = await (await client.get("/api/me", headers=auth_headers)).json()
+    r = await client.post("/api/deposit/stars/quote", headers=auth_headers, json={"amount": 100, "code": me["referral_code"]})
+    assert r.status == 400
+    r = await client.post("/api/deposit/stars", headers=auth_headers, json={"amount": 100, "code": "stars10"})
+    assert (await r.json())["credited"] == 192
+    assert "192 B" in client.server.app["bot"].last_invoice["description"]

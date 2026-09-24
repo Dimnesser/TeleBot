@@ -49,7 +49,7 @@ async def get_oldest_queued(session: AsyncSession) -> DepositRequest | None:
     result = await session.execute(
         select(DepositRequest)
         .where(DepositRequest.status == DepositRequestStatus.QUEUED)
-        .order_by(DepositRequest.created_at.asc())
+        .order_by(DepositRequest.id.asc())  # id строго растёт — порядок очереди без ничьих
         .limit(1)
     )
     return result.scalar_one_or_none()

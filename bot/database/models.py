@@ -281,6 +281,8 @@ class StarsDeposit(Base):
     user_id: Mapped[int] = mapped_column(ForeignKey("users.id"))
     stars_amount: Mapped[int] = mapped_column(Integer)
     promo_code: Mapped[str | None] = mapped_column(String(32), nullable=True)
+    # Сколько B зачислить — зафиксировано при создании счёта (курс + бонус за код).
+    credited_b: Mapped[int | None] = mapped_column(Integer, nullable=True)
     payload: Mapped[str] = mapped_column(String(64), unique=True)
     status: Mapped[str] = mapped_column(String(16), default="pending")  # pending | paid
     telegram_charge_id: Mapped[str | None] = mapped_column(String(128), nullable=True)

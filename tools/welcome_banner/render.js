@@ -9,7 +9,12 @@ const { chromium } = require('playwright');
 
 const HERE = __dirname;
 const HERO_URL = 'https://static.wikia.nocookie.net/stealabr/images/d/d3/Kraken.png/revision/latest?cb=20260616235047';
-const OUT = path.resolve(HERE, '../../bot/assets/welcome.jpg');
+// node render.js          → bot/assets/welcome.jpg (баннер /start, 1280×656)
+// node render.js avatar   → bot/assets/avatar.png (аватарка бота, 640×640) + favicon Mini App
+const MODE = process.argv[2] === 'avatar' ? 'avatar' : 'welcome';
+const OUT = path.resolve(HERE, MODE === 'avatar' ? '../../bot/assets/avatar.png' : '../../bot/assets/welcome.jpg');
+const FAVICON = path.resolve(HERE, '../../webapp/static/assets/favicon.png');
+const SIZE = MODE === 'avatar' ? { width: 640, height: 640 } : { width: 1280, height: 656 };
 
 (async () => {
   const hero = path.join(HERE, 'kraken_crop.png');
@@ -26,13 +31,17 @@ const OUT = path.resolve(HERE, '../../bot/assets/welcome.jpg');
   });
   await new Promise((r) => server.listen(0, '127.0.0.1', r));
   const browser = await chromium.launch({ executablePath: process.env.CHROMIUM_PATH || undefined });
-  const page = await browser.newPage({ viewport: { width: 1280, height: 656 } });
-  await page.goto(`http://127.0.0.1:${server.address().port}/welcome.html`, { waitUntil: 'networkidle' });
+  const page = await browser.newPage({ viewport: SIZE });
+  await page.goto(`http://127.0.0.1:${server.address().port}/${MODE}.html`, { waitUntil: 'networkidle' });
   await page.evaluate(() => document.fonts.ready);
-  const png = path.join(HERE, 'welcome.png');
+  const png = path.join(HERE, `${MODE}.png`);
   await page.screenshot({ path: png });
   await browser.close();
   server.close();
-  execFileSync('python3', ['-c', `from PIL import Image; Image.open(${JSON.stringify(png)}).convert('RGB').save(${JSON.stringify(OUT)}, 'JPEG', quality=90, optimize=True)`]);
+  if (MODE === 'avatar') {
+    execFileSync('python3', ['-c', `from PIL import Image; im=Image.open(${JSON.stringify(png)}).convert('RGB'); im.save(${JSON.stringify(OUT)}); im.resize((192,192), Image.LANCZOS).save(${JSON.stringify(FAVICON)})`]);
+  } else {
+    execFileSync('python3', ['-c', `from PIL import Image; Image.open(${JSON.stringify(png)}).convert('RGB').save(${JSON.stringify(OUT)}, 'JPEG', quality=90, optimize=True)`]);
+  }
   console.log('saved', OUT);
 })();

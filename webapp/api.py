@@ -6,7 +6,6 @@ bot/handlers/*.py, просто с JSON вместо edit_text/inline-кнопо
 from __future__ import annotations
 
 import random
-import secrets
 import time
 from datetime import datetime, timedelta
 from pathlib import Path
@@ -49,7 +48,6 @@ from bot.database.models import (
     StakeStatus,
     User,
 )
-from bot.data.buffs import BUFF_OPTIONS
 from bot.database.models import DepositCategory, DepositRequest, DepositRequestStatus, PromoKind, StarsDeposit
 from bot.database.repo import cases as cases_repo
 from bot.database.repo import deposit_items as deposit_items_repo
@@ -61,9 +59,8 @@ from bot.database.repo import quests as quests_repo
 from bot.database.repo import staking as staking_repo
 from bot.database.repo.known_items import list_known_items
 from bot.database.repo.users import add_balance, count_referrals, find_user
-from bot.services import deposit_moderation, partner_service, quest_service, settings_service
-from bot.services.deposit_service import cart_is_valid, cart_total, get_buff
-from bot.services.notify import notify_admins_new_request
+from bot.services import deposit_moderation, partner_service, quest_service, settings_service, stars_service
+from bot.services.deposit_service import cart_is_valid
 from bot.services.battle_service import run_battle
 from bot.services.cases_service import REEL_REVEAL_INDEX, build_reel, draw_items, total_cost
 from bot.services.dice_service import COLORS, MATCH_PAYOUT_TABLE, resolve_roll
@@ -165,7 +162,10 @@ def _brainrot_json(name: str, value: int, rarity: str | None = None) -> dict:
     roster_entry = ROSTER_BY_NAME.get(name)
     # Реальный тир из ростера важнее сохранённого: старые записи инвентаря
     # получали rarity угадыванием по ценности.
-    tier = rarity_for(name, value) if roster_entry or not rarity else Rarity(rarity)
+    try:
+        tier = rarity_for(name, value) if roster_entry or not rarity else Rarity(rarity)
+    except ValueError:  # неизвестный тир в старой записи — не роняем весь ответ
+        tier = rarity_for(name, value)
     color = RARITY_COLOR[tier]
     return {
         "name": name,
@@ -329,8 +329,8 @@ async def get_market(_request: web.Request) -> web.Response:
 
 
 # ------------------------------------------------------------------- пополнение
-# Честные пополнения: брейнроты и гирсы — заявка, которую подтверждает
-# модератор (та же очередь, что у пополнения в чате: bot/handlers/deposit),
+# Честные пополнения: брейнроты и гирсы — место в очереди, трейды строго по
+# одному, B зачисляет модератор (та же очередь, что в чате: bot/handlers/deposit),
 # Stars — счёт Telegram; B зачисляет bot/handlers/deposit/stars.py по
 # successful_payment. Mini App сам баланс не начисляет.
 
@@ -342,11 +342,20 @@ DEPOSIT_STATUS_LABEL = {
 }
 
 
+GEAR_ASSETS_DIR = Path(__file__).parent / "static" / "assets" / "gears"
+AVAILABLE_GEAR_IMAGES = {p.stem for p in GEAR_ASSETS_DIR.glob("*.webp")}
+
+
+def _gear_image_url(name: str) -> str | None:
+    slug = slugify(name)
+    return f"/static/assets/gears/{slug}.webp" if slug in AVAILABLE_GEAR_IMAGES else None
+
+
 def _deposit_item_json(item) -> dict:
     return {
         "id": item.id, "name": item.name, "emoji": item.emoji, "price_b": item.price_b,
         "min_qty": item.min_qty, "hot_stock_left": item.hot_stock_left,
-        "image_url": _brainrot_image_url(item.name) if item.category == DepositCategory.BRAINROT else None,
+        "image_url": _brainrot_image_url(item.name) if item.category == DepositCategory.BRAINROT else _gear_image_url(item.name),
     }
 
 
@@ -356,16 +365,17 @@ async def get_deposit_catalog(request: web.Request) -> web.Response:
     return web.json_response({
         "brainrot": [_deposit_item_json(i) for i in await deposit_items_repo.list_items(session, DepositCategory.BRAINROT)],
         "hirsy": [_deposit_item_json(i) for i in await deposit_items_repo.list_items(session, DepositCategory.HIRSY)],
-        "buffs": [{"code": b.code, "label": b.label, "surcharge_percent": b.surcharge_percent} for b in BUFF_OPTIONS],
-        "stars": {"rate": config.stars_to_balance_rate, "min": config.min_stars_amount, "max": config.max_stars_amount},
+        "stars": {
+            "rate": await stars_service.rate(session), "code_bonus_percent": await stars_service.code_bonus(session),
+            "min": config.min_stars_amount, "max": config.max_stars_amount,
+        },
     })
 
 
 @routes.post("/api/deposit/request")
 async def post_deposit_request(request: web.Request) -> web.Response:
-    """Заявка на пополнение брейнротами/гирсами. Если все слоты модераторов
-    заняты — заявка сразу встаёт в очередь (в чате бот спрашивает, в Mini App
-    ждать всё равно придётся)."""
+    """Встать в очередь на пополнение брейнротами/гирсами (строго по одному,
+    см. bot.services.deposit_moderation)."""
     session, user = request["session"], request["user"]
     body = await request.json()
     try:
@@ -376,29 +386,34 @@ async def post_deposit_request(request: web.Request) -> web.Response:
     nickname = str(body.get("nickname") or "").strip()
     if not 2 <= len(nickname) <= 32:
         return web.json_response({"error": "bad_nickname", "message": "Ник в игре: от 2 до 32 символов"}, status=400)
-    buff = get_buff(str(body.get("buff") or "none"))
     items = await deposit_items_repo.list_items(session, category)
     if not cart_is_valid(items, cart):
         return web.json_response({"error": "bad_cart", "message": "Выбери предметы (учитывай «от N шт»)"}, status=400)
+    try:
+        deposit, position = await deposit_moderation.submit_deposit(
+            session, request.app["bot"], user, category, cart, nickname, items
+        )
+    except deposit_moderation.DepositAlreadyOpen as exc:
+        return web.json_response({
+            "error": "already_open", "request_id": exc.request.id,
+            "message": f"У тебя уже есть заявка #{exc.request.id} в очереди — дождись её",
+        }, status=400)
+    return web.json_response({"request": _deposit_request_json(deposit, {i.id: i for i in items}, position), "queue_position": position})
 
-    busy = await deposit_requests_repo.count_status(session, DepositRequestStatus.PENDING) >= config.max_concurrent_trades
-    deposit = await deposit_requests_repo.create_request(
-        session, user, category, cart, buff=buff.code, game_nickname=nickname, total_b=cart_total(items, cart, buff),
-        status=DepositRequestStatus.QUEUED if busy else DepositRequestStatus.PENDING,
-    )
-    if not busy:
-        await notify_admins_new_request(request.app["bot"], deposit, user, category, {i.id: i for i in items})
-    position = await deposit_requests_repo.count_status(session, DepositRequestStatus.QUEUED) if busy else 0
-    return web.json_response({"request": _deposit_request_json(deposit, {i.id: i for i in items}), "queue_position": position})
 
-
-def _deposit_request_json(req: DepositRequest, items_by_id: dict) -> dict:
+def _deposit_request_json(req: DepositRequest, items_by_id: dict, position: int | None = None) -> dict:
+    status_label = DEPOSIT_STATUS_LABEL[req.status]
+    if position == 1:
+        status_label = "Твоя очередь — жди трейд"
+    elif position:
+        status_label = f"В очереди: {position}-й"
     return {
         "id": req.id,
         "category": req.category.value,
         "total_b": req.total_b,
         "status": req.status.value,
-        "status_label": DEPOSIT_STATUS_LABEL[req.status],
+        "status_label": status_label,
+        "queue_position": position,
         "nickname": req.game_nickname,
         "items": [
             {"name": items_by_id[int(i)].name if int(i) in items_by_id else "?", "qty": q}
@@ -415,36 +430,55 @@ async def get_deposit_requests(request: web.Request) -> web.Response:
         select(DepositRequest).where(DepositRequest.user_id == user.id).order_by(DepositRequest.id.desc()).limit(10)
     )).scalars().all()
     ids = {int(i) for r in rows for i in r.items}
-    items_by_id = {i: await deposit_items_repo.get_item(session, i) for i in ids}
-    return web.json_response([_deposit_request_json(r, {k: v for k, v in items_by_id.items() if v}) for r in rows])
+    items_by_id = {i: v for i in ids if (v := await deposit_items_repo.get_item(session, i))}
+    result = []
+    for r in rows:
+        position = await deposit_moderation.queue_position(session, r) if r.status in deposit_moderation.OPEN_STATUSES else None
+        result.append(_deposit_request_json(r, items_by_id, position))
+    return web.json_response(result)
 
 
-@routes.post("/api/deposit/stars")
-async def post_deposit_stars(request: web.Request) -> web.Response:
-    """Счёт Telegram Stars для Mini App (tg.openInvoice). Зачисление — по
-    successful_payment в bot/handlers/deposit/stars.py, как у счёта из чата."""
-    session, user = request["session"], request["user"]
-    body = await request.json()
+async def _stars_quote(request: web.Request, body: dict):
     try:
         amount = int(body.get("amount"))
     except (TypeError, ValueError):
         amount = 0
     if not config.min_stars_amount <= amount <= config.max_stars_amount:
-        return web.json_response({
+        return None, web.json_response({
             "error": "bad_amount", "message": f"От {config.min_stars_amount} до {config.max_stars_amount} ⭐",
         }, status=400)
-    payload = f"stars_dep:{user.tg_id}:{secrets.token_hex(6)}"
-    session.add(StarsDeposit(user_id=user.id, stars_amount=amount, payload=payload, status="pending"))
-    await session.commit()
-    credited = amount * config.stars_to_balance_rate
+    try:
+        q = await stars_service.quote(request["session"], request["user"], amount, body.get("code"))
+    except stars_service.BadCode:
+        return None, web.json_response({"error": "bad_code", "message": "Такого кода нет"}, status=400)
+    return q, None
+
+
+@routes.post("/api/deposit/stars/quote")
+async def post_deposit_stars_quote(request: web.Request) -> web.Response:
+    q, err = await _stars_quote(request, await request.json())
+    if err is not None:
+        return err
+    return web.json_response({"stars": q.stars, "rate": q.rate, "bonus_percent": q.bonus_percent, "code": q.code, "credited": q.credited})
+
+
+@routes.post("/api/deposit/stars")
+async def post_deposit_stars(request: web.Request) -> web.Response:
+    """Счёт Telegram Stars для Mini App (tg.openInvoice). Сумма зачисления
+    фиксируется здесь (курс + бонус за код), зачисляет её
+    bot/handlers/deposit/stars.py по successful_payment."""
+    q, err = await _stars_quote(request, await request.json())
+    if err is not None:
+        return err
+    deposit = await stars_service.create_deposit(request["session"], request["user"], q)
     link = await request.app["bot"].create_invoice_link(
         title="Пополнение баланса BrainCore",
-        description=f"Начисление {credited} B на баланс",
-        payload=payload,
+        description=f"Начисление {q.credited} B на баланс",
+        payload=deposit.payload,
         currency="XTR",
-        prices=[LabeledPrice(label="Пополнение баланса", amount=amount)],
+        prices=[LabeledPrice(label="Пополнение баланса", amount=q.stars)],
     )
-    return web.json_response({"invoice_url": link, "credited": credited})
+    return web.json_response({"invoice_url": link, "credited": q.credited, "bonus_percent": q.bonus_percent})
 
 
 # ----------------------------------------------------------------------- кейсы
@@ -1085,7 +1119,7 @@ async def get_admin_deposits(request: web.Request) -> web.Response:
     result = []
     for r in rows:
         items_by_id = {int(i): await deposit_items_repo.get_item(session, int(i)) for i in r.items}
-        data = _deposit_request_json(r, {k: v for k, v in items_by_id.items() if v})
+        data = _deposit_request_json(r, {k: v for k, v in items_by_id.items() if v}, await deposit_moderation.queue_position(session, r))
         owner = await session.get(User, r.user_id)
         data["player"] = f"@{owner.username}" if owner.username else (owner.first_name or str(owner.tg_id))
         data["player_tg_id"] = owner.tg_id
@@ -1106,6 +1140,8 @@ async def post_admin_deposit_decision(request: web.Request) -> web.Response:
         )
     except deposit_moderation.DepositAlreadyResolved:
         return web.json_response({"error": "already_resolved", "message": "Заявка уже обработана"}, status=400)
+    except deposit_moderation.NotYourTurn:
+        return web.json_response({"error": "not_your_turn", "message": "Сначала заявка, которая первая в очереди"}, status=400)
     return web.json_response({"id": decision.request.id, "status": decision.request.status.value, "credited": decision.credited})
 
 
@@ -1118,6 +1154,8 @@ async def get_admin_settings(request: web.Request) -> web.Response:
         "required_channel": await settings_service.required_channel(session),
         "free_case_cooldown_hours": await settings_service.free_case_cooldown_hours(session),
         "support_url": await settings_service.get_setting(session, settings_service.SUPPORT_URL),
+        "stars_rate": await stars_service.rate(session),
+        "stars_code_bonus_percent": await stars_service.code_bonus(session),
     })
 
 
@@ -1144,6 +1182,13 @@ async def post_admin_settings(request: web.Request) -> web.Response:
                     "message": f"Добавь бота админом в {channel}, иначе подписку не проверить",
                 }, status=400)
         await settings_service.set_setting(session, settings_service.REQUIRED_CHANNEL, channel)
+    for key, field, lo, hi in ((stars_service.STARS_RATE, "stars_rate", 0.01, 100),
+                               (stars_service.STARS_CODE_BONUS, "stars_code_bonus_percent", 0, 500)):
+        if field in body:
+            value = _num(body.get(field))
+            if value is None or not lo <= value <= hi:
+                return web.json_response({"error": "bad_" + field, "message": f"{field}: от {lo} до {hi}"}, status=400)
+            await settings_service.set_setting(session, key, f"{value:g}")
     if "support_url" in body:
         try:
             support = settings_service.normalize_link(body.get("support_url") or "")

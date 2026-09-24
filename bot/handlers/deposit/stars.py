@@ -1,7 +1,7 @@
 """Пополнение баланса через Telegram Stars."""
 from __future__ import annotations
 
-import secrets
+import math
 from datetime import datetime
 
 from aiogram import F, Router
@@ -15,11 +15,12 @@ from bot.database.models import StarsDeposit, User
 from bot.database.repo.users import get_or_create_user
 from bot.keyboards.callbacks import StarsCreateInvoiceCB, StarsSkipPromoCB
 from bot.keyboards.deposit import stars_amount_keyboard, stars_invoice_keyboard, stars_promo_keyboard
-from bot.services.partner_service import deposit_bonus
+from bot.services import stars_service
 from bot.services.referral_service import credit_referral_commission
 from bot.states.deposit import DepositStars
 from bot.utils.texts import (
     STARS_AMOUNT_INVALID,
+    STARS_BAD_CODE,
     STARS_HEADER,
     STARS_PAYMENT_SUCCESS,
     STARS_PROMO_PROMPT,
@@ -61,8 +62,20 @@ async def handle_promo_input(message: Message, state: FSMContext) -> None:
 async def _show_summary(message: Message, state: FSMContext, promo: str | None) -> None:
     data = await state.get_data()
     amount = data["stars_amount"]
-    await state.update_data(promo=promo)
-    text = STARS_READY_TEXT.format(amount=amount, promo=promo or "—", credited=amount * config.stars_to_balance_rate)
+    async with async_session() as session:
+        user = await get_or_create_user(
+            session, message.chat.id, message.chat.username, message.chat.first_name
+        )
+        try:
+            q = await stars_service.quote(session, user, amount, promo)
+        except stars_service.BadCode:
+            await message.answer(STARS_BAD_CODE, reply_markup=stars_promo_keyboard())
+            return
+    await state.update_data(promo=q.code)
+    text = STARS_READY_TEXT.format(
+        amount=amount, promo=q.code or "—", credited=q.credited, rate=f"{q.rate:g}",
+        bonus=f" (+{q.bonus_percent:g}% за код)" if q.bonus_percent else "",
+    )
     await message.answer(text, reply_markup=stars_invoice_keyboard())
 
 
@@ -74,28 +87,22 @@ async def handle_create_invoice(callback: CallbackQuery, state: FSMContext) -> N
         await callback.answer("Сначала укажи количество Stars.", show_alert=True)
         return
 
-    payload = f"stars_dep:{callback.from_user.id}:{secrets.token_hex(6)}"
-
     async with async_session() as session:
         user = await get_or_create_user(
             session, callback.from_user.id, callback.from_user.username, callback.from_user.first_name
         )
-        session.add(
-            StarsDeposit(
-                user_id=user.id,
-                stars_amount=amount,
-                promo_code=data.get("promo"),
-                payload=payload,
-                status="pending",
-            )
-        )
-        await session.commit()
+        try:
+            q = await stars_service.quote(session, user, amount, data.get("promo"))
+        except stars_service.BadCode:
+            await callback.answer(STARS_BAD_CODE, show_alert=True)
+            return
+        deposit = await stars_service.create_deposit(session, user, q)
 
     await callback.bot.send_invoice(
         chat_id=callback.from_user.id,
         title="Пополнение баланса BrainCore",
-        description=f"Начисление {amount * config.stars_to_balance_rate} B на внутренний баланс",
-        payload=payload,
+        description=f"Начисление {q.credited} B на баланс",
+        payload=deposit.payload,
         currency="XTR",
         prices=[LabeledPrice(label="Пополнение баланса", amount=amount)],
     )
@@ -122,13 +129,13 @@ async def handle_successful_payment(message: Message, state: FSMContext) -> None
         deposit.paid_at = datetime.utcnow()
 
         user = await session.get(User, deposit.user_id)
-        credited = deposit.stars_amount * config.stars_to_balance_rate
-        bonus = deposit_bonus(user, credited)  # бонус от партнёрского кода
-        user.balance += credited + bonus
+        # Сумма зафиксирована при создании счёта (курс + бонус за код);
+        # старые счета без неё — по текущему курсу.
+        credited = deposit.credited_b or math.floor(deposit.stars_amount * await stars_service.rate(session))
+        user.balance += credited
         await session.commit()
         await credit_referral_commission(session, user, credited)
         balance = user.balance
-        credited += bonus
 
     await state.clear()
     await message.answer(STARS_PAYMENT_SUCCESS.format(credited=credited, balance=balance))

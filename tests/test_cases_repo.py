@@ -73,12 +73,11 @@ async def test_inventory_add_and_list_recent():
 
 
 def test_deposit_catalog_keyboard_fits_telegram_button_limit():
-    from bot.data.buffs import BUFF_OPTIONS
     from bot.data.seed_items import BRAINROT_DEPOSIT_ITEMS
     from bot.database.models import DepositItem
     from bot.keyboards.deposit import catalog_keyboard
 
     items = [DepositItem(id=n, name=s.name, emoji=s.emoji, price_b=s.price_b, min_qty=s.min_qty,
                          hot_stock_left=s.hot_stock_left) for n, s in enumerate(BRAINROT_DEPOSIT_ITEMS, 1)]
-    markup = catalog_keyboard(items, {}, "brainrot", False, BUFF_OPTIONS[0], True)
+    markup = catalog_keyboard(items, {}, "brainrot", False, True)
     assert sum(len(row) for row in markup.inline_keyboard) <= 100

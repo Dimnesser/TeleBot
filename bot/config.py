@@ -15,11 +15,8 @@ class Config:
     admin_ids: list[int] = field(default_factory=lambda: _parse_admin_ids(os.getenv("ADMIN_IDS", "")))
     admin_chat_id: int = int(os.getenv("ADMIN_CHAT_ID", "0") or 0)
     database_url: str = os.getenv("DATABASE_URL", "sqlite+aiosqlite:///./data/brainrot_battle.db")
-    stars_to_balance_rate: int = int(os.getenv("STARS_TO_BALANCE_RATE", "1"))
     min_stars_amount: int = int(os.getenv("MIN_STARS_AMOUNT", "50"))
     max_stars_amount: int = int(os.getenv("MAX_STARS_AMOUNT", "100000"))
-    max_concurrent_trades: int = int(os.getenv("MAX_CONCURRENT_TRADES", "5"))
-    avg_trade_minutes: int = int(os.getenv("AVG_TRADE_MINUTES", "8"))
     # Апгрейдер: шанс всегда режется в этот диапазон, чтобы не было 0%/100% исходов.
     upgrader_min_chance_percent: int = int(os.getenv("UPGRADER_MIN_CHANCE_PERCENT", "1"))
     # Mini App: в список целей апгрейдера попадают только брейнроты, для

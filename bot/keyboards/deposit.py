@@ -4,16 +4,13 @@ from __future__ import annotations
 from aiogram.types import InlineKeyboardButton, InlineKeyboardMarkup
 from aiogram.utils.keyboard import InlineKeyboardBuilder
 
-from bot.data.buffs import BuffOption
 from bot.database.models import DepositCategory, DepositItem
 from bot.keyboards.callbacks import (
     DepositAdminCB,
-    DepositBuffCB,
     DepositCloseCB,
     DepositConfirmCB,
     DepositNextCB,
     DepositQtyCB,
-    DepositQueueCB,
     DepositResetFiltersCB,
     DepositSearchCB,
     DepositSortCB,
@@ -47,7 +44,6 @@ def catalog_keyboard(
     cart: dict[int, int],
     active_category: str,
     sort_desc: bool,
-    buff: BuffOption,
     can_submit: bool,
 ) -> InlineKeyboardMarkup:
     builder = InlineKeyboardBuilder()
@@ -78,7 +74,6 @@ def catalog_keyboard(
         ),
         InlineKeyboardButton(text="✖ Сброс", callback_data=DepositResetFiltersCB().pack()),
     )
-    builder.row(InlineKeyboardButton(text=f"Бафы: {buff.label} ▾", callback_data=DepositBuffCB().pack()))
 
     if can_submit:
         builder.row(InlineKeyboardButton(text="ДАЛЕЕ →", callback_data=DepositNextCB().pack()))
@@ -92,15 +87,6 @@ def confirm_keyboard() -> InlineKeyboardMarkup:
     builder.row(
         InlineKeyboardButton(text="✅ Отправить заявку", callback_data=DepositConfirmCB(action="send").pack()),
         InlineKeyboardButton(text="✖ Отмена", callback_data=DepositConfirmCB(action="cancel").pack()),
-    )
-    return builder.as_markup()
-
-
-def deposit_unavailable_keyboard() -> InlineKeyboardMarkup:
-    builder = InlineKeyboardBuilder()
-    builder.row(
-        InlineKeyboardButton(text="Закрыть", callback_data=DepositQueueCB(action="close").pack()),
-        InlineKeyboardButton(text="ВСТАТЬ В ОЧЕРЕДЬ", callback_data=DepositQueueCB(action="join").pack()),
     )
     return builder.as_markup()
 

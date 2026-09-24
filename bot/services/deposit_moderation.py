@@ -1,9 +1,10 @@
-"""Решение модератора по заявке на пополнение брейнротами/гирсами.
+"""Очередь пополнений брейнротами/гирсами и решения модератора.
 
-Одна логика для кнопок в чате модераторов (bot/handlers/deposit/admin.py)
-и для очереди заявок в админ-панели Mini App: зачисление B (+ бонус
-партнёрского кода), комиссия реферу, уведомление игрока и перевод
-следующей заявки из очереди в работу.
+Строгая очередь «по одному»: у игрока одна открытая заявка; в работе
+(PENDING — «твоя очередь, жди трейд») всегда одна заявка — первая по
+времени, остальные ждут (QUEUED) со своим номером. Зачислить можно только
+заявку в работе; после решения в работу уходит следующая, игрок получает
+сообщение. Одна логика для чата (bot/handlers/deposit) и Mini App.
 """
 from __future__ import annotations
 
@@ -11,11 +12,13 @@ import logging
 from dataclasses import dataclass
 
 from aiogram import Bot
+from sqlalchemy import func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from bot.database.models import DepositRequest, DepositRequestStatus, User
+from bot.database.models import DepositCategory, DepositItem, DepositRequest, DepositRequestStatus, User
 from bot.database.repo import deposit_items as items_repo
 from bot.database.repo import deposit_requests as requests_repo
+from bot.services.deposit_service import cart_total, get_buff
 from bot.services.notify import notify_admins_new_request
 from bot.services.partner_service import deposit_bonus
 from bot.services.referral_service import credit_referral_commission
@@ -30,6 +33,49 @@ class DepositAlreadyResolved(Exception):
     pass
 
 
+class NotYourTurn(Exception):
+    """Зачислить можно только заявку, которая сейчас в работе (первую в очереди)."""
+
+
+class DepositAlreadyOpen(Exception):
+    def __init__(self, request: DepositRequest):
+        super().__init__(request.id)
+        self.request = request
+
+
+async def open_request_of(session: AsyncSession, user: User) -> DepositRequest | None:
+    return (await session.execute(
+        select(DepositRequest).where(DepositRequest.user_id == user.id, DepositRequest.status.in_(OPEN_STATUSES)).limit(1)
+    )).scalar_one_or_none()
+
+
+async def queue_position(session: AsyncSession, request: DepositRequest) -> int:
+    """1 — заявка в работе (игроку кидают трейд), 2+ — сколько ждать до неё."""
+    ahead = (await session.execute(
+        select(func.count()).select_from(DepositRequest)
+        .where(DepositRequest.status.in_(OPEN_STATUSES), DepositRequest.id < request.id)
+    )).scalar_one()
+    return ahead + 1
+
+
+async def submit_deposit(
+    session: AsyncSession, bot: Bot, user: User, category: DepositCategory, cart: dict[int, int],
+    nickname: str, items: list[DepositItem],
+) -> tuple[DepositRequest, int]:
+    """Встать в очередь. Если очередь пуста — заявка сразу в работе."""
+    if (existing := await open_request_of(session, user)) is not None:
+        raise DepositAlreadyOpen(existing)
+    busy = (await requests_repo.count_status(session, DepositRequestStatus.PENDING)) > 0
+    request = await requests_repo.create_request(
+        session, user, category, cart, buff=None, game_nickname=nickname,
+        total_b=cart_total(items, cart, get_buff("none")),
+        status=DepositRequestStatus.QUEUED if busy else DepositRequestStatus.PENDING,
+    )
+    if not busy:
+        await notify_admins_new_request(bot, request, user, category, {i.id: i for i in items})
+    return request, await queue_position(session, request)
+
+
 @dataclass
 class Decision:
     request: DepositRequest
@@ -42,6 +88,8 @@ async def resolve_deposit(
     request = await requests_repo.get_request(session, request_id)
     if request is None or request.status not in OPEN_STATUSES:
         raise DepositAlreadyResolved
+    if approve and request.status != DepositRequestStatus.PENDING:
+        raise NotYourTurn
     was_pending = request.status == DepositRequestStatus.PENDING
     user = await session.get(User, request.user_id)
 
@@ -57,7 +105,7 @@ async def resolve_deposit(
         text = USER_DEPOSIT_REJECTED.format(request_id=request.id)
     await _safe_send(bot, user.tg_id, text)
 
-    if was_pending:  # освободился слот модератора — следующая из очереди в работу
+    if was_pending:  # заявка в работе закрыта — следующая по очереди в работу
         await _promote_next(session, bot)
     return Decision(request=request, credited=credited)
 

@@ -14,10 +14,6 @@ def get_buff(code: str) -> BuffOption:
     return BUFF_OPTIONS[0]
 
 
-def next_buff_code(current: str) -> str:
-    codes = [b.code for b in BUFF_OPTIONS]
-    index = codes.index(current) if current in codes else -1
-    return codes[(index + 1) % len(codes)]
 
 
 def item_unit_price(item: DepositItem, buff: BuffOption) -> int:
@@ -49,22 +45,8 @@ def cart_total(items: list[DepositItem], cart: dict[int, int], buff: BuffOption)
     return total
 
 
-def estimate_wait_seconds(queue_position: int, max_concurrent: int, avg_trade_minutes: int) -> int:
-    """Грубая оценка времени ожидания в очереди на трейд.
-
-    [ЛОГИЧЕСКИ ПРЕДПОЛОЖЕНО] На скриншоте показано «~34:45» без пояснения
-    формулы. Здесь используется простая модель: позиция в очереди делится на
-    число одновременных слотов, округляется вверх до целого «цикла» обработки
-    и умножается на среднее время трейда — легко заменить на реальную логику.
-    """
-    slots = max(max_concurrent, 1)
-    cycles = math.ceil(queue_position / slots)
-    return cycles * avg_trade_minutes * 60
 
 
-def format_eta(seconds: int) -> str:
-    minutes, secs = divmod(max(seconds, 0), 60)
-    return f"{minutes}:{secs:02d}"
 
 
 def cart_is_valid(items: list[DepositItem], cart: dict[int, int]) -> bool:

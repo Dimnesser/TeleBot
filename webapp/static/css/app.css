@@ -1093,3 +1093,36 @@ button.topbar-balance:active { transform: scale(.96); }
 .admin-dep-foot > span:first-child { display: flex; align-items: center; gap: 4px; }
 .admin-dep-actions { display: flex; gap: 6px; }
 .admin-dep-actions .btn-chip { min-height: 36px; padding: 0 12px; font-size: 12px; }
+
+/* очередь пополнений и Stars-код — как на референсе */
+.dep { position: relative; }
+.dep-close { position: absolute; top: 14px; right: 14px; width: 44px; height: 44px; border: 1px solid #1d2a4a; border-radius: 2px; background: #0e121b; color: #8390ad; font-size: 16px; }
+.dep-queue { display: flex; flex-direction: column; gap: 4px; margin-bottom: 12px; padding: 10px 12px; border: 1px solid #5a4a12; border-left: 3px solid #f5c542; background: #151005; font-size: 13px; color: #b9a970; }
+.dep-queue b { color: #ffd24d; font-size: 14px; }
+.dep-label { margin: 4px 0 8px; font-size: 13px; font-weight: 800; letter-spacing: 1.2px; text-transform: uppercase; color: #8fa6d8; }
+.dep-label span { text-transform: none; letter-spacing: 0; font-weight: 600; color: #65718c; }
+.stars-code { width: 100%; height: 48px; margin-bottom: 12px; border-radius: 2px; border: 1px solid #1d2433; background: #0e121b; color: var(--text); font: 700 16px var(--font-mono); padding: 0 14px; text-transform: uppercase; outline: none; }
+.stars-input { text-align: left; }
+.stars-bonus { margin-left: 8px; padding: 2px 8px; border-radius: 2px; background: rgba(62,224,138,.12); color: #3ee08a; font-size: 12px; font-weight: 800; }
+#stars-pay:disabled { background: #1d2745; color: #65718c; box-shadow: none; }
+.stars-hint { margin-top: 10px; text-align: center; font-size: 13px; color: #65718c; min-height: 16px; }
+.dep-confirm-note { font-size: 12px; line-height: 1.4; color: #65718c; text-align: center; }
+.dep-img img { max-height: 58px; }
+
+/* узкие телефоны (iPhone SE/mini, 360–390 px): шапка помещается целиком */
+@media (max-width: 400px) {
+  .topbar { gap: 6px; padding-left: 10px; padding-right: 10px; }
+  .icon-btn { width: 38px; height: 38px; }
+  .brand { gap: 6px; font-size: 14px; letter-spacing: .3px; }
+  .brand-mark { width: 22px; height: 22px; }
+  button.topbar-balance { padding: 4px 4px 4px 9px; font-size: 12px; }
+  .wallet-plus { width: 28px; height: 28px; margin-left: 2px; }
+}
+@media (max-width: 350px) {
+  .brand-word { display: none; }
+}
+/* эффекты (свечения, частицы апгрейдера) не должны давать горизонтальный скролл */
+.screen { overflow-x: clip; }
+.dep-tab-ic { display: inline-flex; align-items: center; justify-content: center; width: 24px; height: 24px; }
+.dep-tab-ic img { max-width: 100%; max-height: 100%; object-fit: contain; }
+@media (max-width: 380px) { .dep-tab { font-size: 13px; gap: 4px; } }

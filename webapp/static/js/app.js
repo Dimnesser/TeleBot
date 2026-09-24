@@ -261,12 +261,28 @@ function skeletonGrid() {
   return `<div class="skeleton-grid">${Array(6).fill('<div class="skeleton skeleton-card"></div>').join('')}</div>`;
 }
 
+/* Системная кнопка «Назад» Telegram: закрывает кейс, иначе ведёт на главную. */
+function syncBackButton() {
+  if (!tg || !tg.BackButton) return;
+  const screen = (location.hash || '#home').slice(1);
+  if (document.getElementById('case-stage') || screen !== 'home') tg.BackButton.show(); else tg.BackButton.hide();
+}
+if (tg && tg.BackButton) {
+  tg.BackButton.onClick(() => {
+    haptic.tick();
+    if (document.getElementById('case-stage')) { closeStage(); setTimeout(syncBackButton, 250); return; }
+    if (document.getElementById('active-modal')) { closeModal(); return; }
+    navigate('home');
+  });
+}
+
 async function renderScreen(screen, params = {}) {
   closeStage();
   closeModal();
   stopCrashLoops();
   if (upgraderFx) { upgraderFx.stop(); upgraderFx = null; }
   renderDrawer(screen);
+  setTimeout(syncBackButton, 0);
   const root = document.getElementById('screen');
   root.innerHTML = `<div class="section-title">&nbsp;</div>${skeletonGrid()}`;
   try {
@@ -432,17 +448,20 @@ function startFreeTimer() {
 let depositTab = 'brainrot';
 const depositCart = { brainrot: {}, hirsy: {} };
 let depositCatalog = null;
+let depositOpenRequest = null; // своя заявка в очереди — новую не оставить, пока не решат
 
 async function renderDepositScreen(root) {
   const [catalog, requests] = await Promise.all([api('/api/deposit/catalog'), api('/api/deposit/requests').catch(() => [])]);
   depositCatalog = catalog;
+  depositOpenRequest = requests.find((r) => r.status === 'pending' || r.status === 'queued') || null;
   root.innerHTML = `
     <section class="dep">
+      <button class="dep-close" aria-label="Закрыть" onclick="navigate('home')">✕</button>
       <div class="dep-eyebrow">Пополнение баланса</div>
       <h1 class="dep-title" id="dep-title"></h1>
       <div class="dep-tabs">
-        ${[['brainrot', '🧠', 'Брейнроты'], ['hirsy', '🪽', 'Гирсы'], ['stars', '⭐', 'Stars']].map(([k, e, t]) =>
-          `<button class="dep-tab ${depositTab === k ? 'active' : ''}" data-tab="${k}"><span>${e}</span>${t}</button>`).join('')}
+        ${[['brainrot', '<img src="/static/assets/brainrots/kraken.webp" alt="">', 'Брейнроты'], ['hirsy', '<img src="/static/assets/gears/rainbow-hammer.webp" alt="">', 'Гирсы'], ['stars', '⭐', 'Stars']].map(([k, e, t]) =>
+          `<button class="dep-tab ${depositTab === k ? 'active' : ''}" data-tab="${k}"><span class="dep-tab-ic">${e}</span>${t}</button>`).join('')}
       </div>
       <div id="dep-body"></div>
     </section>
@@ -468,14 +487,15 @@ function depositHistoryHtml(requests) {
 
 function paintDepositTab(root) {
   const body = root.querySelector('#dep-body');
-  root.querySelector('#dep-title').textContent = depositTab === 'stars' ? 'Депозит звёздами' : depositTab === 'hirsy' ? 'Депозит гирсами' : 'Депозит брейнротом';
+  root.querySelector('#dep-title').textContent = depositTab === 'stars' ? 'Telegram Stars' : depositTab === 'hirsy' ? 'Депозит гирсами' : 'Депозит брейнротом';
   if (depositTab === 'stars') { paintStars(body); return; }
   const items = depositCatalog[depositTab];
   body.innerHTML = `
-    <p class="dep-hint">Выбери, что передашь, введи ник в игре и отправь заявку — после трейда модератор зачислит${coinIcon()} на баланс.</p>
-    <label class="dep-select">
-      <select id="dep-buff">${depositCatalog.buffs.map((b) => `<option value="${b.code}">${escapeHtml(b.label)}</option>`).join('')}</select>
-    </label>
+    <p class="dep-hint">Выбери ${depositTab === 'hirsy' ? 'гирсы' : 'брейнротов'}, введи ник в игре и встань в очередь. Трейды идут строго по одному: дойдёт твоя очередь — модератор кинет трейд и зачислит${coinIcon()} на баланс.</p>
+    ${depositOpenRequest ? `<div class="dep-queue">
+      <b>${escapeHtml(depositOpenRequest.status_label)}</b>
+      <span>Заявка #${depositOpenRequest.id} · ${fmt(depositOpenRequest.total_b)}${coinIcon()} · ник ${escapeHtml(depositOpenRequest.nickname)}. Новую можно оставить после решения по этой.</span>
+    </div>` : ''}
     <div class="dep-filters">
       <input id="dep-search" type="search" placeholder="Поиск по названию…" autocomplete="off">
       <button class="dep-sort" id="dep-sort" data-dir="asc">↑ цена</button>
@@ -487,12 +507,11 @@ function paintDepositTab(root) {
     </div>`;
   const grid = body.querySelector('#dep-grid');
   const cart = depositCart[depositTab];
-  const buffPct = () => (depositCatalog.buffs.find((b) => b.code === body.querySelector('#dep-buff').value) || { surcharge_percent: 0 }).surcharge_percent;
-  const unit = (i) => i.price_b + Math.ceil(i.price_b * buffPct() / 100);
+  const unit = (i) => i.price_b;
   const paintTotal = () => {
     const total = items.reduce((sum, i) => sum + unit(i) * (cart[i.id] || 0), 0);
     body.querySelector('#dep-total').textContent = fmt(total);
-    body.querySelector('#dep-next').disabled = !total;
+    body.querySelector('#dep-next').disabled = !total || !!depositOpenRequest;
   };
   const paintGrid = () => {
     const q = body.querySelector('#dep-search').value.trim().toLowerCase();
@@ -521,17 +540,16 @@ function paintDepositTab(root) {
     paintTotal();
   });
   body.querySelector('#dep-search').addEventListener('input', paintGrid);
-  body.querySelector('#dep-buff').addEventListener('change', paintTotal);
   body.querySelector('#dep-sort').addEventListener('click', (e) => {
     const b = e.currentTarget; b.dataset.dir = b.dataset.dir === 'asc' ? 'desc' : 'asc';
     b.textContent = b.dataset.dir === 'asc' ? '↑ цена' : '↓ цена';
     paintGrid();
   });
-  body.querySelector('#dep-next').addEventListener('click', () => confirmDeposit(root, items, cart, body.querySelector('#dep-buff').value, unit));
+  body.querySelector('#dep-next').addEventListener('click', () => confirmDeposit(root, items, cart, unit));
   paintGrid(); paintTotal();
 }
 
-function confirmDeposit(root, items, cart, buff, unit) {
+function confirmDeposit(root, items, cart, unit) {
   const picked = items.filter((i) => cart[i.id]);
   const total = picked.reduce((sum, i) => sum + unit(i) * cart[i.id], 0);
   const overlay = openModal(`
@@ -540,8 +558,9 @@ function confirmDeposit(root, items, cart, buff, unit) {
       <div class="subscribe-title">Заявка на пополнение</div>
       <div class="dep-confirm-list">${picked.map((i) => `<div><span>${escapeHtml(i.name)} ×${cart[i.id]}</span><b>${fmt(unit(i) * cart[i.id])}${coinIcon()}</b></div>`).join('')}</div>
       <div class="dep-confirm-total">Зачислим <b>${fmt(total)}</b>${coinIcon()} после трейда</div>
+      <div class="dep-confirm-note">Заявка встанет в очередь. Трейды — по одному, в порядке очереди; модератор кинет трейд на этот ник.</div>
       <input class="field" id="dep-nick" maxlength="32" placeholder="Твой ник в Steal a Brainrot" autocomplete="off">
-      <button class="open-btn" id="dep-send">Отправить заявку</button>
+      <button class="open-btn" id="dep-send">Встать в очередь</button>
     </div>`);
   const nick = overlay.querySelector('#dep-nick');
   nick.focus();
@@ -549,10 +568,10 @@ function confirmDeposit(root, items, cart, buff, unit) {
     const btn = e.currentTarget; btn.disabled = true;
     try {
       const res = await api('/api/deposit/request', { method: 'POST', body: JSON.stringify({
-        category: depositTab, items: cart, buff, nickname: nick.value.trim(),
+        category: depositTab, items: cart, nickname: nick.value.trim(),
       }) });
       closeModal(); haptic.success();
-      toast(res.queue_position ? `Заявка #${res.request.id} в очереди: ${res.queue_position}-я` : `Заявка #${res.request.id} отправлена модератору`, 'success');
+      toast(res.queue_position === 1 ? `Заявка #${res.request.id}: ты первый — жди трейд` : `Заявка #${res.request.id}: ты ${res.queue_position}-й в очереди`, 'success');
       Object.keys(cart).forEach((k) => delete cart[k]);
       renderDepositScreen(root);
     } catch (err) { toast(err.message, 'error'); btn.disabled = false; }
@@ -560,38 +579,66 @@ function confirmDeposit(root, items, cart, buff, unit) {
 }
 
 function paintStars(body) {
-  const { rate, min, max } = depositCatalog.stars;
+  const { rate, code_bonus_percent: bonus, min, max } = depositCatalog.stars;
   body.innerHTML = `
-    <p class="dep-hint">Оплата Telegram Stars прямо здесь — ${coinIcon()} придут на баланс сразу после оплаты. Курс: 1 ⭐ = ${rate} B.</p>
+    <p class="dep-hint">Оплата Telegram Stars — ${coinIcon()} зачисляются сразу после оплаты. Курс: 1 ⭐ = ${rate} B. Любой код — промокод, партнёрский или реферальный — даёт +${bonus}%.</p>
+    <div class="dep-label">Количество Stars</div>
     <div class="stars-chips">${[50, 100, 250, 500, 1000, 2500].filter((n) => n >= min && n <= max).map((n) => `<button data-n="${n}">⭐ ${fmt(n)}</button>`).join('')}</div>
-    <input class="field stars-input" id="stars-amount" type="number" min="${min}" max="${max}" value="${Math.max(min, 100)}">
-    <div class="stars-get">Получишь <b id="stars-get"></b>${coinIcon()}</div>
-    <button class="open-btn" id="stars-pay">Оплатить</button>`;
+    <input class="field stars-input" id="stars-amount" type="number" inputmode="numeric" min="${min}" max="${max}" placeholder="Например: 625">
+    <div class="dep-label">Промокод <span>(бонус +${bonus}%)</span></div>
+    <input class="field stars-code" id="stars-code" maxlength="32" placeholder="PROMO" autocomplete="off">
+    <div class="stars-get" id="stars-get"></div>
+    <button class="open-btn" id="stars-pay" disabled>Создать счёт в Stars</button>
+    <div class="stars-hint" id="stars-hint">Введи количество Stars выше.</div>`;
   const input = body.querySelector('#stars-amount');
-  const paint = () => {
+  const codeInput = body.querySelector('#stars-code');
+  const pay = body.querySelector('#stars-pay');
+  let quoted = null, seq = 0, timer = null;
+  const quote = async () => {
     const n = Math.floor(Number(input.value) || 0);
-    body.querySelector('#stars-get').textContent = fmt(Math.max(0, n) * rate);
-    body.querySelector('#stars-pay').textContent = `Оплатить ⭐ ${fmt(Math.max(0, n))}`;
-  };
-  body.querySelectorAll('[data-n]').forEach((b) => b.addEventListener('click', () => { input.value = b.dataset.n; haptic.tick(); paint(); }));
-  input.addEventListener('input', paint);
-  body.querySelector('#stars-pay').addEventListener('click', async (e) => {
-    const btn = e.currentTarget; btn.disabled = true;
+    const code = codeInput.value.trim();
+    const my = ++seq;
+    quoted = null; pay.disabled = true;
+    if (n < min || n > max) {
+      body.querySelector('#stars-get').innerHTML = '';
+      body.querySelector('#stars-hint').textContent = input.value ? `От ${fmt(min)} до ${fmt(max)} ⭐` : 'Введи количество Stars выше.';
+      return;
+    }
     try {
-      const res = await api('/api/deposit/stars', { method: 'POST', body: JSON.stringify({ amount: Math.floor(Number(input.value)) }) });
+      const q = await api('/api/deposit/stars/quote', { method: 'POST', body: JSON.stringify({ amount: n, code }) });
+      if (my !== seq) return;
+      quoted = { amount: n, code };
+      body.querySelector('#stars-get').innerHTML = `Получишь <b>${fmt(q.credited)}</b>${coinIcon()}${q.bonus_percent ? `<span class="stars-bonus">+${q.bonus_percent}% за код</span>` : ''}`;
+      body.querySelector('#stars-hint').textContent = '';
+      pay.disabled = false;
+      pay.textContent = `Оплатить ⭐ ${fmt(n)}`;
+    } catch (err) {
+      if (my !== seq) return;
+      body.querySelector('#stars-get').innerHTML = '';
+      body.querySelector('#stars-hint').textContent = err.body && err.body.error === 'bad_code' ? 'Такого кода нет — проверь или оставь поле пустым.' : err.message;
+    }
+  };
+  const later = () => { clearTimeout(timer); timer = setTimeout(quote, 250); };
+  body.querySelectorAll('[data-n]').forEach((b) => b.addEventListener('click', () => { input.value = b.dataset.n; haptic.tick(); quote(); }));
+  input.addEventListener('input', later);
+  codeInput.addEventListener('input', later);
+  pay.addEventListener('click', async () => {
+    if (!quoted) return;
+    pay.disabled = true;
+    try {
+      const res = await api('/api/deposit/stars', { method: 'POST', body: JSON.stringify(quoted) });
       const done = async (status) => {
-        btn.disabled = false;
+        pay.disabled = false;
         if (status !== 'paid') { if (status === 'failed') toast('Оплата не прошла', 'error'); return; }
         haptic.success();
         toast(`Оплачено! +${fmt(res.credited)} B`, 'success');
-        // B начисляет бот по successful_payment — подтягиваем баланс пару раз
+        // B начисляет бот по successful_payment — подтягиваем баланс
         for (let i = 0; i < 5; i++) { await sleep(1200); await refreshMe().catch(() => {}); }
       };
       if (tg && tg.openInvoice) tg.openInvoice(res.invoice_url, done);
-      else { window.open(res.invoice_url, '_blank'); btn.disabled = false; }
-    } catch (err) { toast(err.message, 'error'); btn.disabled = false; }
+      else { window.open(res.invoice_url, '_blank'); pay.disabled = false; }
+    } catch (err) { toast(err.message, 'error'); pay.disabled = false; }
   });
-  paint();
 }
 
 // =================================================================== СЦЕНА КЕЙСА
@@ -643,6 +690,7 @@ async function openCaseStage(caseId, qty = 1) {
   stage.style.cssText = caseThemeVars(c);
   document.body.appendChild(stage);
   document.body.classList.add('stage-open');
+  syncBackButton();
   const topValue = Math.max(...c.items.map((i) => i.value));
   stage.innerHTML = `
     <canvas class="stage-fx"></canvas>
@@ -1153,6 +1201,8 @@ function adminPanelHtml() {
         <input class="field full" id="s-channel" placeholder="Канал подписки: @username или t.me/… (пусто — без подписки)" />
         <input class="field" id="s-hours" type="number" min="0.5" max="168" step="0.5" placeholder="Раз в N часов" />
         <input class="field full" id="s-support" placeholder="Поддержка в /start: @username или ссылка" />
+        <input class="field" id="s-rate" type="number" min="0.01" step="0.01" placeholder="1 ⭐ = ? B" />
+        <input class="field" id="s-bonus" type="number" min="0" step="1" placeholder="Бонус за код, %" />
         <button class="btn-chip full" type="submit">Сохранить</button>
       </form>
       <div class="muted admin-hint" id="s-status"></div>
@@ -1238,12 +1288,12 @@ async function bindAdminPanel(root) {
     const list = await api('/api/admin/deposits').catch(() => []);
     depositsBox.innerHTML = list.map((r) => `
       <div class="admin-dep st-${r.status}">
-        <div class="admin-dep-head"><b>#${r.id}</b><span>${escapeHtml(r.player)}</span><span class="dep-status">${escapeHtml(r.status_label)}</span></div>
+        <div class="admin-dep-head"><b>${r.queue_position}.</b><b>#${r.id}</b><span>${escapeHtml(r.player)}</span><span class="dep-status">${r.queue_position === 1 ? 'Кинуть трейд' : 'Ждёт'}</span></div>
         <div class="admin-dep-items">${r.items.map((i) => `${escapeHtml(i.name)} ×${i.qty}`).join(', ')}</div>
         <div class="admin-dep-foot">
           <span>ник: <b>${escapeHtml(r.nickname)}</b> · ${fmt(r.total_b)}${coinIcon()}</span>
           <span class="admin-dep-actions">
-            <button class="btn-chip" data-dep="${r.id}" data-act="approve">Зачислить</button>
+            ${r.queue_position === 1 ? `<button class="btn-chip" data-dep="${r.id}" data-act="approve">Зачислить</button>` : ''}
             <button class="btn-chip ghost" data-dep="${r.id}" data-act="reject">Отклонить</button>
           </span>
         </div>
@@ -1266,9 +1316,12 @@ async function bindAdminPanel(root) {
     settingsForm.querySelector('#s-channel').value = st.required_channel || '';
     settingsForm.querySelector('#s-hours').value = st.free_case_cooldown_hours;
     settingsForm.querySelector('#s-support').value = st.support_url || '';
+    settingsForm.querySelector('#s-rate').value = st.stars_rate;
+    settingsForm.querySelector('#s-bonus').value = st.stars_code_bonus_percent;
     panel.querySelector('#s-status').textContent = st.required_channel
       ? `Подписка на ${st.required_channel} обязательна · кейс раз в ${st.free_case_cooldown_hours} ч`
       : `Без обязательной подписки · кейс раз в ${st.free_case_cooldown_hours} ч`;
+    panel.querySelector('#s-status').textContent += ` · 1 ⭐ = ${st.stars_rate} B, код +${st.stars_code_bonus_percent}%`;
   };
   api('/api/admin/settings').then(paintSettings).catch(() => {});
   settingsForm.addEventListener('submit', async (e) => {
@@ -1278,6 +1331,8 @@ async function bindAdminPanel(root) {
         required_channel: settingsForm.querySelector('#s-channel').value.trim(),
         free_case_cooldown_hours: Number(settingsForm.querySelector('#s-hours').value),
         support_url: settingsForm.querySelector('#s-support').value.trim(),
+        stars_rate: Number(settingsForm.querySelector('#s-rate').value),
+        stars_code_bonus_percent: Number(settingsForm.querySelector('#s-bonus').value),
       }) });
       paintSettings(st);
       toast('Сохранено', 'success');
