@@ -14,7 +14,7 @@ from aiogram.types import LabeledPrice
 from aiohttp import web
 from sqlalchemy import select
 
-from bot.config import config, is_admin
+from bot.config import config, is_admin, is_owner, set_granted_admins
 from bot import support_bot
 from bot.data.brainrot_roster import (
     RARITY_COLOR,
@@ -51,6 +51,7 @@ from bot.database.models import (
     User,
 )
 from bot.database.models import (
+    AdminGrant,
     DepositCategory,
     DepositRequest,
     DepositRequestStatus,
@@ -68,6 +69,7 @@ from bot.database.repo import inventory as inventory_repo
 from bot.database.repo import quests as quests_repo
 from bot.database.repo import staking as staking_repo
 from bot.database.repo.known_items import list_known_items
+from bot.database.repo.users import get_user_by_tg_id
 from bot.database.repo.users import add_balance, count_referrals, find_user
 from bot.services import deposit_moderation, partner_service, quest_service, settings_service, stars_service, withdraw_service
 from bot.services.deposit_service import cart_is_valid
@@ -259,6 +261,7 @@ async def _user_json(request: web.Request) -> dict:
     referral_count = await count_referrals(session, user)
     return {
         "is_admin": is_admin(user.tg_id),
+        "is_owner": is_owner(user.tg_id),
         "case_credits": await rewards_repo.case_credits(session, user),
         "partner_percent": user.partner_percent,
         "deposit_bonus_percent": user.deposit_bonus_percent,
@@ -1480,9 +1483,53 @@ async def _admin_user_json(session, target) -> dict:
         "balance": target.balance,
         "partner_percent": target.partner_percent,
         "luck": target.luck,
+        "is_admin": is_admin(target.tg_id),
+        "is_owner": is_owner(target.tg_id),
         "referral_count": await count_referrals(session, target),
         "case_credits": await rewards_repo.case_credits(session, target),
     }
+
+
+async def _reload_admins(session) -> list[int]:
+    ids = list((await session.execute(select(AdminGrant.tg_id))).scalars().all())
+    set_granted_admins(ids)
+    return ids
+
+
+@routes.get("/api/admin/admins")
+async def get_admin_admins(request: web.Request) -> web.Response:
+    """Выданные админки — видит и меняет только владелец (ADMIN_IDS)."""
+    if not is_owner(request["user"].tg_id):
+        return web.json_response({"error": "forbidden"}, status=403)
+    session = request["session"]
+    out = []
+    for tg_id in await _reload_admins(session):
+        u = await get_user_by_tg_id(session, tg_id)
+        out.append({"tg_id": tg_id, "username": u.username if u else None, "first_name": u.first_name if u else None})
+    return web.json_response(out)
+
+
+@routes.post("/api/admin/admins")
+async def post_admin_admins(request: web.Request) -> web.Response:
+    """{user, action: grant|revoke} — выдать или снять админ-панель."""
+    if not is_owner(request["user"].tg_id):
+        return web.json_response({"error": "forbidden", "message": "Выдавать админку может только владелец"}, status=403)
+    session = request["session"]
+    body = await request.json()
+    target, err = await _admin_target(request, str(body.get("user", "")))
+    if err is not None:
+        return err
+    if is_owner(target.tg_id):
+        return web.json_response({"error": "owner", "message": "Это владелец — его админку не снять"}, status=400)
+    row = await session.get(AdminGrant, target.tg_id)
+    if body.get("action") == "grant":
+        if row is None:
+            session.add(AdminGrant(tg_id=target.tg_id, granted_by=request["user"].tg_id))
+    elif row is not None:
+        await session.delete(row)
+    await session.commit()
+    await _reload_admins(session)
+    return web.json_response(await _admin_user_json(session, target))
 
 
 @routes.get("/api/admin/user")

@@ -78,6 +78,16 @@ async def init_db() -> None:
     await _seed_items_reconcile()
     await _seed_cases_reconcile()
     await _seed_quests_if_empty()
+    await load_granted_admins()
+
+
+async def load_granted_admins() -> None:
+    """Выданные владельцем админы — в память для синхронного is_admin."""
+    from bot.config import set_granted_admins
+    from bot.database.models import AdminGrant
+
+    async with async_session() as session:
+        set_granted_admins((await session.execute(select(AdminGrant.tg_id))).scalars().all())
 
 
 async def _migrate_add_missing_columns() -> None:

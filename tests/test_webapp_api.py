@@ -821,6 +821,38 @@ async def test_support_bot_token_validation(client, admin_headers) -> None:
     assert r.status == 200 and (await r.json())["support_bot"] is None
 
 
+async def test_owner_grants_and_revokes_admin(client, auth_headers, admin_headers, monkeypatch) -> None:
+    import dataclasses
+
+    import bot.config as config_module
+    import webapp.api as api_module
+
+    monkeypatch.setattr(config_module, "config", dataclasses.replace(config_module.config, admin_ids=[777000]))
+    monkeypatch.setattr(api_module, "is_admin", config_module.is_admin)
+    config_module.set_granted_admins([])
+    try:
+        me = await (await client.get("/api/me", headers=auth_headers)).json()
+        assert me["is_admin"] is False
+        owner = await (await client.get("/api/me", headers=admin_headers)).json()
+        assert owner["is_owner"] is True
+
+        r = await client.post("/api/admin/admins", headers=admin_headers, json={"user": "999111", "action": "grant"})
+        assert (await r.json())["is_admin"] is True
+        assert (await (await client.get("/api/me", headers=auth_headers)).json())["is_admin"] is True
+        assert [a["tg_id"] for a in await (await client.get("/api/admin/admins", headers=admin_headers)).json()] == [999111]
+        # выданный админ не может раздавать админку и снять владельца
+        r = await client.post("/api/admin/admins", headers=auth_headers, json={"user": "777000", "action": "revoke"})
+        assert r.status == 403
+        r = await client.post("/api/admin/admins", headers=admin_headers, json={"user": "777000", "action": "revoke"})
+        assert r.status == 400
+
+        r = await client.post("/api/admin/admins", headers=admin_headers, json={"user": "999111", "action": "revoke"})
+        assert (await r.json())["is_admin"] is False
+        assert (await (await client.get("/api/me", headers=auth_headers)).json())["is_admin"] is False
+    finally:
+        config_module.set_granted_admins([])
+
+
 async def test_stars_no_upper_limit(client, auth_headers) -> None:
     r = await client.post("/api/deposit/stars/quote", headers=auth_headers, json={"amount": 5_000_000})
     assert r.status == 200 and (await r.json())["credited"] == 8_750_000

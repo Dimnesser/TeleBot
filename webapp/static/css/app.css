@@ -1253,3 +1253,4 @@ button.dep-item:active { transform: scale(.97); }
 }
 #g-zero { width: 100%; min-height: 40px; }
 .support-cta { width: 100%; display: flex; align-items: center; justify-content: center; gap: 8px; margin-bottom: 12px; }
+#g-admin { width: 100%; min-height: 40px; }

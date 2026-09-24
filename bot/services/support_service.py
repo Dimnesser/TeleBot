@@ -16,7 +16,7 @@ from aiogram.types import Message
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from bot.config import config
+from bot.config import all_admin_ids, config
 from bot.database.models import SupportMessage, User
 
 logger = logging.getLogger(__name__)
@@ -24,7 +24,7 @@ logger = logging.getLogger(__name__)
 
 def admin_targets(*, standalone: bool = False) -> list[int]:
     if standalone or not config.admin_chat_id:
-        return list(config.admin_ids)
+        return all_admin_ids()
     return [config.admin_chat_id]
 
 

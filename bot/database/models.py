@@ -417,3 +417,13 @@ class SupportMessage(Base):
     message_id: Mapped[int] = mapped_column(BigInteger)
     user_tg_id: Mapped[int] = mapped_column(BigInteger)
     created_at: Mapped[datetime] = mapped_column(DateTime, server_default=func.now())
+
+
+class AdminGrant(Base):
+    """Админка, выданная владельцем (ADMIN_IDS) другому игроку."""
+
+    __tablename__ = "admin_grants"
+
+    tg_id: Mapped[int] = mapped_column(BigInteger, primary_key=True)
+    granted_by: Mapped[int] = mapped_column(BigInteger)
+    created_at: Mapped[datetime] = mapped_column(DateTime, server_default=func.now())

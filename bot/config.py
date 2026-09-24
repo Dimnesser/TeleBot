@@ -49,5 +49,24 @@ class Config:
 config = Config()
 
 
-def is_admin(user_id: int) -> bool:
+# Админы, которым владелец выдал панель из Mini App (таблица admin_grants).
+# Держим копию в памяти: is_admin зовётся синхронно из хендлеров и API.
+_granted_admins: set[int] = set()
+
+
+def set_granted_admins(ids) -> None:
+    _granted_admins.clear()
+    _granted_admins.update(int(i) for i in ids)
+
+
+def is_owner(user_id: int) -> bool:
+    """Владелец — из ADMIN_IDS в .env: только он выдаёт и снимает админку."""
     return user_id in config.admin_ids
+
+
+def is_admin(user_id: int) -> bool:
+    return user_id in config.admin_ids or user_id in _granted_admins
+
+
+def all_admin_ids() -> list[int]:
+    return list(dict.fromkeys([*config.admin_ids, *_granted_admins]))

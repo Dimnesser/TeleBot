@@ -1293,7 +1293,7 @@ async function renderProfileScreen(root) {
       </div>` : ''}
     ${me.deposit_bonus_percent ? `<div class="panel"><div class="panel-title">Бонус к пополнению</div><div class="admin-stats"><span class="hl">+${me.deposit_bonus_percent}% к каждому пополнению</span></div></div>` : ''}
     ${promoCardHtml()}
-    ${me.is_admin ? adminPanelHtml() : ''}
+    ${me.is_admin ? (IS_OWNER = !!me.is_owner, adminPanelHtml()) : ''}
   `;
   bindPromoForm(root);
   renderMyCases(root, me);
@@ -1304,6 +1304,8 @@ async function renderProfileScreen(root) {
   });
   if (me.is_admin) bindAdminPanel(root);
 }
+
+let IS_OWNER = false; // владелец (ADMIN_IDS) — только он выдаёт и снимает админку
 // =================================================================== ПРОМОКОД + АДМИНКА
 
 function promoCardHtml() {
@@ -1352,7 +1354,11 @@ let adminCases = null;
 function adminPanelHtml() {
   return `
     <div class="panel admin-panel">
-      <div class="panel-title">Админ-панель <span class="admin-badge">ADMIN</span></div>
+      <div class="panel-title">Админ-панель <span class="admin-badge">${IS_OWNER ? 'OWNER' : 'ADMIN'}</span></div>
+      ${IS_OWNER ? `
+      <div class="admin-sub">Админы</div>
+      <div id="admin-admins" class="promo-list"><div class="muted">Загрузка…</div></div>
+      <div class="muted admin-hint">Выдать: найди игрока внизу панели (@username или ID) → «👑 Выдать админку». Игрок должен хоть раз открыть бота.</div>` : ''}
 
       <div class="admin-sub">Заявки на пополнение</div>
       <div id="admin-deposits" class="promo-list"><div class="muted">Загрузка…</div></div>
@@ -1435,10 +1441,14 @@ function adminUserHtml(u) {
       <div class="admin-stats">
         <span>${fmt(u.balance)}${coinIcon()}</span>
         <span>реф. ${u.referral_count}</span>
+        ${u.is_owner ? '<span class="hl">владелец</span>' : u.is_admin ? '<span class="hl">админ</span>' : ''}
         <span class="${u.partner_percent != null ? 'hl' : ''}">${u.partner_percent != null ? 'партнёр ' + u.partner_percent + '%' : 'не партнёр'}</span>
       </div>
       ${credits ? `<div class="muted" style="font-size:12px;margin-top:4px">Кейсы: ${credits}</div>` : ''}
       <div class="admin-actions">
+        ${IS_OWNER && !u.is_owner ? (u.is_admin
+          ? '<button class="btn-chip danger" id="g-admin" data-act="revoke">Снять админку</button>'
+          : '<button class="btn-chip" id="g-admin" data-act="grant">👑 Выдать админку</button>') : ''}
         <div class="inline-form"><input class="field" id="g-balance" type="number" min="1" placeholder="Сколько B" /><button class="btn-chip" data-grant="balance">Выдать B</button><button class="btn-chip ghost" id="g-take">Списать</button></div>
         <button class="btn-chip danger" id="g-zero">🗑 Обнулить баланс (${fmt(u.balance)} B)</button>
         <div class="inline-form luck-form">
@@ -1634,6 +1644,29 @@ async function bindAdminPanel(root) {
   });
   let current = null;
 
+  async function loadAdmins() {
+    const box = panel.querySelector('#admin-admins');
+    if (!box) return;
+    try {
+      const list = await api('/api/admin/admins');
+      box.innerHTML = list.length ? list.map((a) => `
+        <div class="partner-row"><div class="partner-head">
+          <b>${a.username ? '@' + escapeHtml(a.username) : escapeHtml(a.first_name || 'игрок')}</b>
+          <span class="muted">ID ${a.tg_id}</span>
+          <button class="btn-chip danger" data-unadmin="${a.tg_id}">Снять</button>
+        </div></div>`).join('') : '<div class="muted">Кроме тебя админов нет.</div>';
+      box.querySelectorAll('[data-unadmin]').forEach((b) => b.addEventListener('click', async () => {
+        if (!confirm(`Снять админку у ID ${b.dataset.unadmin}?`)) return;
+        try {
+          await api('/api/admin/admins', { method: 'POST', body: JSON.stringify({ user: b.dataset.unadmin, action: 'revoke' }) });
+          toast('Админка снята', 'success'); loadAdmins();
+          if (current && String(current.tg_id) === b.dataset.unadmin) showUser({ ...current, is_admin: false });
+        } catch (err) { toast(err.message, 'error'); }
+      }));
+    } catch (err) { box.innerHTML = `<div class="muted">${escapeHtml(err.message)}</div>`; }
+  }
+  loadAdmins();
+
   const userBox = panel.querySelector('#admin-user');
   function showUser(u) {
     current = u;
@@ -1661,6 +1694,15 @@ async function bindAdminPanel(root) {
         toast(done, 'success'); haptic.success();
       } catch (err) { toast('Ошибка: ' + err.message, 'error'); }
     };
+    userBox.querySelector('#g-admin')?.addEventListener('click', async (e) => {
+      const act = e.currentTarget.dataset.act;
+      if (act === 'revoke' && !confirm(`Снять админку у ID ${current.tg_id}?`)) return;
+      try {
+        showUser(await api('/api/admin/admins', { method: 'POST', body: JSON.stringify({ user: String(current.tg_id), action: act }) }));
+        toast(act === 'grant' ? 'Админка выдана' : 'Админка снята', 'success'); haptic.success();
+        loadAdmins();
+      } catch (err) { toast(err.message, 'error'); }
+    });
     userBox.querySelector('#g-take').addEventListener('click', () => {
       const amount = Number(userBox.querySelector('#g-balance').value);
       if (!amount || amount <= 0) { toast('Введи, сколько B списать', 'error'); return; }
