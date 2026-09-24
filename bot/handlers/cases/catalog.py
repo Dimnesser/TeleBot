@@ -1,4 +1,4 @@
-"""Каталог и открытие кейсов (демо-валюта 🎫, не связана с депозитами)."""
+"""Каталог и открытие кейсов в чате (оплата балансом B)."""
 from __future__ import annotations
 
 from aiogram import Router
@@ -9,7 +9,7 @@ from bot.database.engine import async_session
 from bot.database.models import CaseCategory
 from bot.database.repo import cases as cases_repo
 from bot.database.repo import inventory as inventory_repo
-from bot.database.repo.users import add_game_tokens, get_or_create_user
+from bot.database.repo.users import add_balance, get_or_create_user
 from bot.config import config
 from bot.keyboards.callbacks import (
     CaseConfirmOpenCB,
@@ -17,7 +17,6 @@ from bot.keyboards.callbacks import (
     CaseQtySelectCB,
     CasesCategoryCB,
     CasesInventoryCB,
-    CasesTopUpCB,
 )
 from bot.keyboards.cases import case_detail_keyboard, cases_list_keyboard
 from bot.services import quest_service
@@ -39,12 +38,10 @@ from bot.utils.texts import (
     CASE_OPEN_RESULT_HEADER,
     CASE_OPEN_RESULT_LINE,
     CASES_CATEGORY_TITLES,
-    CASES_DEMO_DISCLAIMER,
     CASES_HOME_TEXT,
     CASES_INVENTORY_EMPTY,
     CASES_INVENTORY_HEADER,
     CASES_INVENTORY_LINE,
-    CASES_TOPUP_TEXT,
 )
 
 router = Router(name="cases_catalog")
@@ -62,11 +59,7 @@ async def open_cases_home(
         user = await get_or_create_user(session, from_user.id, from_user.username, from_user.first_name)
         cases = await cases_repo.list_cases(session, category)
 
-    text = (
-        CASES_HOME_TEXT.format(title=CASES_CATEGORY_TITLES[category], tokens=user.game_tokens)
-        + "\n\n"
-        + CASES_DEMO_DISCLAIMER
-    )
+    text = CASES_HOME_TEXT.format(title=CASES_CATEGORY_TITLES[category], tokens=user.balance)
     markup = cases_list_keyboard(cases, category, page)
 
     await callback.message.edit_text(text, reply_markup=markup)
@@ -105,12 +98,12 @@ async def _render_case_detail(callback: CallbackQuery, state: FSMContext, case_i
         lines.append(CASE_DETAIL_DROP_POOL_HEADER)
         for item in items:
             rarity = RARITY_LABEL[rarity_for(item.name, item.value)]
-            lines.append(f"• {item.name} · {rarity} · {item.value} 🎫")
+            lines.append(f"• {item.name} · {rarity} · {item.value} B")
     else:
         lines.append(CASE_DETAIL_NOT_OPENABLE)
 
     lines.append("")
-    lines.append(CASE_DETAIL_BALANCE_LINE.format(tokens=user.game_tokens))
+    lines.append(CASE_DETAIL_BALANCE_LINE.format(tokens=user.balance))
     cost = total_cost(case, qty)
     if cost is not None:
         lines.append(CASE_DETAIL_TOTAL_COST_LINE.format(qty=qty, cost=cost))
@@ -149,16 +142,16 @@ async def handle_confirm_open(callback: CallbackQuery, callback_data: CaseConfir
 
         from_user = callback.from_user
         user = await get_or_create_user(session, from_user.id, from_user.username, from_user.first_name)
-        if user.game_tokens < cost:
+        if user.balance < cost:
             await callback.answer(
-                CASE_OPEN_NOT_ENOUGH_TOKENS.format(cost=cost, balance=user.game_tokens), show_alert=True
+                CASE_OPEN_NOT_ENOUGH_TOKENS.format(cost=cost, balance=user.balance), show_alert=True
             )
             return
 
         items = await cases_repo.list_case_items(session, case.id)
         won = draw_items(items, callback_data.qty)
 
-        user.game_tokens -= cost
+        user.balance -= cost
         await session.commit()
         await session.refresh(user)
 
@@ -166,7 +159,7 @@ async def handle_confirm_open(callback: CallbackQuery, callback_data: CaseConfir
             session, user, case.name, [(item.name, item.value) for item in won], case_id=case.id
         )
         await quest_service.record_progress(session, user, f"open_case:{case.code}")
-        tokens_after = user.game_tokens
+        tokens_after = user.balance
 
     result_lines = [CASE_OPEN_RESULT_HEADER.format(name=case.name, qty=callback_data.qty)]
     result_lines.extend(
@@ -180,17 +173,6 @@ async def handle_confirm_open(callback: CallbackQuery, callback_data: CaseConfir
         reply_markup=case_detail_keyboard(case, callback_data.qty, case.category, 0),
     )
     await callback.answer()
-
-
-@router.callback_query(CasesTopUpCB.filter())
-async def handle_topup(callback: CallbackQuery, state: FSMContext) -> None:
-    async with async_session() as session:
-        from_user = callback.from_user
-        user = await get_or_create_user(session, from_user.id, from_user.username, from_user.first_name)
-        user = await add_game_tokens(session, user, config.demo_topup_tokens)
-        tokens = user.game_tokens
-
-    await callback.answer(CASES_TOPUP_TEXT.format(amount=config.demo_topup_tokens, tokens=tokens), show_alert=True)
 
 
 @router.callback_query(CasesInventoryCB.filter())

@@ -1,23 +1,48 @@
 """Инициализация БД и фабрика сессий."""
 from __future__ import annotations
 
+import logging
+import shutil
+from datetime import datetime
 from pathlib import Path
 
-from sqlalchemy import delete, select, text
+from sqlalchemy import delete, select, text, update
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker, create_async_engine
 
 from bot.config import config
 from bot.data.brainrot_roster import RARITY_ORDER, Rarity
 from bot.data.coins import COIN_RARITY
 from bot.data.seed_cases import CASES_CONTENT_VERSION, SEED_CASES, SEED_CASES_BY_CODE
-from bot.data.seed_items import SEED_ITEMS
+from bot.data.seed_items import DEPOSIT_CATALOG_VERSION, SEED_ITEMS
 from bot.data.seed_quests import SEED_QUESTS
-from bot.database.models import AppMeta, Base, Case, CaseCredit, CaseItem, DepositItem, PartnerCode, PromoCode, Quest
+from bot.database.models import (
+    AppMeta,
+    Base,
+    Case,
+    CaseCredit,
+    CaseItem,
+    DepositItem,
+    GiveawayEntry,
+    InventoryItem,
+    PartnerCode,
+    PromoCode,
+    PromoRedemption,
+    Quest,
+    StakePosition,
+    User,
+    UserQuestProgress,
+)
 
 engine = create_async_engine(config.database_url)
 async_session: async_sessionmaker[AsyncSession] = async_sessionmaker(engine, expire_on_commit=False)
 
+logger = logging.getLogger(__name__)
+
 CASES_VERSION_KEY = "cases_content_version"
+DEPOSIT_VERSION_KEY = "deposit_catalog_version"
+# Смена id — ещё один полный откат прогресса. Не менять без явной просьбы.
+PROGRESS_RESET_KEY = "progress_reset"
+PROGRESS_RESET_ID = "2026-09-24-real-balance"
 
 # Коды кейсов из прошлых версий каталога → ближайший кейс текущего. Нужны,
 # чтобы уже выданные открытия, промокоды и партнёрские коды не «повисли» на
@@ -49,7 +74,8 @@ async def init_db() -> None:
     async with engine.begin() as conn:
         await conn.run_sync(Base.metadata.create_all)
     await _migrate_add_missing_columns()
-    await _seed_items_if_empty()
+    await _reset_progress_once()
+    await _seed_items_reconcile()
     await _seed_cases_reconcile()
     await _seed_quests_if_empty()
 
@@ -81,24 +107,71 @@ async def _migrate_add_missing_columns() -> None:
                 await conn.execute(text(f"ALTER TABLE {table} ADD COLUMN {column} {coltype}"))
 
 
-async def _seed_items_if_empty() -> None:
+async def _seed_items_reconcile() -> None:
+    """Каталог приёма депозитов = SEED_ITEMS (версия DEPOSIT_CATALOG_VERSION).
+
+    Строки не удаляются — заявки хранят id предметов: совпавшие по
+    (категория, имя) обновляются, новые добавляются, пропавшие из сида
+    выключаются (is_active=False).
+    """
     async with async_session() as session:
-        result = await session.execute(select(DepositItem.id).limit(1))
-        if result.scalar_one_or_none() is not None:
+        version = (await session.execute(select(AppMeta.value).where(AppMeta.key == DEPOSIT_VERSION_KEY))).scalar_one_or_none()
+        if version == DEPOSIT_CATALOG_VERSION:
             return
-        session.add_all(
-            DepositItem(
-                category=item.category,
-                name=item.name,
-                emoji=item.emoji,
-                price_b=item.price_b,
-                min_qty=item.min_qty,
-                hot_stock_left=item.hot_stock_left,
-                sort_order=item.sort_order,
-            )
-            for item in SEED_ITEMS
-        )
+        existing = {(i.category, i.name): i for i in (await session.execute(select(DepositItem))).scalars()}
+        wanted = set()
+        for seed in SEED_ITEMS:
+            wanted.add((seed.category, seed.name))
+            item = existing.get((seed.category, seed.name)) or DepositItem(category=seed.category, name=seed.name)
+            item.emoji, item.price_b, item.min_qty = seed.emoji, seed.price_b, seed.min_qty
+            item.hot_stock_left, item.sort_order, item.is_active = seed.hot_stock_left, seed.sort_order, True
+            session.add(item)
+        for key, item in existing.items():
+            if key not in wanted:
+                item.is_active = False
+        await session.merge(AppMeta(key=DEPOSIT_VERSION_KEY, value=DEPOSIT_CATALOG_VERSION))
         await session.commit()
+
+
+async def _reset_progress_once() -> None:
+    """Разовый откат всего игрового прогресса при переходе с демо-режима на
+    настоящий баланс (PROGRESS_RESET_ID): балансы, инвентарь, квесты, стейкинг,
+    участия в розыгрышах, выданные открытия и активации промокодов. Аккаунты,
+    рефералы, партнёрки, промокоды и история депозитов остаются. Перед
+    откатом файл SQLite копируется рядом (…-before-reset-<время>.db).
+    """
+    async with async_session() as session:
+        done = (await session.execute(select(AppMeta.value).where(AppMeta.key == PROGRESS_RESET_KEY))).scalar_one_or_none()
+        if done == PROGRESS_RESET_ID:
+            return
+        has_users = (await session.execute(select(User.id).limit(1))).scalar_one_or_none() is not None
+
+    if has_users:
+        _backup_sqlite("before-reset")
+        async with async_session() as session:
+            for model in (InventoryItem, UserQuestProgress, StakePosition, GiveawayEntry, CaseCredit, PromoRedemption):
+                await session.execute(delete(model))
+            await session.execute(update(PromoCode).values(uses=0))
+            await session.execute(update(User).values(balance=0, game_tokens=0, free_case_at=None, referral_earned_total=0))
+            await session.commit()
+        logger.warning("Игровой прогресс всех игроков откатан (%s)", PROGRESS_RESET_ID)
+
+    async with async_session() as session:
+        await session.merge(AppMeta(key=PROGRESS_RESET_KEY, value=PROGRESS_RESET_ID))
+        await session.commit()
+
+
+def _backup_sqlite(tag: str) -> Path | None:
+    # Путь берётся у движка, с которым реально работаем (в тестах — in-memory).
+    if engine.url.get_backend_name() != "sqlite" or not engine.url.database or engine.url.database == ":memory:":
+        return None
+    path = Path(engine.url.database)
+    if not path.exists():
+        return None
+    target = path.with_name(f"{path.stem}-{tag}-{datetime.utcnow():%Y%m%d-%H%M%S}{path.suffix}")
+    shutil.copy2(path, target)
+    logger.warning("Резервная копия БД: %s", target)
+    return target
 
 
 async def _seed_cases_reconcile() -> None:

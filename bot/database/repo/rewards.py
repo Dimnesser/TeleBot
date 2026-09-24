@@ -7,7 +7,7 @@ from sqlalchemy import desc, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from bot.database.models import CaseCredit, PromoCode, PromoKind, PromoRedemption, User
-from bot.database.repo.users import add_balance, add_game_tokens
+from bot.database.repo.users import add_balance
 
 _CODE_ALPHABET = "ABCDEFGHJKLMNPQRSTUVWXYZ23456789"  # без 0/O и 1/I
 
@@ -99,9 +99,7 @@ async def redeem_promo(session: AsyncSession, user: User, code: str) -> PromoCod
     promo.uses += 1
     session.add(PromoRedemption(promo_id=promo.id, user_id=user.id))
     await session.commit()
-    if promo.kind == PromoKind.TOKENS:
-        await add_game_tokens(session, user, promo.amount)
-    elif promo.kind == PromoKind.BALANCE:
+    if promo.kind in (PromoKind.BALANCE, PromoKind.TOKENS):  # старые «фишковые» промо — тоже в B
         await add_balance(session, user, promo.amount)
     else:
         await add_case_credits(session, user, promo.case_code, promo.amount)

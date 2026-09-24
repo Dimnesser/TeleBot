@@ -6,11 +6,14 @@ bot/handlers/*.py, просто с JSON вместо edit_text/inline-кнопо
 from __future__ import annotations
 
 import random
+import secrets
 import time
 from datetime import datetime, timedelta
 from pathlib import Path
 
+from aiogram.types import LabeledPrice
 from aiohttp import web
+from sqlalchemy import select
 
 from bot.config import config, is_admin
 from bot.data.brainrot_roster import (
@@ -44,17 +47,23 @@ from bot.database.models import (
     Quest,
     StakePosition,
     StakeStatus,
+    User,
 )
+from bot.data.buffs import BUFF_OPTIONS
+from bot.database.models import DepositCategory, DepositRequest, DepositRequestStatus, PromoKind, StarsDeposit
 from bot.database.repo import cases as cases_repo
+from bot.database.repo import deposit_items as deposit_items_repo
+from bot.database.repo import deposit_requests as deposit_requests_repo
 from bot.database.repo import rewards as rewards_repo
-from bot.database.models import PromoKind
 from bot.database.repo import giveaways as giveaways_repo
 from bot.database.repo import inventory as inventory_repo
 from bot.database.repo import quests as quests_repo
 from bot.database.repo import staking as staking_repo
 from bot.database.repo.known_items import list_known_items
-from bot.database.repo.users import add_balance, add_game_tokens, count_referrals, find_user
-from bot.services import partner_service, quest_service, settings_service
+from bot.database.repo.users import add_balance, count_referrals, find_user
+from bot.services import deposit_moderation, partner_service, quest_service, settings_service
+from bot.services.deposit_service import cart_is_valid, cart_total, get_buff
+from bot.services.notify import notify_admins_new_request
 from bot.services.battle_service import run_battle
 from bot.services.cases_service import REEL_REVEAL_INDEX, build_reel, draw_items, total_cost
 from bot.services.dice_service import COLORS, MATCH_PAYOUT_TABLE, resolve_roll
@@ -149,7 +158,7 @@ def _case_json(case: Case) -> dict:
 def _brainrot_json(name: str, value: int, rarity: str | None = None) -> dict:
     if (coins := coin_amount(name)) is not None:
         return {
-            "name": f"{coins} 🎫", "value": coins, "coins": True, "rarity": COIN_RARITY, "rarity_rank": -1,
+            "name": f"{coins} B", "value": coins, "coins": True, "rarity": COIN_RARITY, "rarity_rank": -1,
             "rarity_label": "Монеты", "rarity_color": "#ffd24d", "rarity_color_accent": "#b8861a",
             "slug": "coins", "image_url": None, "game": None, "market": None,
         }
@@ -248,7 +257,6 @@ async def _user_json(request: web.Request) -> dict:
         "username": user.username,
         "first_name": user.first_name,
         "balance": user.balance,
-        "game_tokens": user.game_tokens,
         "referral_code": user.referral_code,
         "referral_count": referral_count,
         "referral_earned_total": user.referral_earned_total,
@@ -261,13 +269,6 @@ async def _user_json(request: web.Request) -> dict:
 @routes.get("/api/me")
 async def get_me(request: web.Request) -> web.Response:
     return web.json_response(await _user_json(request))
-
-
-@routes.post("/api/demo-topup")
-async def post_demo_topup(request: web.Request) -> web.Response:
-    session, user = request["session"], request["user"]
-    user = await add_game_tokens(session, user, config.demo_topup_tokens)
-    return web.json_response({"game_tokens": user.game_tokens, "amount": config.demo_topup_tokens})
 
 
 @routes.get("/api/inventory")
@@ -291,9 +292,9 @@ async def post_inventory_sell(request: web.Request) -> web.Response:
     payout = round(item.value * SELL_RATE)
     name = item.item_name
     await inventory_repo.delete(session, item)
-    user = await add_game_tokens(session, user, payout)
+    user = await add_balance(session, user, payout)
 
-    return web.json_response({"sold_name": name, "payout": payout, "game_tokens": user.game_tokens})
+    return web.json_response({"sold_name": name, "payout": payout, "balance": user.balance})
 
 
 @routes.get("/api/recent-wins")
@@ -325,6 +326,125 @@ async def get_market(_request: web.Request) -> web.Response:
         "as_of": MARKET_SNAPSHOT_DATE,
         "sources": list(MARKET_SOURCES),
     })
+
+
+# ------------------------------------------------------------------- пополнение
+# Честные пополнения: брейнроты и гирсы — заявка, которую подтверждает
+# модератор (та же очередь, что у пополнения в чате: bot/handlers/deposit),
+# Stars — счёт Telegram; B зачисляет bot/handlers/deposit/stars.py по
+# successful_payment. Mini App сам баланс не начисляет.
+
+DEPOSIT_STATUS_LABEL = {
+    DepositRequestStatus.PENDING: "На проверке",
+    DepositRequestStatus.QUEUED: "В очереди",
+    DepositRequestStatus.APPROVED: "Зачислено",
+    DepositRequestStatus.REJECTED: "Отклонено",
+}
+
+
+def _deposit_item_json(item) -> dict:
+    return {
+        "id": item.id, "name": item.name, "emoji": item.emoji, "price_b": item.price_b,
+        "min_qty": item.min_qty, "hot_stock_left": item.hot_stock_left,
+        "image_url": _brainrot_image_url(item.name) if item.category == DepositCategory.BRAINROT else None,
+    }
+
+
+@routes.get("/api/deposit/catalog")
+async def get_deposit_catalog(request: web.Request) -> web.Response:
+    session = request["session"]
+    return web.json_response({
+        "brainrot": [_deposit_item_json(i) for i in await deposit_items_repo.list_items(session, DepositCategory.BRAINROT)],
+        "hirsy": [_deposit_item_json(i) for i in await deposit_items_repo.list_items(session, DepositCategory.HIRSY)],
+        "buffs": [{"code": b.code, "label": b.label, "surcharge_percent": b.surcharge_percent} for b in BUFF_OPTIONS],
+        "stars": {"rate": config.stars_to_balance_rate, "min": config.min_stars_amount, "max": config.max_stars_amount},
+    })
+
+
+@routes.post("/api/deposit/request")
+async def post_deposit_request(request: web.Request) -> web.Response:
+    """Заявка на пополнение брейнротами/гирсами. Если все слоты модераторов
+    заняты — заявка сразу встаёт в очередь (в чате бот спрашивает, в Mini App
+    ждать всё равно придётся)."""
+    session, user = request["session"], request["user"]
+    body = await request.json()
+    try:
+        category = DepositCategory(body.get("category"))
+        cart = {int(k): int(v) for k, v in (body.get("items") or {}).items() if int(v) > 0}
+    except (ValueError, TypeError):
+        return web.json_response({"error": "bad_request", "message": "Неверная заявка"}, status=400)
+    nickname = str(body.get("nickname") or "").strip()
+    if not 2 <= len(nickname) <= 32:
+        return web.json_response({"error": "bad_nickname", "message": "Ник в игре: от 2 до 32 символов"}, status=400)
+    buff = get_buff(str(body.get("buff") or "none"))
+    items = await deposit_items_repo.list_items(session, category)
+    if not cart_is_valid(items, cart):
+        return web.json_response({"error": "bad_cart", "message": "Выбери предметы (учитывай «от N шт»)"}, status=400)
+
+    busy = await deposit_requests_repo.count_status(session, DepositRequestStatus.PENDING) >= config.max_concurrent_trades
+    deposit = await deposit_requests_repo.create_request(
+        session, user, category, cart, buff=buff.code, game_nickname=nickname, total_b=cart_total(items, cart, buff),
+        status=DepositRequestStatus.QUEUED if busy else DepositRequestStatus.PENDING,
+    )
+    if not busy:
+        await notify_admins_new_request(request.app["bot"], deposit, user, category, {i.id: i for i in items})
+    position = await deposit_requests_repo.count_status(session, DepositRequestStatus.QUEUED) if busy else 0
+    return web.json_response({"request": _deposit_request_json(deposit, {i.id: i for i in items}), "queue_position": position})
+
+
+def _deposit_request_json(req: DepositRequest, items_by_id: dict) -> dict:
+    return {
+        "id": req.id,
+        "category": req.category.value,
+        "total_b": req.total_b,
+        "status": req.status.value,
+        "status_label": DEPOSIT_STATUS_LABEL[req.status],
+        "nickname": req.game_nickname,
+        "items": [
+            {"name": items_by_id[int(i)].name if int(i) in items_by_id else "?", "qty": q}
+            for i, q in req.items.items()
+        ],
+        "created_at": req.created_at.isoformat() if req.created_at else None,
+    }
+
+
+@routes.get("/api/deposit/requests")
+async def get_deposit_requests(request: web.Request) -> web.Response:
+    session, user = request["session"], request["user"]
+    rows = (await session.execute(
+        select(DepositRequest).where(DepositRequest.user_id == user.id).order_by(DepositRequest.id.desc()).limit(10)
+    )).scalars().all()
+    ids = {int(i) for r in rows for i in r.items}
+    items_by_id = {i: await deposit_items_repo.get_item(session, i) for i in ids}
+    return web.json_response([_deposit_request_json(r, {k: v for k, v in items_by_id.items() if v}) for r in rows])
+
+
+@routes.post("/api/deposit/stars")
+async def post_deposit_stars(request: web.Request) -> web.Response:
+    """Счёт Telegram Stars для Mini App (tg.openInvoice). Зачисление — по
+    successful_payment в bot/handlers/deposit/stars.py, как у счёта из чата."""
+    session, user = request["session"], request["user"]
+    body = await request.json()
+    try:
+        amount = int(body.get("amount"))
+    except (TypeError, ValueError):
+        amount = 0
+    if not config.min_stars_amount <= amount <= config.max_stars_amount:
+        return web.json_response({
+            "error": "bad_amount", "message": f"От {config.min_stars_amount} до {config.max_stars_amount} ⭐",
+        }, status=400)
+    payload = f"stars_dep:{user.tg_id}:{secrets.token_hex(6)}"
+    session.add(StarsDeposit(user_id=user.id, stars_amount=amount, payload=payload, status="pending"))
+    await session.commit()
+    credited = amount * config.stars_to_balance_rate
+    link = await request.app["bot"].create_invoice_link(
+        title="Пополнение баланса BrainCore",
+        description=f"Начисление {credited} B на баланс",
+        payload=payload,
+        currency="XTR",
+        prices=[LabeledPrice(label="Пополнение баланса", amount=amount)],
+    )
+    return web.json_response({"invoice_url": link, "credited": credited})
 
 
 # ----------------------------------------------------------------------- кейсы
@@ -410,8 +530,8 @@ async def post_case_open(request: web.Request) -> web.Response:
         cost = 0
     elif case.category == CaseCategory.REFERRAL:
         return web.json_response({"error": "referral_only", "message": "Этот кейс только выдаётся"}, status=400)
-    elif user.game_tokens < cost:
-        return web.json_response({"error": "not_enough_tokens", "cost": cost, "balance": user.game_tokens}, status=400)
+    elif user.balance < cost:
+        return web.json_response({"error": "not_enough_tokens", "message": f"Нужно {cost} B, у тебя {user.balance} B", "cost": cost, "balance": user.balance}, status=400)
 
     items = await cases_repo.list_case_items(session, case.id)
     # Результат определяется ЗДЕСЬ, на сервере, до какой-либо анимации —
@@ -420,14 +540,14 @@ async def post_case_open(request: web.Request) -> web.Response:
     # REEL_REVEAL_INDEX, см. bot.services.cases_service.build_reel.
     won = draw_items(items, qty)
 
-    user.game_tokens -= cost
+    user.balance -= cost
     await session.commit()
     await session.refresh(user)
 
-    # Монеты — сразу на демо-баланс; брейнроты — в инвентарь.
+    # Монеты — сразу на баланс B; брейнроты — в инвентарь.
     coins_won = sum(coin_amount(i.name) or 0 for i in won)
     if coins_won:
-        user = await add_game_tokens(session, user, coins_won)
+        user = await add_balance(session, user, coins_won)
     brainrots = [i for i in won if coin_amount(i.name) is None]
     entries = iter(await inventory_repo.add_items(
         session, user, case.name, [(i.name, i.value) for i in brainrots], case_id=case.id
@@ -451,7 +571,7 @@ async def post_case_open(request: web.Request) -> web.Response:
         "free": free,
         "credits_left": (await rewards_repo.case_credits(session, user)).get(case.code, 0),
         "free_wait_seconds": (await _free_case_state(request))["free_wait_seconds"],
-        "game_tokens": user.game_tokens,
+        "balance": user.balance,
         "reels": reels,
         "reveal_index": REEL_REVEAL_INDEX,
     }
@@ -682,10 +802,10 @@ async def post_battle_start(request: web.Request) -> web.Response:
         return web.json_response({"error": "case_unavailable"}, status=400)
 
     cost = case.price_tokens
-    if user.game_tokens < cost:
-        return web.json_response({"error": "not_enough_tokens", "cost": cost, "balance": user.game_tokens}, status=400)
+    if user.balance < cost:
+        return web.json_response({"error": "not_enough_tokens", "message": f"Нужно {cost} B, у тебя {user.balance} B", "cost": cost, "balance": user.balance}, status=400)
 
-    user.game_tokens -= cost
+    user.balance -= cost
     await session.commit()
     await session.refresh(user)
 
@@ -701,14 +821,14 @@ async def post_battle_start(request: web.Request) -> web.Response:
             case_id=case.id,
         )
     elif result.winner == "tie":
-        await add_game_tokens(session, user, cost)
+        await add_balance(session, user, cost)
 
     return web.json_response(
         {
             "winner": result.winner,
             "player_item": _case_item_json(result.player_item),
             "bot_item": _case_item_json(result.bot_item),
-            "game_tokens": user.game_tokens,
+            "balance": user.balance,
         }
     )
 
@@ -749,9 +869,9 @@ async def post_quest_claim(request: web.Request) -> web.Response:
 
     progress.claimed = True
     await session.commit()
-    user = await add_game_tokens(session, user, quest.reward_tokens)
+    user = await add_balance(session, user, quest.reward_tokens)
 
-    return web.json_response({"reward": quest.reward_tokens, "game_tokens": user.game_tokens})
+    return web.json_response({"reward": quest.reward_tokens, "balance": user.balance})
 
 
 # -------------------------------------------------------------------- бонусы
@@ -953,6 +1073,42 @@ def _require_admin(request: web.Request) -> web.Response | None:
     return None
 
 
+@routes.get("/api/admin/deposits")
+async def get_admin_deposits(request: web.Request) -> web.Response:
+    """Открытые заявки на пополнение (на проверке и в очереди) — старые сверху."""
+    if (denied := _require_admin(request)) is not None:
+        return denied
+    session = request["session"]
+    rows = (await session.execute(
+        select(DepositRequest).where(DepositRequest.status.in_(deposit_moderation.OPEN_STATUSES)).order_by(DepositRequest.id)
+    )).scalars().all()
+    result = []
+    for r in rows:
+        items_by_id = {int(i): await deposit_items_repo.get_item(session, int(i)) for i in r.items}
+        data = _deposit_request_json(r, {k: v for k, v in items_by_id.items() if v})
+        owner = await session.get(User, r.user_id)
+        data["player"] = f"@{owner.username}" if owner.username else (owner.first_name or str(owner.tg_id))
+        data["player_tg_id"] = owner.tg_id
+        result.append(data)
+    return web.json_response(result)
+
+
+@routes.post("/api/admin/deposits/{request_id}")
+async def post_admin_deposit_decision(request: web.Request) -> web.Response:
+    if (denied := _require_admin(request)) is not None:
+        return denied
+    body = await request.json()
+    approve = body.get("action") == "approve"
+    try:
+        decision = await deposit_moderation.resolve_deposit(
+            request["session"], request.app["bot"], int(request.match_info["request_id"]),
+            approve=approve, admin_tg_id=request["user"].tg_id,
+        )
+    except deposit_moderation.DepositAlreadyResolved:
+        return web.json_response({"error": "already_resolved", "message": "Заявка уже обработана"}, status=400)
+    return web.json_response({"id": decision.request.id, "status": decision.request.status.value, "credited": decision.credited})
+
+
 @routes.get("/api/admin/settings")
 async def get_admin_settings(request: web.Request) -> web.Response:
     if (denied := _require_admin(request)) is not None:
@@ -1014,7 +1170,6 @@ async def _admin_user_json(session, target) -> dict:
         "tg_id": target.tg_id,
         "username": target.username,
         "first_name": target.first_name,
-        "game_tokens": target.game_tokens,
         "balance": target.balance,
         "partner_percent": target.partner_percent,
         "referral_count": await count_referrals(session, target),
@@ -1049,9 +1204,7 @@ async def post_admin_grant(request: web.Request) -> web.Response:
     if amount <= 0 or amount > 10_000_000:
         return web.json_response({"error": "bad_amount", "message": "Неверное количество"}, status=400)
 
-    if kind == "tokens":
-        await add_game_tokens(session, target, amount)
-    elif kind == "balance":
+    if kind in ("balance", "tokens"):  # «tokens» — старые клиенты: демо-фишек больше нет
         await add_balance(session, target, amount)
     elif kind == "case":
         code = body.get("case_code")

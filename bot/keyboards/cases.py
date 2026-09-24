@@ -11,7 +11,6 @@ from bot.keyboards.callbacks import (
     CaseQtySelectCB,
     CasesCategoryCB,
     CasesInventoryCB,
-    CasesTopUpCB,
     MainMenuCB,
 )
 
@@ -53,7 +52,7 @@ def cases_list_keyboard(cases: list[Case], category: CaseCategory, page: int) ->
     start = page * PAGE_SIZE
     page_items = cases[start : start + PAGE_SIZE]
     for case in page_items:
-        price = f"{case.price_tokens} 🎫" if case.price_tokens is not None else "цена уточняется"
+        price = f"{case.price_tokens} B" if case.price_tokens is not None else "цена уточняется"
         count = f"{case.item_count_label} предм." if case.item_count_label is not None else "? предм."
         lock = "" if case.is_openable else "🔒 "
         label = f"{lock}{case.name} — {price} · {count}"
@@ -72,7 +71,6 @@ def cases_list_keyboard(cases: list[Case], category: CaseCategory, page: int) ->
         builder.row(*nav_row)
 
     builder.row(InlineKeyboardButton(text="🎒 Инвентарь", callback_data=CasesInventoryCB().pack()))
-    builder.row(InlineKeyboardButton(text="🎁 Пополнить демо-баланс", callback_data=CasesTopUpCB().pack()))
     builder.row(InlineKeyboardButton(text="☰ МЕНЮ", callback_data=MainMenuCB(section="menu").pack()))
     return builder.as_markup()
 

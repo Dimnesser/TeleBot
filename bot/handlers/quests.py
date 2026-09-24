@@ -8,7 +8,7 @@ from aiogram.types import CallbackQuery
 from bot.database.engine import async_session
 from bot.database.models import Quest, QuestScope
 from bot.database.repo import quests as quests_repo
-from bot.database.repo.users import add_game_tokens, get_or_create_user
+from bot.database.repo.users import add_balance, get_or_create_user
 from bot.keyboards.callbacks import QuestClaimCB, QuestsHomeCB
 from bot.keyboards.quests import quests_keyboard
 from bot.services.quest_service import format_timedelta, period_key, time_until_reset
@@ -60,7 +60,7 @@ async def open_quests_home(callback: CallbackQuery, state: FSMContext, *, answer
             if progress_count >= quest.target_count:
                 claimable.append(quest)
 
-        tokens = user.game_tokens
+        tokens = user.balance
 
     lines = [QUESTS_HEADER, "", QUESTS_BALANCE_LINE.format(tokens=tokens)]
     if rows_by_scope[QuestScope.DAILY]:
@@ -104,7 +104,7 @@ async def handle_claim(callback: CallbackQuery, callback_data: QuestClaimCB, sta
 
         progress.claimed = True
         await session.commit()
-        await add_game_tokens(session, user, quest.reward_tokens)
+        await add_balance(session, user, quest.reward_tokens)
         reward = quest.reward_tokens
 
     await callback.answer(QUEST_CLAIMED_ALERT.format(reward=reward), show_alert=True)

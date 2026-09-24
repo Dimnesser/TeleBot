@@ -10,6 +10,7 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 
+from bot.data.brainrot_roster import CHEAP_SECRETS, ROSTER
 from bot.database.models import DepositCategory
 
 
@@ -32,13 +33,19 @@ SEED_ITEMS: list[SeedItem] = [
     SeedItem(DepositCategory.HIRSY, "Santas Sleigh", "🛷", 88, 1, None, 4),
     SeedItem(DepositCategory.HIRSY, "Rainbow Hammer", "🔨", 623, 1, None, 5),
     SeedItem(DepositCategory.HIRSY, "Bloodmoon Hammer", "🔨", 1259, 1, None, 6),
-    # Брейнроты
-    SeedItem(DepositCategory.BRAINROT, "Kraken", "🐙", 3077, 1, 15, 1),
-    SeedItem(DepositCategory.BRAINROT, "Garama and Madundung", "🗿", 41, 2, None, 2),
-    SeedItem(DepositCategory.BRAINROT, "Cash or Card", "💳", 43, 2, None, 3),
-    SeedItem(DepositCategory.BRAINROT, "Burguro And Fryuro", "🍔", 73, 1, None, 4),
-    SeedItem(DepositCategory.BRAINROT, "Pizza and Ranch", "🍕", 80, 1, None, 5),
-    SeedItem(DepositCategory.BRAINROT, "Popcuru and Fizzuru", "🍿", 87, 1, None, 6),
-    SeedItem(DepositCategory.BRAINROT, "Capitano Moby", "🐋", 91, 1, None, 7),
-    SeedItem(DepositCategory.BRAINROT, "Celestial Pegasus", "🦄", 93, 1, None, 8),
+    # Брейнроты — из ростера (bot.data.brainrot_roster), см. BRAINROT_DEPOSIT_ITEMS ниже.
 ]
+
+
+# Приём брейнротов — те же 57 брейнротов и цены в B, что на скриншотах
+# «Депозит брейнротом» (= основной ростер). Дешёвые Secret из кейсов обменник
+# не принимает — на скриншоте самый дешёвый приём Garama and Madundung (41 B).
+# «от 2 шт» — у дешёвых (< 50 B), как у Cash or Card и Garama на скриншоте.
+_CHEAP = {b.name for b in CHEAP_SECRETS}
+_HOT_STOCK = {"Kraken": 15}
+BRAINROT_DEPOSIT_ITEMS: list[SeedItem] = [
+    SeedItem(DepositCategory.BRAINROT, b.name, "🧠", b.value, 2 if b.value < 50 else 1, _HOT_STOCK.get(b.name), n)
+    for n, b in enumerate(sorted((b for b in ROSTER if b.name not in _CHEAP), key=lambda b: b.value), start=1)
+]
+SEED_ITEMS = SEED_ITEMS + BRAINROT_DEPOSIT_ITEMS
+DEPOSIT_CATALOG_VERSION = "2-roster"

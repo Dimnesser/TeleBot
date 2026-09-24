@@ -43,10 +43,9 @@ class User(Base):
     username: Mapped[str | None] = mapped_column(String(64), nullable=True)
     first_name: Mapped[str | None] = mapped_column(String(128), nullable=True)
     balance: Mapped[int] = mapped_column(Integer, default=0)
-    # Отдельная демо-валюта для игровых разделов со случайным исходом (кейсы,
-    # апгрейдер, краш, дайсы) — НЕ связана с депозитами/выводом, пополняется
-    # только через демо-кран, чтобы игровые механики не были обёрткой над
-    # реальными деньгами/предметами из обменника.
+    # Устарело: была отдельная демо-валюта 🎫. Демо-режим убран, всё идёт
+    # через balance (B); колонка оставлена, чтобы не ломать старые SQLite-базы
+    # (NOT NULL без server_default — без неё не вставить нового пользователя).
     game_tokens: Mapped[int] = mapped_column(Integer, default=0)
     referral_code: Mapped[str] = mapped_column(String(16), unique=True)
     referred_by_id: Mapped[int | None] = mapped_column(ForeignKey("users.id"), nullable=True)
@@ -138,7 +137,7 @@ class CaseItem(Base):
     """Один возможный дроп из кейса — реальный персонаж Steal a Brainrot.
 
     name/rarity — из bot.data.brainrot_roster (сверено с вики игры), value —
-    демо-ценность 🎫 из реальной внутриигровой цены. Вес выпадения ∝ 1/value,
+    ценность в B со скриншотов пользователя. Вес выпадения ∝ 1/value,
     см. bot/services/cases_service.py.
     """
 
@@ -303,7 +302,7 @@ class CaseCredit(Base):
 
 
 class PromoKind(str, enum.Enum):
-    TOKENS = "tokens"  # демо-фишки 🎫
+    TOKENS = "tokens"  # устарело: демо-фишек больше нет, такие промо начисляют B
     BALANCE = "balance"  # баланс B
     CASE = "case"  # бесплатные открытия кейса
 

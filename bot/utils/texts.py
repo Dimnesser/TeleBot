@@ -117,44 +117,37 @@ CASES_CATEGORY_TITLES = {
 
 CASES_HOME_TEXT = (
     "<b>{title}</b>\n\n"
-    "Демо-баланс: <b>{tokens} 🎫</b>\n"
+    "Баланс: <b>{tokens} B</b>\n"
     "Внутри — только реальные брейнроты из Steal a Brainrot. "
     "Красивое открытие с анимацией — в Mini App.\n\n"
     "Выбери кейс:"
 )
 
 CASE_DETAIL_HEADER = "<b>{name}</b>"
-CASE_DETAIL_PRICE_LINE = "Цена: <b>{price} 🎫</b> за 1 шт · {count} предм. в пуле"
+CASE_DETAIL_PRICE_LINE = "Цена: <b>{price} B</b> за 1 шт · {count} предм. в пуле"
 CASE_DETAIL_PRICE_UNKNOWN_LINE = "Цена уточняется · {count} предм. в пуле"
 CASE_DETAIL_NOTE_LINE = "ℹ️ {note}"
 CASE_DETAIL_NOT_OPENABLE = "🔒 У этого кейса пока нет содержимого — открытие недоступно."
 CASE_DETAIL_DROP_POOL_HEADER = "<b>ЧТО ВНУТРИ</b>"
-CASE_DETAIL_BALANCE_LINE = "Демо-баланс: <b>{tokens} 🎫</b>"
-CASE_DETAIL_TOTAL_COST_LINE = "Стоимость открытия ×{qty}: <b>{cost} 🎫</b>"
+CASE_DETAIL_BALANCE_LINE = "Баланс: <b>{tokens} B</b>"
+CASE_DETAIL_TOTAL_COST_LINE = "Стоимость открытия ×{qty}: <b>{cost} B</b>"
 
 CASE_OPEN_NOT_OPENABLE_ALERT = "У этого кейса пока нет содержимого — открытие недоступно."
 CASE_OPEN_NO_PRICE_ALERT = "У этого кейса не задана цена — открытие недоступно."
-CASE_OPEN_NOT_ENOUGH_TOKENS = "Недостаточно демо-фишек. Нужно {cost} 🎫, у тебя {balance} 🎫."
+CASE_OPEN_NOT_ENOUGH_TOKENS = "Недостаточно B. Нужно {cost} B, у тебя {balance} B. Пополни баланс."
 
 CASE_OPEN_RESULT_HEADER = "🎉 Открыт кейс «{name}» ×{qty}:"
-CASE_OPEN_RESULT_LINE = "• {name} [{rarity}] — {value} 🎫"
-CASE_OPEN_RESULT_FOOTER = "\nДемо-баланс: <b>{tokens} 🎫</b>"
-
-CASES_TOPUP_TEXT = "🎁 Начислено {amount} 🎫 демо-баланса. Текущий демо-баланс: {tokens} 🎫."
+CASE_OPEN_RESULT_LINE = "• {name} [{rarity}] — {value} B"
+CASE_OPEN_RESULT_FOOTER = "\nБаланс: <b>{tokens} B</b>"
 
 CASES_INVENTORY_HEADER = "<b>🎒 Твой инвентарь (последние {limit})</b>"
 CASES_INVENTORY_EMPTY = "Пока пусто — открой кейс, чтобы что-то тут появилось."
-CASES_INVENTORY_LINE = "• {item_name} ({case_name}) — {value} 🎫"
-
-CASES_DEMO_DISCLAIMER = (
-    "Кейсы работают на демо-фишках 🎫 — они не покупаются за деньги/предметы и не выводятся, "
-    "это отдельная песочница для проверки механики, не связанная с балансом B из обменника."
-)
+CASES_INVENTORY_LINE = "• {item_name} ({case_name}) — {value} B"
 
 UPGRADER_HOME_HEADER = "<b>АПГРЕЙДЕР</b>"
 UPGRADER_HOME_DISCLAIMER = (
-    "Апгрейдер работает с предметами из твоего инвентаря (дропы из кейсов), а не с балансом B "
-    "или Stars — рискуешь только тем, что уже выиграл в демо-режиме."
+    "Апгрейдер работает с брейнротами из твоего инвентаря: ставишь один, "
+    "при удаче получаешь дороже, при неудаче ставка сгорает."
 )
 UPGRADER_CONTRIBUTION_LABEL = "ТВОЙ ВКЛАД"
 UPGRADER_TARGET_LABEL = "ЖЕЛАЕМЫЙ ПРЕДМЕТ"
@@ -224,14 +217,14 @@ DICE_RESULT_LOSS = "💥 <b>Проигрыш.</b> {stake} потерян."
 
 # --- Квесты ---
 QUESTS_HEADER = "<b>КВЕСТЫ</b>"
-QUESTS_BALANCE_LINE = "БАЛАНС: <b>{tokens} 🎫</b>"
+QUESTS_BALANCE_LINE = "БАЛАНС: <b>{tokens} B</b>"
 QUESTS_SCOPE_DAILY = "<b>ДНЕВНЫЕ</b>"
 QUESTS_SCOPE_WEEKLY = "<b>НЕДЕЛЬНЫЕ</b>"
-QUEST_ROW = "{title}\n{description}\n{progress}/{target} · Сброс через {reset}\n+{reward} 🎫"
+QUEST_ROW = "{title}\n{description}\n{progress}/{target} · Сброс через {reset}\n+{reward} B"
 QUEST_CLAIMED_ROW = "{title} — ✅ забрано"
 QUEST_NOT_READY_ALERT = "Квест ещё не выполнен."
 QUEST_ALREADY_CLAIMED_ALERT = "Награда уже забрана."
-QUEST_CLAIMED_ALERT = "Получено {reward} 🎫!"
+QUEST_CLAIMED_ALERT = "Получено {reward} B!"
 
 # --- Бонусы: общее ---
 BONUSES_HEADER = "<b>БОНУСЫ</b>"
@@ -277,12 +270,12 @@ STAKING_MY_STATS = (
 # --- Батл ---
 BATTLE_HOME_HEADER = "<b>БАТЛ</b>"
 BATTLE_HOME_DISCLAIMER = (
-    "1×1 против бота-соперника на демо-фишках 🎫: оба открывают один кейс, "
+    "1×1 против бота-соперника за B: оба открывают один кейс, "
     "у кого дороже дроп — забирает оба предмета, ничья — возврат входа."
 )
 BATTLE_PICK_CASE_HINT = "Выбери кейс для батла:"
 BATTLE_NO_CASES = "Пока нет ни одного кейса с подтверждённым пулом для батла."
-BATTLE_NOT_ENOUGH_TOKENS = "Недостаточно фишек. Вход {cost} 🎫, у тебя {balance} 🎫."
+BATTLE_NOT_ENOUGH_TOKENS = "Недостаточно B. Вход {cost} B, у тебя {balance} B."
 BATTLE_RESULT_HEADER = "<b>{case_name}</b> — батл против бота"
 BATTLE_RESULT_PLAYER_LINE = "Ты: {name} — {value} B"
 BATTLE_RESULT_BOT_LINE = "Бот: {name} — {value} B"
@@ -303,9 +296,9 @@ GIVEAWAY_NO_WINNER_ANNOUNCEMENT = "🏆 Розыгрыш «{title}» завер�
 # --- FAQ ---
 FAQ_HEADER = "<b>FAQ</b>"
 FAQ_ENTRIES = [
-    ("Что такое B и 🎫?", "B — внутренний баланс от обменника (реальные предметы/Stars по фиксированному курсу). 🎫 — отдельная демо-валюта игровых разделов (кейсы, апгрейдер, краш, дайсы, батл), не связанная с депозитами."),
+    ("Что такое B?", "B — единый баланс BrainCore. Пополняется брейнротами, гирсами или Telegram Stars; на него открываются кейсы и батлы, туда же идут продажи дропа."),
     ("Можно ли вывести B в деньги или предметы?", "Нет, обратного вывода из бота не предусмотрено — только приём пополнений."),
-    ("Как получить 🎫?", "Стартовый демо-баланс при первом /start, плюс кнопка «Пополнить демо-баланс» в разделе кейсов/апгрейдера/краша/дайсов."),
+    ("Как пополнить баланс?", "В Mini App нажми на кошелёк: брейнроты и гирсы — заявка, которую проверяет модератор; Stars — оплата прямо в Telegram, B приходят сразу. Раз в 12 часов есть бесплатный кейс."),
     ("Как работает депозит предметами?", "Выбираешь предметы в обменнике, указываешь ник, заявку проверяет модератор — после подтверждения B зачисляется на баланс."),
     ("Что внутри кейсов?", "Только реальные брейнроты Steal a Brainrot тиров Secret и OG. Чем дороже брейнрот — тем реже он выпадает."),
     ("Какой шанс в апгрейдере?", "Шанс = ценность вклада / ценность цели. Цели — только с шансом от 75% до 1%. Исход решает сервер до начала анимации."),

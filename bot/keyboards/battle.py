@@ -13,7 +13,7 @@ def battle_cases_keyboard(cases: list[Case]) -> InlineKeyboardMarkup:
     for case in cases:
         builder.row(
             InlineKeyboardButton(
-                text=f"⚔️ {case.name} — вход {case.price_tokens} 🎫",
+                text=f"⚔️ {case.name} — вход {case.price_tokens} B",
                 callback_data=BattleStartCB(case_id=case.id).pack(),
             )
         )

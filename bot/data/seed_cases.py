@@ -7,7 +7,7 @@
 bot.data.brainrot_roster; в бесплатных кейсах ещё и монеты.
 
 Логика кейса (вся выводится из данных, руками не проставлено ничего):
-  * ценность предмета 🎫 — его ценность в B со скриншотов пользователя
+  * ценность предмета — его ценность в B со скриншотов пользователя
     (brainrot_roster.ROSTER);
   * шанс предмета ∝ 1 / ценность — дорогие брейнроты реже, но выпадают
     (bot.services.cases_service.item_weight);
@@ -75,7 +75,7 @@ def price_for(values: list[int]) -> int:
 
 
 def _pool(names: list[str | int]) -> tuple[SeedCaseItem, ...]:
-    """Имена брейнротов из ростера; число N — монеты «🎫 N» (сразу на баланс)."""
+    """Имена брейнротов из ростера; число N — N B монетами (сразу на баланс)."""
     items = [
         SeedCaseItem(coin_name(n), n, COIN_RARITY) if isinstance(n, int)
         else SeedCaseItem(n, ROSTER_BY_NAME[n].value, ROSTER_BY_NAME[n].rarity.value)

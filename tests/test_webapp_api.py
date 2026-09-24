@@ -28,12 +28,20 @@ class FakeBot:
 
     def __init__(self):
         self.subscribers: set[int] = set()
+        self.sent: list[tuple[int, str]] = []
+
+    async def send_message(self, chat_id, text, **kwargs):
+        self.sent.append((chat_id, text))
 
     async def get_me(self):
         class Me:
             username = "BrainCorre_bot"
 
         return Me()
+
+    async def create_invoice_link(self, **kwargs):
+        self.last_invoice = kwargs
+        return f"https://t.me/$invoice_{kwargs['payload']}"
 
     async def get_chat_member(self, chat_id, user_id):
         if chat_id not in self.channels:
@@ -43,6 +51,9 @@ class FakeBot:
             status = "member" if user_id in self.subscribers else "left"
 
         return Member()
+
+
+TEST_BALANCE = 1_000_000
 
 
 def _init_data(tg_id: int, *, username: str = "tester", first_name: str = "Test") -> str:
@@ -66,10 +77,20 @@ async def client(in_memory_db, monkeypatch):
     # via the private seed helpers (they look up bot.database.engine's own
     # async_session at call time, which conftest already points at the test DB).
     # _seed_cases_reconcile also needs the app_meta table, already created above.
-    from bot.database.engine import _seed_cases_reconcile, _seed_quests_if_empty
+    from bot.database.engine import _seed_cases_reconcile, _seed_items_reconcile, _seed_quests_if_empty
 
+    await _seed_items_reconcile()
     await _seed_cases_reconcile()
     await _seed_quests_if_empty()
+
+    # Демо-фишек больше нет: основному тестовому игроку (auth_headers) заранее
+    # кладём B на баланс, чтобы открывать кейсы и батлы.
+    from bot.database.repo.users import get_or_create_user
+
+    async with in_memory_db() as session:
+        user = await get_or_create_user(session, 999111, "tester", "Test")
+        user.balance = TEST_BALANCE
+        await session.commit()
 
     app = create_app(FakeBot())
     server = TestServer(app)
@@ -96,7 +117,11 @@ async def test_me_auto_creates_user(client, auth_headers) -> None:
     assert r.status == 200
     body = await r.json()
     assert body["tg_id"] == 999111
-    assert body["game_tokens"] == config.demo_starting_tokens
+    assert body["balance"] == TEST_BALANCE
+    # новый игрок — без стартовых фишек: демо-режима нет
+    r = await client.get("/api/me", headers={"Authorization": "tma " + _init_data(123123)})
+    assert (await r.json())["balance"] == 0
+    assert "game_tokens" not in await r.json()
 
 
 async def test_cases_feed_and_open(client, auth_headers) -> None:
@@ -123,7 +148,7 @@ async def test_inventory_sell(client, auth_headers) -> None:
     won = (await r.json())["won"][0]
 
     r = await client.get("/api/me", headers=auth_headers)
-    tokens_before = (await r.json())["game_tokens"]
+    tokens_before = (await r.json())["balance"]
 
     r = await client.get("/api/inventory", headers=auth_headers)
     item = (await r.json())[0]
@@ -133,7 +158,7 @@ async def test_inventory_sell(client, auth_headers) -> None:
     body = await r.json()
     assert body["sold_name"] == won["name"]
     assert body["payout"] == round(won["value"] * 0.9)
-    assert body["game_tokens"] == tokens_before + body["payout"]
+    assert body["balance"] == tokens_before + body["payout"]
 
     r = await client.get("/api/inventory", headers=auth_headers)
     assert await r.json() == []
@@ -153,8 +178,6 @@ async def test_case_open_reel_lands_on_server_decided_winner(client, auth_header
 
     for _ in range(8):
         r = await client.get(f"/api/me", headers=auth_headers)
-        if (await r.json())["game_tokens"] < case["price_tokens"]:
-            await client.post("/api/demo-topup", headers=auth_headers)
         r = await client.post(f"/api/cases/{case['id']}/open", headers=auth_headers, json={"qty": 1})
         assert r.status == 200
         body = await r.json()
@@ -183,15 +206,12 @@ async def test_case_open_rejects_insufficient_tokens(client, auth_headers) -> No
     assert openable, "seed data must contain at least one openable priced case"
     expensive = max(openable, key=lambda c: c["price_tokens"])
 
-    # спамим открытия, пока не кончатся токены
-    for _ in range(50):
-        r = await client.post(f"/api/cases/{expensive['id']}/open", headers=auth_headers, json={"qty": 1})
-        if r.status != 200:
-            break
-
+    # новый игрок с пустым балансом не может открыть платный кейс
+    broke = {"Authorization": "tma " + _init_data(424242)}
+    r = await client.post(f"/api/cases/{expensive['id']}/open", headers=broke, json={"qty": 1})
     assert r.status == 400
     body = await r.json()
-    assert body["error"] == "not_enough_tokens"
+    assert body["error"] == "not_enough_tokens" and body["balance"] == 0
 
 
 async def test_upgrader_spin_consumes_contribution(client, auth_headers) -> None:
@@ -299,7 +319,7 @@ async def test_staking_flow(client, auth_headers, in_memory_db) -> None:
 
     r = await client.get("/api/staking", headers=auth_headers)
     staking = await r.json()
-    assert staking["balance"] == 500
+    assert staking["balance"] == TEST_BALANCE + 500
     tier = staking["tiers"][0]
 
     r = await client.post("/api/staking/start", headers=auth_headers, json={"term_days": tier["term_days"], "amount": 200})
@@ -344,12 +364,12 @@ async def test_free_case_gives_coins_or_brainrot_then_cooldown(client, auth_head
     cases = (await (await client.get("/api/cases?category=free", headers=auth_headers)).json())["cases"]
     free = cases[0]
     assert free["price_tokens"] == 0
-    before = (await (await client.get("/api/me", headers=auth_headers)).json())["game_tokens"]
+    before = (await (await client.get("/api/me", headers=auth_headers)).json())["balance"]
     r = await client.post(f"/api/cases/{free['id']}/open", headers=auth_headers, json={"qty": 1})
     body = await r.json()
     assert r.status == 200 and body["cost"] == 0 and body["free_wait_seconds"] > 0
     won = body["won"][0]
-    assert body["game_tokens"] == before + (won["value"] if won.get("coins") else 0)
+    assert body["balance"] == before + (won["value"] if won.get("coins") else 0)
     r = await client.post(f"/api/cases/{free['id']}/open", headers=auth_headers, json={"qty": 1})
     assert r.status == 400 and (await r.json())["error"] == "free_cooldown"
 
@@ -432,9 +452,9 @@ async def test_admin_grant_tokens_and_partner(client, auth_headers, admin_header
 
     r = await client.post("/api/admin/grant", headers=admin_headers, json={"user": "999111", "kind": "tokens", "amount": 500})
     assert r.status == 200
-    before = (await r.json())["game_tokens"]
+    before = (await r.json())["balance"]
     me = await (await client.get("/api/me", headers=auth_headers)).json()
-    assert me["game_tokens"] == before
+    assert me["balance"] == before
 
     r = await client.post("/api/admin/partner", headers=admin_headers, json={"user": "@tester", "percent": 12})
     assert r.status == 200 and (await r.json())["partner_percent"] == 12
@@ -457,11 +477,11 @@ async def test_promo_case_credits_open_case_for_free(client, auth_headers, admin
 
     cases = (await (await client.get("/api/cases?category=starter", headers=auth_headers)).json())["cases"]
     nonna = next(c for c in cases if c["code"] == "fastfood")
-    tokens_before = (await (await client.get("/api/me", headers=auth_headers)).json())["game_tokens"]
+    tokens_before = (await (await client.get("/api/me", headers=auth_headers)).json())["balance"]
     r = await client.post(f"/api/cases/{nonna['id']}/open", headers=auth_headers, json={"qty": 1, "use_credits": True})
     body = await r.json()
     assert body["free"] is True and body["cost"] == 0 and body["credits_left"] == 1
-    assert body["game_tokens"] == tokens_before
+    assert body["balance"] == tokens_before
 
 
 async def test_promo_tokens_and_unknown_code(client, auth_headers, admin_headers) -> None:
@@ -469,9 +489,9 @@ async def test_promo_tokens_and_unknown_code(client, auth_headers, admin_headers
     promo = await (await client.post("/api/admin/promos", headers=admin_headers,
                                      json={"kind": "tokens", "amount": 300, "max_uses": 5})).json()
     assert len(promo["code"]) == 8
-    before = (await (await client.get("/api/me", headers=auth_headers)).json())["game_tokens"]
+    before = (await (await client.get("/api/me", headers=auth_headers)).json())["balance"]
     r = await client.post("/api/promo/redeem", headers=auth_headers, json={"code": promo["code"].lower()})
-    assert (await r.json())["me"]["game_tokens"] == before + 300
+    assert (await r.json())["me"]["balance"] == before + 300
     r = await client.post("/api/promo/redeem", headers=auth_headers, json={"code": "NOPE1234"})
     assert r.status == 400 and (await r.json())["error"] == "not_found"
 
@@ -564,3 +584,67 @@ async def test_free_case_requires_channel_subscription(client, auth_headers, adm
     r = await client.post("/api/admin/settings", headers=admin_headers, json={"required_channel": ""})
     assert (await r.json())["required_channel"] is None
 
+
+
+async def test_deposit_catalog_lists_brainrots_gears_and_stars(client, auth_headers) -> None:
+    body = await (await client.get("/api/deposit/catalog", headers=auth_headers)).json()
+    assert len(body["brainrot"]) == 57
+    garama = next(i for i in body["brainrot"] if i["name"] == "Garama and Madundung")
+    assert (garama["price_b"], garama["min_qty"]) == (41, 2) and garama["image_url"].endswith(".webp")
+    assert body["hirsy"] and body["stars"]["rate"] >= 1
+
+
+async def test_deposit_request_goes_to_moderation_not_balance(client, auth_headers) -> None:
+    catalog = await (await client.get("/api/deposit/catalog", headers=auth_headers)).json()
+    kraken = next(i for i in catalog["brainrot"] if i["name"] == "Kraken")
+    before = (await (await client.get("/api/me", headers=auth_headers)).json())["balance"]
+    r = await client.post("/api/deposit/request", headers=auth_headers,
+                          json={"category": "brainrot", "items": {kraken["id"]: 1}, "nickname": "dimon"})
+    body = await r.json()
+    assert r.status == 200 and body["request"]["status"] == "pending" and body["request"]["total_b"] == 3077
+    # B не начисляется, пока модератор не подтвердит
+    assert (await (await client.get("/api/me", headers=auth_headers)).json())["balance"] == before
+    mine = await (await client.get("/api/deposit/requests", headers=auth_headers)).json()
+    assert mine[0]["items"] == [{"name": "Kraken", "qty": 1}]
+
+    garama = next(i for i in catalog["brainrot"] if i["name"] == "Garama and Madundung")
+    r = await client.post("/api/deposit/request", headers=auth_headers,
+                          json={"category": "brainrot", "items": {garama["id"]: 1}, "nickname": "dimon"})
+    assert r.status == 400 and (await r.json())["error"] == "bad_cart"  # «от 2 шт»
+
+
+async def test_deposit_stars_creates_invoice(client, auth_headers) -> None:
+    r = await client.post("/api/deposit/stars", headers=auth_headers, json={"amount": 100})
+    body = await r.json()
+    assert r.status == 200 and body["invoice_url"].startswith("https://t.me/$invoice_stars_dep:999111:")
+    assert client.server.app["bot"].last_invoice["currency"] == "XTR"
+    r = await client.post("/api/deposit/stars", headers=auth_headers, json={"amount": 1})
+    assert r.status == 400
+
+
+async def test_admin_approves_and_rejects_deposit_requests(client, auth_headers, admin_headers) -> None:
+    catalog = await (await client.get("/api/deposit/catalog", headers=auth_headers)).json()
+    kraken = next(i for i in catalog["brainrot"] if i["name"] == "Kraken")
+    griffin = next(i for i in catalog["brainrot"] if i["name"] == "Griffin")
+    ids = []
+    for item in (kraken, griffin):
+        r = await client.post("/api/deposit/request", headers=auth_headers,
+                              json={"category": "brainrot", "items": {item["id"]: 1}, "nickname": "dimon"})
+        ids.append((await r.json())["request"]["id"])
+
+    assert (await client.get("/api/admin/deposits", headers=auth_headers)).status == 403
+    queue = await (await client.get("/api/admin/deposits", headers=admin_headers)).json()
+    assert [q["id"] for q in queue] == ids and queue[0]["player_tg_id"] == 999111
+
+    before = (await (await client.get("/api/me", headers=auth_headers)).json())["balance"]
+    r = await client.post(f"/api/admin/deposits/{ids[0]}", headers=admin_headers, json={"action": "approve"})
+    assert (await r.json())["credited"] == 3077
+    r = await client.post(f"/api/admin/deposits/{ids[1]}", headers=admin_headers, json={"action": "reject"})
+    assert (await r.json())["status"] == "rejected"
+    assert (await (await client.get("/api/me", headers=auth_headers)).json())["balance"] == before + 3077
+    # повторно не обработать, игрок получил уведомления
+    r = await client.post(f"/api/admin/deposits/{ids[0]}", headers=admin_headers, json={"action": "approve"})
+    assert r.status == 400
+    sent = [t for chat, t in client.server.app["bot"].sent if chat == 999111]
+    assert any("Начислено 3077 B" in t for t in sent) and any("отклонена" in t for t in sent)
+    assert await (await client.get("/api/admin/deposits", headers=admin_headers)).json() == []

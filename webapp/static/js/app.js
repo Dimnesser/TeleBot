@@ -142,7 +142,7 @@ function popNumber(el) {
 }
 
 async function refreshMe() {
-  const prevTokens = ME ? ME.game_tokens : null;
+  const prevTokens = ME ? ME.balance : null;
   ME = await api('/api/me');
   document.getElementById('drawer-username').textContent = ME.username ? '@' + ME.username : (ME.first_name || 'игрок');
   const drawerAvatar = document.getElementById('drawer-avatar');
@@ -150,8 +150,8 @@ async function refreshMe() {
   document.getElementById('drawer-balance').textContent = ME.balance;
   const topBalance = document.getElementById('topbar-tokens');
   if (topBalance) {
-    topBalance.textContent = ME.game_tokens;
-    if (prevTokens !== null && prevTokens !== ME.game_tokens) popNumber(topBalance);
+    topBalance.textContent = ME.balance;
+    if (prevTokens !== null && prevTokens !== ME.balance) popNumber(topBalance);
   }
   return ME;
 }
@@ -173,6 +173,7 @@ const ICONS = {
   bonuses: '<rect x="3" y="8" width="18" height="13" rx="2"/><path d="M3 12h18M12 8v13"/><path d="M12 8S8.5 3 7 5.5 12 8 12 8zM12 8s3.5-5 5-2.5S12 8 12 8z"/>',
   menu: '<path d="M4 7h16M4 12h16M4 17h10"/>',
   user: '<circle cx="12" cy="8" r="4"/><path d="M4 21a8 8 0 0 1 16 0"/>',
+  wallet: '<path d="M4 7.5A2.5 2.5 0 0 1 6.5 5H18v3"/><rect x="3" y="8" width="18" height="12" rx="2.5"/><path d="M16 14h2"/>',
 };
 function icon(name, cls = '') {
   return `<svg class="ic ${cls}" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">${ICONS[name] || ''}</svg>`;
@@ -216,6 +217,7 @@ function closeDrawer() {
 document.getElementById('btn-drawer').addEventListener('click', openDrawer);
 document.getElementById('drawer-overlay').addEventListener('click', closeDrawer);
 document.getElementById('btn-profile').addEventListener('click', () => navigate('profile'));
+document.getElementById('btn-wallet').addEventListener('click', () => { haptic.tick(); navigate('deposit'); });
 document.getElementById('brand-home').addEventListener('click', () => navigate('home'));
 document.getElementById('drawer-profile').addEventListener('click', () => { closeDrawer(); navigate('profile'); });
 
@@ -232,7 +234,7 @@ const SCREENS = {
   giveaways: renderGiveawaysScreen,
   faq: renderFaqScreen,
   bonuses: renderBonusesScreen,
-  deposit: renderDepositPlaceholder,
+  deposit: renderDepositScreen,
   inventory: renderInventoryScreen,
 };
 
@@ -422,29 +424,174 @@ function startFreeTimer() {
   freeTimer = setInterval(paint, 1000);
 }
 
-function renderDepositPlaceholder(root) {
+/* ------------------------------------------------------------------ ПОПОЛНЕНИЕ
+ * Честные пополнения, как на референсе: брейнроты и гирсы — заявка с ником в
+ * игре (B зачисляет модератор после трейда), Stars — счёт Telegram прямо в
+ * Mini App (B приходят после оплаты). Сам клиент баланс не трогает. */
+
+let depositTab = 'brainrot';
+const depositCart = { brainrot: {}, hirsy: {} };
+let depositCatalog = null;
+
+async function renderDepositScreen(root) {
+  const [catalog, requests] = await Promise.all([api('/api/deposit/catalog'), api('/api/deposit/requests').catch(() => [])]);
+  depositCatalog = catalog;
   root.innerHTML = `
-    <div class="section-title">ПОПОЛНИТЬ</div>
-    <div class="topup-card">
-      <div class="topup-badge">ТЕСТ</div>
-      <div class="topup-amount">+1 000 🎫</div>
-      <button class="open-btn" id="btn-test-topup" style="--c1:#c6ff3d;--c2:#5dffb0">
-        <span class="open-btn-shine"></span><span class="open-btn-label">Пополнить</span><span class="open-btn-price" id="topup-balance">${fmt(ME ? ME.game_tokens : 0)} 🎫</span>
-      </button>
+    <section class="dep">
+      <div class="dep-eyebrow">Пополнение баланса</div>
+      <h1 class="dep-title" id="dep-title"></h1>
+      <div class="dep-tabs">
+        ${[['brainrot', '🧠', 'Брейнроты'], ['hirsy', '🪽', 'Гирсы'], ['stars', '⭐', 'Stars']].map(([k, e, t]) =>
+          `<button class="dep-tab ${depositTab === k ? 'active' : ''}" data-tab="${k}"><span>${e}</span>${t}</button>`).join('')}
+      </div>
+      <div id="dep-body"></div>
+    </section>
+    <section class="dep-history" id="dep-history">${depositHistoryHtml(requests)}</section>`;
+  root.querySelectorAll('[data-tab]').forEach((el) => el.addEventListener('click', () => {
+    depositTab = el.dataset.tab; haptic.tick();
+    root.querySelectorAll('[data-tab]').forEach((t) => t.classList.toggle('active', t === el));
+    paintDepositTab(root);
+  }));
+  paintDepositTab(root);
+}
+
+function depositHistoryHtml(requests) {
+  if (!requests.length) return '';
+  return `
+    <div class="drops-title">Мои заявки</div>
+    ${requests.map((r) => `
+      <div class="dep-req st-${r.status}">
+        <div><b>#${r.id}</b> · ${r.items.map((i) => `${escapeHtml(i.name)} ×${i.qty}`).join(', ')}</div>
+        <div class="dep-req-foot"><span>${fmt(r.total_b)}${coinIcon()}</span><span class="dep-status">${escapeHtml(r.status_label)}</span></div>
+      </div>`).join('')}`;
+}
+
+function paintDepositTab(root) {
+  const body = root.querySelector('#dep-body');
+  root.querySelector('#dep-title').textContent = depositTab === 'stars' ? 'Депозит звёздами' : depositTab === 'hirsy' ? 'Депозит гирсами' : 'Депозит брейнротом';
+  if (depositTab === 'stars') { paintStars(body); return; }
+  const items = depositCatalog[depositTab];
+  body.innerHTML = `
+    <p class="dep-hint">Выбери, что передашь, введи ник в игре и отправь заявку — после трейда модератор зачислит${coinIcon()} на баланс.</p>
+    <label class="dep-select">
+      <select id="dep-buff">${depositCatalog.buffs.map((b) => `<option value="${b.code}">${escapeHtml(b.label)}</option>`).join('')}</select>
+    </label>
+    <div class="dep-filters">
+      <input id="dep-search" type="search" placeholder="Поиск по названию…" autocomplete="off">
+      <button class="dep-sort" id="dep-sort" data-dir="asc">↑ цена</button>
     </div>
-    <div class="card"><p class="muted" style="margin:0">Пополнение брейнротами, гирсами и Stars — в чате с ботом.</p></div>`;
-  root.querySelector('#btn-test-topup').addEventListener('click', async (e) => {
-    const btn = e.currentTarget;
-    btn.disabled = true;
-    try {
-      const res = await api('/api/demo-topup', { method: 'POST' });
-      haptic.success();
-      toast(`+${fmt(res.amount)} 🎫`, 'success');
-      root.querySelector('#topup-balance').textContent = `${fmt(res.game_tokens)} 🎫`;
-      await refreshMe();
-    } catch (err) { toast('Ошибка: ' + err.message, 'error'); }
-    btn.disabled = false;
+    <div class="dep-grid" id="dep-grid"></div>
+    <div class="dep-bar">
+      <div><span class="muted">Итого</span><b id="dep-total">0</b>${coinIcon()}</div>
+      <button class="open-btn" id="dep-next">Далее</button>
+    </div>`;
+  const grid = body.querySelector('#dep-grid');
+  const cart = depositCart[depositTab];
+  const buffPct = () => (depositCatalog.buffs.find((b) => b.code === body.querySelector('#dep-buff').value) || { surcharge_percent: 0 }).surcharge_percent;
+  const unit = (i) => i.price_b + Math.ceil(i.price_b * buffPct() / 100);
+  const paintTotal = () => {
+    const total = items.reduce((sum, i) => sum + unit(i) * (cart[i.id] || 0), 0);
+    body.querySelector('#dep-total').textContent = fmt(total);
+    body.querySelector('#dep-next').disabled = !total;
+  };
+  const paintGrid = () => {
+    const q = body.querySelector('#dep-search').value.trim().toLowerCase();
+    const dir = body.querySelector('#dep-sort').dataset.dir;
+    const list = items.filter((i) => !q || i.name.toLowerCase().includes(q))
+      .sort((a, b) => (dir === 'asc' ? a.price_b - b.price_b : b.price_b - a.price_b));
+    grid.innerHTML = list.map((i) => `
+      <div class="dep-item ${cart[i.id] ? 'picked' : ''}" data-id="${i.id}">
+        ${i.hot_stock_left ? `<span class="dep-hot">🔥 ${i.hot_stock_left}</span>` : ''}
+        <div class="dep-img">${i.image_url ? `<img src="${i.image_url}" alt="" loading="lazy">` : `<span>${escapeHtml(i.emoji)}</span>`}</div>
+        <div class="dep-name">${escapeHtml(i.name)}</div>
+        <div class="dep-price">${fmt(i.price_b)}${coinIcon()}${i.min_qty > 1 ? `<span> · от ${i.min_qty} шт</span>` : ''}</div>
+        <div class="dep-qty"><button data-d="-1">−</button><b>${cart[i.id] || 0}</b><button data-d="1">+</button></div>
+      </div>`).join('') || '<div class="empty-state">Ничего не найдено</div>';
+  };
+  grid.addEventListener('click', (e) => {
+    const btn = e.target.closest('[data-d]'); if (!btn) return;
+    const card = btn.closest('[data-id]'); const item = items.find((i) => i.id === Number(card.dataset.id));
+    const cur = cart[item.id] || 0;
+    // как в чате: первый «+» сразу до минимальной партии, «−» ниже минимума — в 0
+    const next = btn.dataset.d === '1' ? (cur ? cur + 1 : item.min_qty) : (cur <= item.min_qty ? 0 : cur - 1);
+    if (next) cart[item.id] = next; else delete cart[item.id];
+    haptic.tick();
+    card.classList.toggle('picked', !!next);
+    card.querySelector('.dep-qty b').textContent = next;
+    paintTotal();
   });
+  body.querySelector('#dep-search').addEventListener('input', paintGrid);
+  body.querySelector('#dep-buff').addEventListener('change', paintTotal);
+  body.querySelector('#dep-sort').addEventListener('click', (e) => {
+    const b = e.currentTarget; b.dataset.dir = b.dataset.dir === 'asc' ? 'desc' : 'asc';
+    b.textContent = b.dataset.dir === 'asc' ? '↑ цена' : '↓ цена';
+    paintGrid();
+  });
+  body.querySelector('#dep-next').addEventListener('click', () => confirmDeposit(root, items, cart, body.querySelector('#dep-buff').value, unit));
+  paintGrid(); paintTotal();
+}
+
+function confirmDeposit(root, items, cart, buff, unit) {
+  const picked = items.filter((i) => cart[i.id]);
+  const total = picked.reduce((sum, i) => sum + unit(i) * cart[i.id], 0);
+  const overlay = openModal(`
+    <button class="modal-close" onclick="closeModal()">✕</button>
+    <div class="dep-confirm">
+      <div class="subscribe-title">Заявка на пополнение</div>
+      <div class="dep-confirm-list">${picked.map((i) => `<div><span>${escapeHtml(i.name)} ×${cart[i.id]}</span><b>${fmt(unit(i) * cart[i.id])}${coinIcon()}</b></div>`).join('')}</div>
+      <div class="dep-confirm-total">Зачислим <b>${fmt(total)}</b>${coinIcon()} после трейда</div>
+      <input class="field" id="dep-nick" maxlength="32" placeholder="Твой ник в Steal a Brainrot" autocomplete="off">
+      <button class="open-btn" id="dep-send">Отправить заявку</button>
+    </div>`);
+  const nick = overlay.querySelector('#dep-nick');
+  nick.focus();
+  overlay.querySelector('#dep-send').addEventListener('click', async (e) => {
+    const btn = e.currentTarget; btn.disabled = true;
+    try {
+      const res = await api('/api/deposit/request', { method: 'POST', body: JSON.stringify({
+        category: depositTab, items: cart, buff, nickname: nick.value.trim(),
+      }) });
+      closeModal(); haptic.success();
+      toast(res.queue_position ? `Заявка #${res.request.id} в очереди: ${res.queue_position}-я` : `Заявка #${res.request.id} отправлена модератору`, 'success');
+      Object.keys(cart).forEach((k) => delete cart[k]);
+      renderDepositScreen(root);
+    } catch (err) { toast(err.message, 'error'); btn.disabled = false; }
+  });
+}
+
+function paintStars(body) {
+  const { rate, min, max } = depositCatalog.stars;
+  body.innerHTML = `
+    <p class="dep-hint">Оплата Telegram Stars прямо здесь — ${coinIcon()} придут на баланс сразу после оплаты. Курс: 1 ⭐ = ${rate} B.</p>
+    <div class="stars-chips">${[50, 100, 250, 500, 1000, 2500].filter((n) => n >= min && n <= max).map((n) => `<button data-n="${n}">⭐ ${fmt(n)}</button>`).join('')}</div>
+    <input class="field stars-input" id="stars-amount" type="number" min="${min}" max="${max}" value="${Math.max(min, 100)}">
+    <div class="stars-get">Получишь <b id="stars-get"></b>${coinIcon()}</div>
+    <button class="open-btn" id="stars-pay">Оплатить</button>`;
+  const input = body.querySelector('#stars-amount');
+  const paint = () => {
+    const n = Math.floor(Number(input.value) || 0);
+    body.querySelector('#stars-get').textContent = fmt(Math.max(0, n) * rate);
+    body.querySelector('#stars-pay').textContent = `Оплатить ⭐ ${fmt(Math.max(0, n))}`;
+  };
+  body.querySelectorAll('[data-n]').forEach((b) => b.addEventListener('click', () => { input.value = b.dataset.n; haptic.tick(); paint(); }));
+  input.addEventListener('input', paint);
+  body.querySelector('#stars-pay').addEventListener('click', async (e) => {
+    const btn = e.currentTarget; btn.disabled = true;
+    try {
+      const res = await api('/api/deposit/stars', { method: 'POST', body: JSON.stringify({ amount: Math.floor(Number(input.value)) }) });
+      const done = async (status) => {
+        btn.disabled = false;
+        if (status !== 'paid') { if (status === 'failed') toast('Оплата не прошла', 'error'); return; }
+        haptic.success();
+        toast(`Оплачено! +${fmt(res.credited)} B`, 'success');
+        // B начисляет бот по successful_payment — подтягиваем баланс пару раз
+        for (let i = 0; i < 5; i++) { await sleep(1200); await refreshMe().catch(() => {}); }
+      };
+      if (tg && tg.openInvoice) tg.openInvoice(res.invoice_url, done);
+      else { window.open(res.invoice_url, '_blank'); btn.disabled = false; }
+    } catch (err) { toast(err.message, 'error'); btn.disabled = false; }
+  });
+  paint();
 }
 
 // =================================================================== СЦЕНА КЕЙСА
@@ -503,7 +650,7 @@ async function openCaseStage(caseId, qty = 1) {
     <div class="stage-scroll">
       <header class="stage-top">
         <button class="stage-close" aria-label="Назад">‹</button>
-        <div class="stage-wallet"><span id="stage-tokens">${fmt(ME ? ME.game_tokens : 0)}</span>${coinIcon()}</div>
+        <div class="stage-wallet"><span id="stage-tokens">${fmt(ME ? ME.balance : 0)}</span>${coinIcon()}</div>
       </header>
       <div class="stage-view" id="stage-view">
         <div class="stage-art">${CaseArt.artifact(c)}</div>
@@ -547,7 +694,7 @@ function paintStageControls(stage, c, qty) {
     sub = 'бесплатно';
     if (freeLeft) { label = 'Через ' + freeWaitLabel(freeLeft); block = 'Бесплатный кейс ещё перезаряжается'; }
   } else if (isRef) { sub = 'только по коду партнёра'; block = 'Этот кейс выдаётся за код партнёра'; }
-  else if (!ME || ME.game_tokens < total) { block = `Нужно ${fmt(total)}, у тебя ${fmt(ME ? ME.game_tokens : 0)}. Пополни баланс.`; }
+  else if (!ME || ME.balance < total) { block = `Нужно ${fmt(total)}, у тебя ${fmt(ME ? ME.balance : 0)}. Пополни баланс.`; }
 
   controls.innerHTML = `
     ${isFree || isRef ? '' : `<div class="qty-switch">
@@ -594,10 +741,10 @@ async function runOpening(stage, c, qty, fast = false) {
     toast('Ошибка: ' + err.message, 'error');
     return;
   }
-  ME.game_tokens = res.game_tokens;
+  ME.balance = res.balance;
   if (ME.case_credits) ME.case_credits[c.code] = res.credits_left;
   if (c.category === 'free') freeReadyAt = Date.now() + (res.free_wait_seconds || 0) * 1000;
-  stage.querySelector('#stage-tokens').textContent = fmt(res.game_tokens);
+  stage.querySelector('#stage-tokens').textContent = fmt(res.balance);
   refreshMe().catch(() => {});
 
   if (!fast && !CaseArt.REDUCED) {
@@ -715,19 +862,19 @@ function showReveal(stage, c, qty, won) {
       if (won[i].coins) continue;
       try {
         const res = await api(`/api/inventory/${won[i].inventory_id}/sell`, { method: 'POST' });
-        ME.game_tokens = res.game_tokens;
+        ME.balance = res.balance;
         sum += res.payout;
         view.querySelector(`[data-won="${i}"]`).classList.add('sold');
       } catch (err) { /* уже продан */ }
     }
-    stage.querySelector('#stage-tokens').textContent = fmt(ME.game_tokens);
+    stage.querySelector('#stage-tokens').textContent = fmt(ME.balance);
     if (sum) toast(`Продано: +${fmt(sum)}`, 'success');
     refreshMe().catch(() => {});
     resetStage(stage, c, qty);
   });
   if (again) controls.querySelector('#btn-again').addEventListener('click', () => {
-    if (caseCreditsLeft(c) < qty && ME.game_tokens < c.price_tokens * qty) {
-      toast(`Нужно ${fmt(c.price_tokens * qty)}, у тебя ${fmt(ME.game_tokens)}. Пополни баланс.`, 'error');
+    if (caseCreditsLeft(c) < qty && ME.balance < c.price_tokens * qty) {
+      toast(`Нужно ${fmt(c.price_tokens * qty)}, у тебя ${fmt(ME.balance)}. Пополни баланс.`, 'error');
       return;
     }
     runOpening(stage, c, qty);
@@ -816,8 +963,8 @@ function paintInventory(root, items) {
     <div class="inv-tile fade-in-up" style="--rc:${i.rarity_color};animation-delay:${Math.min(idx * 25, 300)}ms">
       ${brainrotArt(i)}
       <div class="inv-name">${escapeHtml(i.name)}</div>
-      <div class="inv-value">${fmt(i.value)} 🎫</div>
-      <button class="inv-sell-btn" data-sell="${i.id}" data-payout="${Math.round(i.value * 0.9)}">Продать · ${Math.round(i.value * 0.9)} 🎫</button>
+      <div class="inv-value">${fmt(i.value)}${coinIcon()}</div>
+      <button class="inv-sell-btn" data-sell="${i.id}" data-payout="${Math.round(i.value * 0.9)}">Продать · ${Math.round(i.value * 0.9)}${coinIcon()}</button>
     </div>`).join('') || '<div class="empty-state" style="grid-column:1/-1">Пусто — открой кейс на главной.</div>';
 
   root.innerHTML = `
@@ -839,10 +986,10 @@ function paintInventory(root, items) {
     el.disabled = true;
     try {
       const res = await api(`/api/inventory/${el.dataset.sell}/sell`, { method: 'POST' });
-      toast(`Продано: ${res.sold_name} +${res.payout} 🎫`, 'success');
-      ME.game_tokens = res.game_tokens;
+      toast(`Продано: ${res.sold_name} +${res.payout} B`, 'success');
+      ME.balance = res.balance;
       const topBalance = document.getElementById('topbar-tokens');
-      if (topBalance) { topBalance.textContent = res.game_tokens; popNumber(topBalance); }
+      if (topBalance) { topBalance.textContent = res.balance; popNumber(topBalance); }
       const fresh = await api('/api/inventory?limit=200');
       paintInventory(root, fresh);
     } catch (err) {
@@ -858,12 +1005,12 @@ function paintInventory(root, items) {
       try {
         const res = await api(`/api/inventory/${item.id}/sell`, { method: 'POST' });
         total += res.payout;
-        ME.game_tokens = res.game_tokens;
+        ME.balance = res.balance;
       } catch (err) { /* предмет уже продан/удалён — пропускаем */ }
     }
-    toast(`Продано всё: +${total} 🎫`, 'success');
+    toast(`Продано всё: +${total} B`, 'success');
     const topBalance = document.getElementById('topbar-tokens');
-    if (topBalance) { topBalance.textContent = ME.game_tokens; popNumber(topBalance); }
+    if (topBalance) { topBalance.textContent = ME.balance; popNumber(topBalance); }
     const fresh = await api('/api/inventory?limit=200');
     paintInventory(root, fresh);
   });
@@ -898,13 +1045,13 @@ async function renderProfileScreen(root) {
       <div class="profile-name">${escapeHtml(displayName)}</div>
       <div class="profile-id">ID ${me.tg_id}</div>
       <div class="profile-wallets">
-        <div><span>Демо</span><b>${fmt(me.game_tokens)} 🎫</b></div>
-        <div><span>Баланс</span><b>${fmt(me.balance)} 🪙</b></div>
+        <div><span>Баланс</span><b>${fmt(me.balance)}${coinIcon()}</b></div>
+        <button class="profile-topup" onclick="navigate('deposit')">${icon('wallet')}Пополнить</button>
       </div>
     </div>
     <div class="profile-stats">
       <div><b>${inventory.length}</b><span>брейнротов</span></div>
-      <div><b>${fmt(total)}</b><span>ценность 🎫</span></div>
+      <div><b>${fmt(total)}</b><span>ценность${coinIcon()}</span></div>
       <div><b>${ogCount}</b><span>OG</span></div>
       <div><b>${me.referral_count}</b><span>рефералов</span></div>
     </div>
@@ -917,7 +1064,7 @@ async function renderProfileScreen(root) {
             ${brainrotArt(b)}
             ${rarityBadge(b)}
             <div class="showcase-name">${escapeHtml(b.name)}</div>
-            <div class="showcase-value">${fmt(b.value)} 🎫</div>
+            <div class="showcase-value">${fmt(b.value)}${coinIcon()}</div>
           </div>`).join('')}
       </div>
       <h3 class="profile-h">Последние дропы</h3>
@@ -977,7 +1124,7 @@ function bindPromoForm(root) {
         toast(`Партнёрский код активирован: 🎁 реферальный кейс ×${res.partner.case_amount} и +${res.partner.deposit_bonus_percent}% к пополнениям`, 'success');
       } else {
         const p = res.promo;
-        const what = p.kind === 'tokens' ? `+${fmt(p.amount)} 🎫` : p.kind === 'balance' ? `+${fmt(p.amount)} 🪙` : `🎁 ${p.amount} бесплатн. открытий кейса`;
+        const what = p.kind === 'case' ? `🎁 ${p.amount} бесплатн. открытий кейса` : `+${fmt(p.amount)} B`;
         toast(`Промокод активирован: ${what}`, 'success');
       }
       input.value = '';
@@ -997,6 +1144,9 @@ function adminPanelHtml() {
   return `
     <div class="panel admin-panel">
       <div class="panel-title">Админ-панель <span class="admin-badge">ADMIN</span></div>
+
+      <div class="admin-sub">Заявки на пополнение</div>
+      <div id="admin-deposits" class="promo-list"><div class="muted">Загрузка…</div></div>
 
       <div class="admin-sub">Бесплатный кейс</div>
       <form class="admin-grid" id="admin-settings" autocomplete="off">
@@ -1028,8 +1178,7 @@ function adminPanelHtml() {
       <div class="admin-sub">Промокод</div>
       <form class="admin-grid" id="admin-promo" autocomplete="off">
         <select class="field" id="promo-kind">
-          <option value="tokens">🎫 Фишки</option>
-          <option value="balance">🪙 Баланс B</option>
+          <option value="balance">Баланс B</option>
           <option value="case">🎁 Кейс</option>
         </select>
         <input class="field" id="promo-amount" type="number" min="1" placeholder="Сколько" />
@@ -1060,14 +1209,13 @@ function adminUserHtml(u) {
         <span class="muted">ID ${u.tg_id}</span>
       </div>
       <div class="admin-stats">
-        <span>${fmt(u.game_tokens)} 🎫</span><span>${fmt(u.balance)} 🪙</span>
+        <span>${fmt(u.balance)}${coinIcon()}</span>
         <span>реф. ${u.referral_count}</span>
         <span class="${u.partner_percent != null ? 'hl' : ''}">${u.partner_percent != null ? 'партнёр ' + u.partner_percent + '%' : 'не партнёр'}</span>
       </div>
       ${credits ? `<div class="muted" style="font-size:12px;margin-top:4px">Кейсы: ${credits}</div>` : ''}
       <div class="admin-actions">
-        <div class="inline-form"><input class="field" id="g-tokens" type="number" min="1" placeholder="🎫" /><button class="btn-chip" data-grant="tokens">Выдать 🎫</button></div>
-        <div class="inline-form"><input class="field" id="g-balance" type="number" min="1" placeholder="🪙 B" /><button class="btn-chip" data-grant="balance">Выдать B</button></div>
+        <div class="inline-form"><input class="field" id="g-balance" type="number" min="1" placeholder="Сколько B" /><button class="btn-chip" data-grant="balance">Выдать B</button></div>
         <div class="inline-form"><select class="field" id="g-case">${caseOptions()}</select><input class="field narrow" id="g-case-n" type="number" min="1" value="1" /><button class="btn-chip" data-grant="case">Выдать кейс</button></div>
       </div>
     </div>`;
@@ -1084,6 +1232,34 @@ async function bindAdminPanel(root) {
   panel.querySelector('#promo-case').innerHTML = caseOptions();
   panel.querySelector('#p-case').innerHTML = caseOptions();
   const botLink = await api('/api/referral').then((r) => r.link.split('?')[0]).catch(() => 'https://t.me/BrainCorre_bot');
+
+  const depositsBox = panel.querySelector('#admin-deposits');
+  async function loadDeposits() {
+    const list = await api('/api/admin/deposits').catch(() => []);
+    depositsBox.innerHTML = list.map((r) => `
+      <div class="admin-dep st-${r.status}">
+        <div class="admin-dep-head"><b>#${r.id}</b><span>${escapeHtml(r.player)}</span><span class="dep-status">${escapeHtml(r.status_label)}</span></div>
+        <div class="admin-dep-items">${r.items.map((i) => `${escapeHtml(i.name)} ×${i.qty}`).join(', ')}</div>
+        <div class="admin-dep-foot">
+          <span>ник: <b>${escapeHtml(r.nickname)}</b> · ${fmt(r.total_b)}${coinIcon()}</span>
+          <span class="admin-dep-actions">
+            <button class="btn-chip" data-dep="${r.id}" data-act="approve">Зачислить</button>
+            <button class="btn-chip ghost" data-dep="${r.id}" data-act="reject">Отклонить</button>
+          </span>
+        </div>
+      </div>`).join('') || '<div class="muted">Открытых заявок нет</div>';
+    depositsBox.querySelectorAll('[data-dep]').forEach((b) => b.addEventListener('click', async () => {
+      const approve = b.dataset.act === 'approve';
+      if (!approve && !confirm(`Отклонить заявку #${b.dataset.dep}?`)) return;
+      b.disabled = true;
+      try {
+        const res = await api(`/api/admin/deposits/${b.dataset.dep}`, { method: 'POST', body: JSON.stringify({ action: b.dataset.act }) });
+        toast(approve ? `Заявка #${res.id}: зачислено ${fmt(res.credited)} B` : `Заявка #${res.id} отклонена`, 'success');
+      } catch (err) { toast(err.message, 'error'); }
+      loadDeposits();
+    }));
+  }
+  loadDeposits();
 
   const settingsForm = panel.querySelector('#admin-settings');
   const paintSettings = (st) => {
@@ -1167,7 +1343,6 @@ async function bindAdminPanel(root) {
     userBox.querySelectorAll('[data-grant]').forEach((b) => b.addEventListener('click', async () => {
       const kind = b.dataset.grant;
       const body = { user: String(current.tg_id), kind };
-      if (kind === 'tokens') body.amount = userBox.querySelector('#g-tokens').value;
       if (kind === 'balance') body.amount = userBox.querySelector('#g-balance').value;
       if (kind === 'case') { body.case_code = userBox.querySelector('#g-case').value; body.amount = userBox.querySelector('#g-case-n').value; }
       try {
@@ -1193,7 +1368,7 @@ async function bindAdminPanel(root) {
     panel.querySelector('#admin-promos').innerHTML = list.map((p) => `
       <div class="promo-row">
         <code>${escapeHtml(p.code)}</code>
-        <span>${p.kind === 'tokens' ? fmt(p.amount) + ' 🎫' : p.kind === 'balance' ? fmt(p.amount) + ' 🪙' : '🎁 ' + p.amount + ' · ' + escapeHtml(((adminCases || []).find((c) => c.code === p.case_code) || {}).name || p.case_code)}</span>
+        <span>${p.kind !== 'case' ? fmt(p.amount) + coinIcon() : '🎁 ' + p.amount + ' · ' + escapeHtml(((adminCases || []).find((c) => c.code === p.case_code) || {}).name || p.case_code)}</span>
         <span class="muted">${p.uses}/${p.max_uses}</span>
       </div>`).join('') || '<div class="muted">Пока нет</div>';
   }
@@ -1243,7 +1418,7 @@ async function renderUpgraderScreen(root) {
 
   const slot = (b, label, id) => `
     <button class="upg-slot ${b ? 'filled' : ''}" id="${id}" style="${b ? glowVars(b) : ''}">
-      ${b ? `${brainrotArt(b)}<div class="upg-slot-name">${escapeHtml(b.name)}</div><div class="upg-slot-value">${fmt(b.value)} 🎫</div>`
+      ${b ? `${brainrotArt(b)}<div class="upg-slot-name">${escapeHtml(b.name)}</div><div class="upg-slot-value">${fmt(b.value)}${coinIcon()}</div>`
           : '<div class="upg-slot-plus">+</div>'}
     </button>`;
 
@@ -1364,7 +1539,7 @@ function showUpgradeOnWheel(root, res, contribution, target) {
     center.innerHTML = `
       <div class="upg-center-art won">${brainrotArt(b)}</div>
       <div class="upg-result-word win">WIN</div>
-      <div class="upg-label">+${fmt(b.value)} 🎫</div>`;
+      <div class="upg-label">+${fmt(b.value)}${coinIcon()}</div>`;
     haptic.success();
     const wrap = root.querySelector('.upg-ring-wrap');
     if (upgraderFx) upgraderFx.burst(wrap.clientWidth / 2, wrap.clientHeight / 2, '#c6ff3d', 1.3);
@@ -1393,7 +1568,7 @@ function openBrainrotPicker(title, list, emptyText, onPick, isDisabled = null) {
     <button class="pick-tile ${off ? 'off' : ''}" style="${glowVars(b)}" data-idx="${idx}" ${off ? 'disabled' : ''}>
       ${brainrotArt(b)}
       <div class="pick-name">${escapeHtml(b.name)}</div>
-      <div class="pick-value">${off ? off : fmt(b.value) + ' 🎫'}</div>
+      <div class="pick-value">${off ? off : fmt(b.value) + coinIcon()}</div>
     </button>`;
   }).join('') || `<div class="empty-state" style="grid-column:1/-1">${emptyText}</div>`;
   const overlay = openModal(`
@@ -1604,7 +1779,7 @@ function prizeCardHtml(label, b, extra = '') {
       <div class="prize-body">
         <div class="prize-label">${label}</div>
         <div class="prize-name">${escapeHtml(b.name)}</div>
-        <div class="prize-value">${fmt(b.value)} 🎫</div>
+        <div class="prize-value">${fmt(b.value)}${coinIcon()}</div>
         ${extra}
       </div>
     </div>`;
@@ -1624,11 +1799,11 @@ function paintCrashIdle(root, state, picked = null) {
   const actions = root.querySelector('#crash-actions');
   actions.innerHTML = `
     <button class="stake-card stake-pick" id="btn-crash-pick" style="${picked ? glowVars(picked) : ''}">
-      ${picked ? `${brainrotArt(picked)}<div><div class="stake-name">${escapeHtml(picked.name)}</div><div class="stake-value">Ставка · ${fmt(picked.value)} 🎫</div></div><span class="stake-change">Сменить</span>`
+      ${picked ? `${brainrotArt(picked)}<div><div class="stake-name">${escapeHtml(picked.name)}</div><div class="stake-value">Ставка · ${fmt(picked.value)}${coinIcon()}</div></div><span class="stake-change">Сменить</span>`
                : `<div class="upg-slot-plus">+</div><div><div class="stake-name">Выбери брейнрота</div></div>`}
     </button>
     <button class="open-btn" id="btn-crash-start" ${picked ? '' : 'disabled'} style="--c1:#c6ff3d;--c2:#5dffb0">
-      <span class="open-btn-shine"></span><span class="open-btn-label">Взлёт</span><span class="open-btn-price">${picked ? fmt(picked.value) + ' 🎫' : '—'}</span>
+      <span class="open-btn-shine"></span><span class="open-btn-label">Взлёт</span><span class="open-btn-price">${picked ? fmt(picked.value) + coinIcon() : '—'}</span>
     </button>`;
   actions.querySelector('#btn-crash-pick').addEventListener('click', async () => {
     const [items, all] = await Promise.all([api('/api/inventory?limit=200'), api('/api/upgrader/targets?min_value=0')]);
@@ -1794,7 +1969,7 @@ function paintDice(root, rules, lastResult = null) {
     </div>
 
     <button class="stake-card stake-pick" id="dice-pick" style="${item ? glowVars(item) : ''}">
-      ${item ? `${brainrotArt(item)}<div><div class="stake-name">${escapeHtml(item.name)}</div><div class="stake-value">Ставка · ${fmt(item.value)} 🎫</div></div><span class="stake-change">Сменить</span>`
+      ${item ? `${brainrotArt(item)}<div><div class="stake-name">${escapeHtml(item.name)}</div><div class="stake-value">Ставка · ${fmt(item.value)}${coinIcon()}</div></div><span class="stake-change">Сменить</span>`
              : `<div class="upg-slot-plus">+</div><div><div class="stake-name">Выбери брейнрота</div></div>`}
     </button>
 
@@ -1805,7 +1980,7 @@ function paintDice(root, rules, lastResult = null) {
 
     <button class="open-btn" id="btn-dice-roll" ${item && color ? '' : 'disabled'} style="--c1:${color ? DICE_COLORS[color][0] : '#c6ff3d'};--c2:#ffffff">
       <span class="open-btn-shine"></span><span class="open-btn-label">Бросить</span>
-      <span class="open-btn-price">${item ? fmt(item.value) + ' 🎫' : '—'}</span>
+      <span class="open-btn-price">${item ? fmt(item.value) + coinIcon() : '—'}</span>
     </button>
 
     <div class="payouts">
@@ -1878,7 +2053,7 @@ function showDiceVerdict(root, rules, res) {
   table.classList.add(res.win ? 'won' : 'lost');
   if (res.win) haptic.success(); else haptic.impact('rigid');
   verdict.innerHTML = res.win
-    ? `<span class="v-win">${res.bonus ? 'Радужный бонус!' : `Совпадений: ${res.match_count}`} · ×${res.multiplier}</span><span class="v-sub">${escapeHtml(res.won_item.name)} → ${fmt(res.won_item.value)} 🎫</span>`
+    ? `<span class="v-win">${res.bonus ? 'Радужный бонус!' : `Совпадений: ${res.match_count}`} · ×${res.multiplier}</span><span class="v-sub">${escapeHtml(res.won_item.name)} → ${fmt(res.won_item.value)}${coinIcon()}</span>`
     : `<span class="v-lose">Совпадений: ${res.match_count} — мимо</span><span class="v-sub">${escapeHtml(res.stake.name)} сгорел</span>`;
   diceState.item = null;
   refreshMe().catch(() => {});
@@ -1911,7 +2086,7 @@ async function renderBattleScreen(root) {
 }
 
 async function startBattle(root, c) {
-  if (ME && ME.game_tokens < c.price_tokens) { toast(`Нужно ${fmt(c.price_tokens)} 🎫`, 'error'); return; }
+  if (ME && ME.balance < c.price_tokens) { toast(`Нужно ${fmt(c.price_tokens)} B`, 'error'); return; }
   const detail = await api(`/api/cases/${c.id}`);
   const pool = detail.items.filter((i) => i.image_url);
   const me = ME || {};
@@ -1950,7 +2125,7 @@ async function startBattle(root, c) {
     const side = overlay.querySelector(id);
     side.querySelector('.duel-slot').innerHTML = brainrotArt(b);
     side.querySelector('.duel-slot').style.cssText = glowVars(b);
-    side.querySelector('.duel-value').innerHTML = `<b>${escapeHtml(b.name)}</b><span>${fmt(b.value)} 🎫</span>`;
+    side.querySelector('.duel-value').innerHTML = `<b>${escapeHtml(b.name)}</b><span>${fmt(b.value)}${coinIcon()}</span>`;
     side.classList.add('landed');
   };
   put('#duel-me', res.player_item);
@@ -1959,7 +2134,7 @@ async function startBattle(root, c) {
   await sleep(450);
   const meSide = overlay.querySelector('#duel-me'), botSide = overlay.querySelector('#duel-bot');
   const verdict = overlay.querySelector('#duel-verdict');
-  if (res.winner === 'player') { meSide.classList.add('win'); botSide.classList.add('lose'); verdict.innerHTML = `<span class="v-win">Победа · +${fmt(res.player_item.value + res.bot_item.value)} 🎫</span>`; haptic.success(); }
+  if (res.winner === 'player') { meSide.classList.add('win'); botSide.classList.add('lose'); verdict.innerHTML = `<span class="v-win">Победа · +${fmt(res.player_item.value + res.bot_item.value)}${coinIcon()}</span>`; haptic.success(); }
   else if (res.winner === 'bot') { botSide.classList.add('win'); meSide.classList.add('lose'); verdict.innerHTML = '<span class="v-lose">Поражение</span>'; haptic.impact('rigid'); }
   else { verdict.innerHTML = '<span class="v-sub">Ничья — ставка возвращена</span>'; }
   refreshMe().catch(() => {});
@@ -1984,14 +2159,14 @@ async function renderQuestsScreen(root) {
         <div class="muted">${escapeHtml(q.description)}</div>
         <div class="muted" style="margin:6px 0">${q.progress_count}/${q.target_count} · сброс через ${q.reset_label}</div>
         <div style="display:flex;justify-content:space-between;align-items:center">
-          <span class="item-value">+${q.reward_tokens} 🎫</span>
+          <span class="item-value">+${q.reward_tokens}${coinIcon()}</span>
           ${q.claimable ? `<button class="btn btn-gold" style="width:auto;padding:8px 16px" data-claim="${q.id}">ЗАБРАТЬ</button>` : ''}
         </div>
       </div>`).join('')}` : '';
 
   root.innerHTML = `
     <div class="section-title">КВЕСТЫ</div>
-    <div class="balance-line">Баланс: <b>${me.game_tokens} 🎫</b></div>
+    <div class="balance-line">Баланс: <b>${me.balance}${coinIcon()}</b></div>
     ${renderGroup(scopeLabel.daily, groups.daily)}
     ${renderGroup(scopeLabel.weekly, groups.weekly)}
   `;
@@ -2000,7 +2175,7 @@ async function renderQuestsScreen(root) {
     el.addEventListener('click', async () => {
       try {
         const res = await api(`/api/quests/${el.dataset.claim}/claim`, { method: 'POST' });
-        toast(`+${res.reward} 🎫`, 'success');
+        toast(`+${res.reward} B`, 'success');
         renderQuestsScreen(root);
       } catch (err) { toast('Ошибка: ' + err.message, 'error'); }
     })
@@ -2082,7 +2257,7 @@ async function renderReferralTab(body) {
     </div>
     <div class="stat-grid">
       <div class="stat-box"><div class="stat-label">Рефералов</div><div class="stat-value">${r.referral_count}</div></div>
-      <div class="stat-box"><div class="stat-label">Заработано</div><div class="stat-value">${r.earned_total} 🪙</div></div>
+      <div class="stat-box"><div class="stat-label">Заработано</div><div class="stat-value">${r.earned_total}${coinIcon()}</div></div>
     </div>
   `;
 }
@@ -2093,9 +2268,9 @@ async function renderStakingTab(body) {
     body.innerHTML = `
       <div class="card">
         <div class="muted">АКТИВНЫЙ СТЕЙК</div>
-        <div style="font-weight:800;font-size:18px;margin:6px 0">${s.active.amount} 🪙 на ${s.active.term_days} дн. (+${s.active.bonus_percent}%)</div>
+        <div style="font-weight:800;font-size:18px;margin:6px 0">${s.active.amount}${coinIcon()} на ${s.active.term_days} дн. (+${s.active.bonus_percent}%)</div>
         <div class="muted">Погашение: ${new Date(s.active.matures_at).toLocaleString('ru-RU')}</div>
-        <div class="muted">Выплата: ${s.active.payout} 🪙</div>
+        <div class="muted">Выплата: ${s.active.payout}${coinIcon()}</div>
         ${s.active.matured
           ? '<button class="btn btn-gold" id="btn-stake-claim" style="margin-top:10px">ЗАБРАТЬ</button>'
           : '<div class="muted" style="margin-top:10px">Забрать раньше срока нельзя.</div>'}
@@ -2105,7 +2280,7 @@ async function renderStakingTab(body) {
     body.querySelector('#btn-stake-claim')?.addEventListener('click', async () => {
       try {
         const res = await api(`/api/staking/${s.active.id}/claim`, { method: 'POST' });
-        toast(`+${res.payout} 🪙`, 'success');
+        toast(`+${res.payout} B`, 'success');
         renderStakingTab(body);
       } catch (err) { toast('Ошибка: ' + err.message, 'error'); }
     });
@@ -2114,7 +2289,7 @@ async function renderStakingTab(body) {
 
   body.innerHTML = `
     <div class="card">
-      <p class="muted">Заморозь 🪙 и забирай их обратно с надбавкой. Минимум ${s.min_amount} 🪙. Твой баланс: ${s.balance} 🪙.</p>
+      <p class="muted">Заморозь B и забирай их обратно с надбавкой. Минимум ${s.min_amount}${coinIcon()}. Твой баланс: ${s.balance}${coinIcon()}.</p>
       <div class="pill-row">
         ${s.tiers.map((t) => `<button class="pill tier-pill" data-term="${t.term_days}" data-bonus="${t.bonus_percent}">${t.label}<br>+${t.bonus_percent}%</button>`).join('')}
       </div>
@@ -2147,8 +2322,8 @@ async function renderStakingTab(body) {
 function stakingStatsHtml(s) {
   return `
     <div class="stat-grid">
-      <div class="stat-box"><div class="stat-label">Заморожено всего</div><div class="stat-value">${s.total_frozen} 🪙</div></div>
-      <div class="stat-box"><div class="stat-label">Заработано сверху</div><div class="stat-value">${s.total_bonus} 🪙</div></div>
+      <div class="stat-box"><div class="stat-label">Заморожено всего</div><div class="stat-value">${s.total_frozen}${coinIcon()}</div></div>
+      <div class="stat-box"><div class="stat-label">Заработано сверху</div><div class="stat-value">${s.total_bonus}${coinIcon()}</div></div>
     </div>`;
 }
 

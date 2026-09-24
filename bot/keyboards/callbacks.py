@@ -81,10 +81,6 @@ class CaseConfirmOpenCB(CallbackData, prefix="copen"):
     qty: int
 
 
-class CasesTopUpCB(CallbackData, prefix="ctopup"):
-    pass
-
-
 class CasesInventoryCB(CallbackData, prefix="cinv"):
     pass
 

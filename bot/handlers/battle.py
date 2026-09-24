@@ -1,4 +1,4 @@
-"""Батл: 1×1 против бота-соперника на демо-фишках (см. bot.services.battle_service)."""
+"""Батл: 1×1 против бота-соперника за B (см. bot.services.battle_service)."""
 from __future__ import annotations
 
 from aiogram import Router
@@ -9,7 +9,7 @@ from bot.database.engine import async_session
 from bot.database.models import CaseCategory
 from bot.database.repo import cases as cases_repo
 from bot.database.repo import inventory as inventory_repo
-from bot.database.repo.users import add_game_tokens, get_or_create_user
+from bot.database.repo.users import add_balance, get_or_create_user
 from bot.keyboards.battle import battle_cases_keyboard, battle_result_keyboard
 from bot.keyboards.callbacks import BattleHomeCB, BattleStartCB
 from bot.services.battle_service import run_battle
@@ -58,13 +58,13 @@ async def handle_battle_start(callback: CallbackQuery, callback_data: BattleStar
         from_user = callback.from_user
         user = await get_or_create_user(session, from_user.id, from_user.username, from_user.first_name)
         cost = case.price_tokens
-        if user.game_tokens < cost:
+        if user.balance < cost:
             await callback.answer(
-                BATTLE_NOT_ENOUGH_TOKENS.format(cost=cost, balance=user.game_tokens), show_alert=True
+                BATTLE_NOT_ENOUGH_TOKENS.format(cost=cost, balance=user.balance), show_alert=True
             )
             return
 
-        user.game_tokens -= cost
+        user.balance -= cost
         await session.commit()
 
         items = await cases_repo.list_case_items(session, case.id)
@@ -82,7 +82,7 @@ async def handle_battle_start(callback: CallbackQuery, callback_data: BattleStar
                 case_id=case.id,
             )
         elif result.winner == "tie":
-            await add_game_tokens(session, user, cost)
+            await add_balance(session, user, cost)
 
         case_name = case.name
 

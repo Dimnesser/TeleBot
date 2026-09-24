@@ -23,18 +23,18 @@ async def _seed_case_with_items(session, category=CaseCategory.STARTER) -> Case:
     return case
 
 
-async def test_new_user_gets_starting_demo_tokens():
+async def test_new_user_starts_with_empty_balance():
+    """Демо-режима нет: новый игрок начинает с 0 B, без стартовых фишек."""
     async with engine_module.async_session() as session:
         user = await users_repo.get_or_create_user(session, tg_id=1, username="a", first_name="A")
-        assert user.game_tokens > 0
+        assert user.balance == 0
 
 
-async def test_add_game_tokens_increments_balance():
+async def test_add_balance_increments_balance():
     async with engine_module.async_session() as session:
         user = await users_repo.get_or_create_user(session, tg_id=2, username="b", first_name="B")
-        before = user.game_tokens
-        user = await users_repo.add_game_tokens(session, user, 500)
-        assert user.game_tokens == before + 500
+        user = await users_repo.add_balance(session, user, 500)
+        assert user.balance == 500
 
 
 async def test_list_cases_filters_by_category_and_orders_by_sort_order():
@@ -70,3 +70,15 @@ async def test_inventory_add_and_list_recent():
         assert len(recent) == 2
         assert {e.item_name for e in recent} == {"Cheap", "Rare"}
         assert all(e.case_name == "Seed Case" for e in recent)
+
+
+def test_deposit_catalog_keyboard_fits_telegram_button_limit():
+    from bot.data.buffs import BUFF_OPTIONS
+    from bot.data.seed_items import BRAINROT_DEPOSIT_ITEMS
+    from bot.database.models import DepositItem
+    from bot.keyboards.deposit import catalog_keyboard
+
+    items = [DepositItem(id=n, name=s.name, emoji=s.emoji, price_b=s.price_b, min_qty=s.min_qty,
+                         hot_stock_left=s.hot_stock_left) for n, s in enumerate(BRAINROT_DEPOSIT_ITEMS, 1)]
+    markup = catalog_keyboard(items, {}, "brainrot", False, BUFF_OPTIONS[0], True)
+    assert sum(len(row) for row in markup.inline_keyboard) <= 100

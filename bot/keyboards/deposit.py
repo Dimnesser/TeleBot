@@ -39,6 +39,9 @@ def _tabs_row(active: str) -> list[InlineKeyboardButton]:
     return buttons
 
 
+MAX_CATALOG_ROWS = 18
+
+
 def catalog_keyboard(
     items: list[DepositItem],
     cart: dict[int, int],
@@ -50,7 +53,9 @@ def catalog_keyboard(
     builder = InlineKeyboardBuilder()
     builder.row(*_tabs_row(active_category))
 
-    for item in items:
+    # Telegram принимает не больше 100 кнопок в клавиатуре (4 на предмет):
+    # показываем первые MAX_CATALOG_ROWS, остальные — через поиск/сортировку.
+    for item in items[:MAX_CATALOG_ROWS]:
         qty = cart.get(item.id, 0)
         min_note = f" · от {item.min_qty} шт" if item.min_qty > 1 else ""
         hot_note = f"🔥 Осталось {item.hot_stock_left} · " if item.hot_stock_left else ""
@@ -62,6 +67,9 @@ def catalog_keyboard(
             InlineKeyboardButton(text="➕", callback_data=DepositQtyCB(item_id=item.id, delta=1).pack()),
         )
 
+    if len(items) > MAX_CATALOG_ROWS:
+        builder.row(InlineKeyboardButton(
+            text=f"…ещё {len(items) - MAX_CATALOG_ROWS} — найди через 🔍 Поиск", callback_data=NOOP))
     builder.row(
         InlineKeyboardButton(text="🔍 Поиск", callback_data=DepositSearchCB().pack()),
         InlineKeyboardButton(
