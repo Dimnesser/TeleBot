@@ -403,3 +403,17 @@ class WithdrawRequest(Base):
     admin_id: Mapped[int | None] = mapped_column(BigInteger, nullable=True)
     created_at: Mapped[datetime] = mapped_column(DateTime, server_default=func.now())
     resolved_at: Mapped[datetime | None] = mapped_column(DateTime, nullable=True)
+
+
+class SupportMessage(Base):
+    """Сообщение поддержки у админов: по реплаю админа на него бот понимает,
+    какому игроку отправить ответ."""
+
+    __tablename__ = "support_messages"
+    __table_args__ = (UniqueConstraint("chat_id", "message_id"),)
+
+    id: Mapped[int] = mapped_column(primary_key=True)
+    chat_id: Mapped[int] = mapped_column(BigInteger)
+    message_id: Mapped[int] = mapped_column(BigInteger)
+    user_tg_id: Mapped[int] = mapped_column(BigInteger)
+    created_at: Mapped[datetime] = mapped_column(DateTime, server_default=func.now())

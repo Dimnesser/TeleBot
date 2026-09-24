@@ -25,6 +25,11 @@ async def handle_start(message: Message, state: FSMContext) -> None:
     await state.clear()
 
     payload = message.text.split(maxsplit=1)[1] if message.text and " " in message.text else None
+    if payload == "support":  # t.me/<бот>?start=support — кнопка «Поддержка» в Mini App
+        from bot.handlers.support import open_support
+
+        await open_support(message, state)
+        return
     referral_code = payload.removeprefix("ref_") if payload and payload.startswith("ref_") else None
 
     partner_note = ""
@@ -44,10 +49,9 @@ async def handle_start(message: Message, state: FSMContext) -> None:
             except PartnerError:
                 pass
         news_url = settings_service.channel_url(await settings_service.required_channel(session))
-        support_url = await settings_service.get_setting(session, settings_service.SUPPORT_URL)
 
     await message.answer_photo(
         FSInputFile(WELCOME_BANNER),
         caption=START_CAPTION + partner_note,
-        reply_markup=welcome_keyboard(news_url, support_url),
+        reply_markup=welcome_keyboard(news_url),
     )

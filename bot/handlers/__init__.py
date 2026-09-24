@@ -3,7 +3,7 @@ from __future__ import annotations
 
 from aiogram import Router
 
-from bot.handlers import battle, bonuses, crash, dice, faq, giveaways, menu, quests, start, upgrader
+from bot.handlers import battle, bonuses, crash, dice, faq, giveaways, menu, quests, start, support, upgrader
 from bot.handlers.cases import catalog as cases_catalog
 from bot.handlers.deposit import admin as deposit_admin
 from bot.handlers.deposit import catalog as deposit_catalog
@@ -24,4 +24,5 @@ routers: list[Router] = [
     battle.router,
     giveaways.router,
     faq.router,
+    support.router,  # последним: ловит «любое сообщение боту» как обращение
 ]

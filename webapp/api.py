@@ -1244,6 +1244,18 @@ async def post_giveaway_join(request: web.Request) -> web.Response:
 # ------------------------------------------------------------------------ faq
 
 
+_bot_username: str | None = None
+
+
+@routes.get("/api/support")
+async def get_support(request: web.Request) -> web.Response:
+    """Ссылка на чат поддержки в боте (t.me/<бот>?start=support)."""
+    global _bot_username
+    if _bot_username is None:
+        _bot_username = (await request.app["bot"].get_me()).username
+    return web.json_response({"url": f"https://t.me/{_bot_username}?start=support"})
+
+
 @routes.get("/api/faq")
 async def get_faq(_request: web.Request) -> web.Response:
     return web.json_response([{"question": q, "answer": a} for q, a in FAQ_ENTRIES])

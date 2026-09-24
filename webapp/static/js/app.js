@@ -169,6 +169,7 @@ const ICONS = {
   inventory: '<path d="M5 9a4 4 0 0 1 4-4h6a4 4 0 0 1 4 4v12H5z"/><path d="M9 5V3h6v2"/><path d="M9 13h6"/>',
   quests: '<path d="M10 6h10M10 12h10M10 18h10"/><path d="m4 6 1.5 1.5L8 5M4 12l1.5 1.5L8 11M4 18l1.5 1.5L8 17"/>',
   giveaways: '<path d="M8 21h8M12 16v5"/><path d="M7 4h10v5a5 5 0 0 1-10 0z"/><path d="M17 5h3v2a3 3 0 0 1-3 3M7 5H4v2a3 3 0 0 0 3 3"/>',
+  support: '<path d="M4 13v-1a8 8 0 0 1 16 0v1"/><rect x="3" y="13" width="4" height="6" rx="1.5"/><rect x="17" y="13" width="4" height="6" rx="1.5"/><path d="M19 19c0 1.5-2 2.5-5 2.5"/>',
   faq: '<circle cx="12" cy="12" r="9"/><path d="M9.5 9.5a2.5 2.5 0 1 1 3.5 2.3c-.6.3-1 .9-1 1.6v.6"/><circle cx="12" cy="17.2" r=".9" fill="currentColor"/>',
   bonuses: '<rect x="3" y="8" width="18" height="13" rx="2"/><path d="M3 12h18M12 8v13"/><path d="M12 8S8.5 3 7 5.5 12 8 12 8zM12 8s3.5-5 5-2.5S12 8 12 8z"/>',
   menu: '<path d="M4 7h16M4 12h16M4 17h10"/>',
@@ -193,6 +194,7 @@ const DRAWER_SECTIONS = [
   ['deposit', 'Пополнить баланс'],
   ['withdraw', 'Вывод брейнротов'],
   ['faq', 'FAQ'],
+  ['support', 'Поддержка'],
 ];
 
 const TOPNAV_SECTIONS = ['home', 'upgrader', 'dice', 'crash', 'battle', 'inventory', 'bonuses'];
@@ -204,7 +206,7 @@ function renderDrawer(active) {
     const btn = document.createElement('button');
     btn.className = 'drawer-item' + (key === active ? ' active' : '');
     btn.innerHTML = `${icon(key)}<span>${label}</span>`;
-    btn.addEventListener('click', () => { closeDrawer(); navigate(key); });
+    btn.addEventListener('click', () => { closeDrawer(); if (key === 'support') openSupport(); else navigate(key); });
     root.appendChild(btn);
   }
   // ПК: основные разделы прямо в шапке (виден только на широком экране)
@@ -1281,6 +1283,7 @@ async function renderProfileScreen(root) {
       <button class="btn btn-ghost" onclick="navigate('withdraw')">📤 Вывести</button>
       <button class="btn btn-ghost" onclick="withdrawMode='exchange';navigate('withdraw')">🔁 Обменять</button>
     </div>
+    <div class="btn-row"><button class="btn btn-ghost" onclick="openSupport()">🆘 Поддержка</button></div>
     <div id="my-cases"></div>
     ${me.partner_code ? `
       <div class="panel partner-self">
@@ -1365,7 +1368,6 @@ function adminPanelHtml() {
       <form class="admin-grid" id="admin-settings" autocomplete="off">
         <input class="field full" id="s-channel" placeholder="Канал подписки: @username или t.me/… (пусто — без подписки)" />
         <input class="field" id="s-hours" type="number" min="0.5" max="168" step="0.5" placeholder="Раз в N часов" />
-        <input class="field full" id="s-support" placeholder="Поддержка в /start: @username или ссылка" />
         <input class="field" id="s-rate" type="number" min="0.01" step="0.01" placeholder="1 ⭐ = ? B" />
         <input class="field" id="s-bonus" type="number" min="0" step="1" placeholder="Бонус за код, %" />
         <button class="btn-chip full" type="submit">Сохранить</button>
@@ -1532,7 +1534,6 @@ async function bindAdminPanel(root) {
   const paintSettings = (st) => {
     settingsForm.querySelector('#s-channel').value = st.required_channel || '';
     settingsForm.querySelector('#s-hours').value = st.free_case_cooldown_hours;
-    settingsForm.querySelector('#s-support').value = st.support_url || '';
     settingsForm.querySelector('#s-rate').value = st.stars_rate;
     settingsForm.querySelector('#s-bonus').value = st.stars_code_bonus_percent;
     panel.querySelector('#s-status').textContent = st.required_channel
@@ -1547,7 +1548,6 @@ async function bindAdminPanel(root) {
       const st = await api('/api/admin/settings', { method: 'POST', body: JSON.stringify({
         required_channel: settingsForm.querySelector('#s-channel').value.trim(),
         free_case_cooldown_hours: Number(settingsForm.querySelector('#s-hours').value),
-        support_url: settingsForm.querySelector('#s-support').value.trim(),
         stars_rate: Number(settingsForm.querySelector('#s-rate').value),
         stars_code_bonus_percent: Number(settingsForm.querySelector('#s-bonus').value),
       }) });
@@ -2568,16 +2568,27 @@ async function renderGiveawaysScreen(root) {
 
 // =================================================================== FAQ
 
+/* Поддержка — чат в самом боте: открываем бота с ?start=support. */
+async function openSupport() {
+  haptic.tick();
+  try {
+    const { url } = await api('/api/support');
+    if (tg && tg.openTelegramLink) { tg.openTelegramLink(url); tg.close && tg.close(); } else window.open(url, '_blank');
+  } catch (err) { toast(err.message, 'error'); }
+}
+
 async function renderFaqScreen(root) {
   const entries = await api('/api/faq');
   root.innerHTML = `
     <div class="section-title">FAQ</div>
+    <button class="btn btn-primary support-cta" id="faq-support">${icon('support')}<span>Написать в поддержку</span></button>
     ${entries.map((e) => `
       <div class="card">
         <div style="font-weight:800;margin-bottom:6px">${escapeHtml(e.question)}</div>
         <div class="muted">${escapeHtml(e.answer)}</div>
       </div>`).join('')}
   `;
+  root.querySelector('#faq-support').addEventListener('click', openSupport);
 }
 
 // =================================================================== БОНУСЫ

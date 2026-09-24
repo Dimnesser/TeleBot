@@ -217,3 +217,8 @@ class FaqHomeCB(CallbackData, prefix="fhome"):
 class WithdrawAdminCB(CallbackData, prefix="wadmin"):
     request_id: int
     action: str  # done | cancel
+
+
+class SupportCB(CallbackData, prefix="support"):
+    action: str  # open | faq | close
+    idx: int = -1  # номер вопроса FAQ

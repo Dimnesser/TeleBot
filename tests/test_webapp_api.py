@@ -809,6 +809,11 @@ async def test_admin_take_and_zero_balance(client, auth_headers, admin_headers) 
     assert left >= 300 and (await r.json())["balance"] == 0
 
 
+async def test_support_link(client, auth_headers) -> None:
+    body = await (await client.get("/api/support", headers=auth_headers)).json()
+    assert body["url"].startswith("https://t.me/") and body["url"].endswith("?start=support")
+
+
 async def test_stars_no_upper_limit(client, auth_headers) -> None:
     r = await client.post("/api/deposit/stars/quote", headers=auth_headers, json={"amount": 5_000_000})
     assert r.status == 200 and (await r.json())["credited"] == 8_750_000

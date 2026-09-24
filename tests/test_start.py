@@ -42,11 +42,11 @@ async def test_start_sends_banner_with_news_and_support(in_memory_db, monkeypatc
     assert sent["photo"].path == start_module.WELCOME_BANNER and start_module.WELCOME_BANNER.exists()
     assert "Добро пожаловать в <b>BrainCore</b>" in sent["caption"] and "<blockquote>" in sent["caption"]
     assert ("Новости", "https://t.me/braincore_news") in _buttons(sent["markup"])
-    assert ("Поддержка", "https://t.me/braincore_help") in _buttons(sent["markup"])
+    assert ("🆘 Поддержка", None) in _buttons(sent["markup"])  # поддержка — чат в самом боте
 
 
 def test_welcome_keyboard_skips_unset_links() -> None:
-    assert [t for t, _ in _buttons(welcome_keyboard(None, None))] in ([], ["🚀 Играть!"])
+    assert [t for t, _ in _buttons(welcome_keyboard(None))] in (["🆘 Поддержка"], ["🚀 Играть!", "🆘 Поддержка"])
 
 
 @pytest.mark.parametrize("raw, url", [
