@@ -6,6 +6,7 @@ bot/handlers/*.py, просто с JSON вместо edit_text/inline-кнопо
 from __future__ import annotations
 
 import random
+import time
 from pathlib import Path
 
 from aiohttp import web
@@ -366,8 +367,15 @@ async def get_upgrader_targets(request: web.Request) -> web.Response:
     min_value = int(request.query.get("min_value", "0"))
     exclude_name = request.query.get("exclude_name")
     items = await list_known_items(session)
-    eligible = [i for i in items if i.value > min_value and i.name != exclude_name]
-    return web.json_response([_brainrot_json(i.name, i.value) for i in eligible])
+    # Только брейнроты ростера: в «известных предметах» есть ещё гирсы из
+    # обменника (Santas Sleigh и т.п.) — они не персонажи и без картинок.
+    eligible = [i for i in items if i.value > min_value and i.name != exclude_name and i.name in ROSTER_BY_NAME]
+    payload = []
+    for i in eligible:
+        entry = _brainrot_json(i.name, i.value)
+        entry["chance_percent"] = chance_percent(min_value, i.value) if min_value else None
+        payload.append(entry)
+    return web.json_response(payload)
 
 
 @routes.post("/api/upgrader/spin")
@@ -385,7 +393,7 @@ async def post_upgrader_spin(request: web.Request) -> web.Response:
 
     # Ценность цели берётся из каталога, а не из запроса: иначе клиент мог
     # бы сам назначить цели любую цену.
-    known = {i.name: i.value for i in await list_known_items(session)}
+    known = {i.name: i.value for i in await list_known_items(session) if i.name in ROSTER_BY_NAME}
     if target_name not in known or known[target_name] <= item.value:
         return web.json_response({"error": "invalid_target"}, status=400)
     target_value = known[target_name]
@@ -433,8 +441,20 @@ async def get_crash_state(request: web.Request) -> web.Response:
             "multiplier": mult,
             "stake": _brainrot_json(round_.item_name, round_.item_value),
             "history": crash_history_label(),
+            **_crash_curve(round_),
         }
     )
+
+
+def _crash_curve(round_) -> dict:
+    """Параметры кривой множителя — клиент рисует её плавно по той же
+    формуле, что и сервер (bot.services.crash_service.multiplier_at)."""
+    return {
+        "elapsed": round(time.monotonic() - round_.start_time, 3),
+        "tick_seconds": config.crash_tick_seconds,
+        "growth_rate": config.crash_growth_rate,
+        "max_multiplier": config.crash_max_multiplier,
+    }
 
 
 @routes.post("/api/crash/start")
@@ -454,9 +474,11 @@ async def post_crash_start(request: web.Request) -> web.Response:
 
     item_name, item_value = item.item_name, item.value
     await inventory_repo.delete(session, item)
-    crash_start_round(user.tg_id, item_name, item_value)
+    round_ = crash_start_round(user.tg_id, item_name, item_value)
 
-    return web.json_response({"active": True, "multiplier": 1.0, "stake": _brainrot_json(item_name, item_value)})
+    return web.json_response(
+        {"active": True, "multiplier": 1.0, "stake": _brainrot_json(item_name, item_value), **_crash_curve(round_)}
+    )
 
 
 @routes.post("/api/crash/cashout")

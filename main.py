@@ -1,4 +1,4 @@
-"""Точка входа Brainrot Battle бота."""
+"""Точка входа BrainCore бота."""
 from __future__ import annotations
 
 import asyncio

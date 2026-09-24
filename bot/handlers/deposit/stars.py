@@ -92,7 +92,7 @@ async def handle_create_invoice(callback: CallbackQuery, state: FSMContext) -> N
 
     await callback.bot.send_invoice(
         chat_id=callback.from_user.id,
-        title="Пополнение баланса Brainrot Battle",
+        title="Пополнение баланса BrainCore",
         description=f"Начисление {amount * config.stars_to_balance_rate} B на внутренний баланс",
         payload=payload,
         currency="XTR",

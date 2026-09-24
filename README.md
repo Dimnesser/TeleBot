@@ -1,6 +1,6 @@
-# Brainrot Battle — Telegram-бот
+# BrainCore — Telegram-бот и Mini App
 
-Реконструкция интерфейса и логики Telegram Mini App «Brainrot Battle» в виде
+Telegram-бот BrainCore (ранее — реконструкция Mini App «Brainrot Battle») в виде
 классического Telegram-бота на `aiogram`: те же экраны, тексты и переходы,
 но через инлайн-клавиатуры вместо веб-интерфейса.
 

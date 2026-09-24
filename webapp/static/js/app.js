@@ -1,11 +1,11 @@
-/* Brainrot Battle Mini App — vanilla JS SPA, без сборки/зависимостей. */
+/* BrainCore Mini App — vanilla JS SPA, без сборки/зависимостей. */
 
 const tg = window.Telegram && window.Telegram.WebApp;
 if (tg) {
   tg.ready();
   tg.expand();
-  if (tg.setHeaderColor) try { tg.setHeaderColor('#08090f'); } catch (e) {}
-  if (tg.setBackgroundColor) try { tg.setBackgroundColor('#08090f'); } catch (e) {}
+  if (tg.setHeaderColor) try { tg.setHeaderColor('#07060c'); } catch (e) {}
+  if (tg.setBackgroundColor) try { tg.setBackgroundColor('#07060c'); } catch (e) {}
 }
 
 // Диагностическая страховка: любая необработанная ошибка/rejection раньше
@@ -146,18 +146,38 @@ async function refreshMe() {
 
 // ------------------------------------------------------------------- drawer
 
+// Линейные иконки 24×24 (stroke = currentColor) — вместо эмодзи в меню.
+const ICONS = {
+  home: '<path d="M3 10.5 12 3l9 7.5"/><path d="M5 9.5V21h5v-6h4v6h5V9.5"/>',
+  deposit: '<rect x="3" y="6" width="18" height="14" rx="3"/><path d="M3 10h18"/><path d="M16 15h2"/><path d="M7 6V4.5h10V6"/>',
+  upgrader: '<path d="M12 20V6"/><path d="m6 12 6-6 6 6"/><path d="M5 3h14"/>',
+  battle: '<path d="M14.5 4H20v5.5L9 20.5 3.5 15z"/><path d="m7 13 4 4"/><path d="M3 21l2.5-2.5"/>',
+  dice: '<rect x="3" y="3" width="18" height="18" rx="4"/><circle cx="8.5" cy="8.5" r="1.2" fill="currentColor"/><circle cx="15.5" cy="15.5" r="1.2" fill="currentColor"/><circle cx="15.5" cy="8.5" r="1.2" fill="currentColor"/><circle cx="8.5" cy="15.5" r="1.2" fill="currentColor"/>',
+  crash: '<path d="M3 20c7 0 12-5 16-15"/><path d="M14 5h5v5"/><path d="M3 20h18"/>',
+  inventory: '<path d="M5 9a4 4 0 0 1 4-4h6a4 4 0 0 1 4 4v12H5z"/><path d="M9 5V3h6v2"/><path d="M9 13h6"/>',
+  quests: '<path d="M10 6h10M10 12h10M10 18h10"/><path d="m4 6 1.5 1.5L8 5M4 12l1.5 1.5L8 11M4 18l1.5 1.5L8 17"/>',
+  giveaways: '<path d="M8 21h8M12 16v5"/><path d="M7 4h10v5a5 5 0 0 1-10 0z"/><path d="M17 5h3v2a3 3 0 0 1-3 3M7 5H4v2a3 3 0 0 0 3 3"/>',
+  faq: '<circle cx="12" cy="12" r="9"/><path d="M9.5 9.5a2.5 2.5 0 1 1 3.5 2.3c-.6.3-1 .9-1 1.6v.6"/><circle cx="12" cy="17.2" r=".9" fill="currentColor"/>',
+  bonuses: '<rect x="3" y="8" width="18" height="13" rx="2"/><path d="M3 12h18M12 8v13"/><path d="M12 8S8.5 3 7 5.5 12 8 12 8zM12 8s3.5-5 5-2.5S12 8 12 8z"/>',
+  menu: '<path d="M4 7h16M4 12h16M4 17h10"/>',
+  user: '<circle cx="12" cy="8" r="4"/><path d="M4 21a8 8 0 0 1 16 0"/>',
+};
+function icon(name, cls = '') {
+  return `<svg class="ic ${cls}" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">${ICONS[name] || ''}</svg>`;
+}
+
 const DRAWER_SECTIONS = [
-  ['home', '🏠 ГЛАВНАЯ'],
-  ['deposit', '💰 ПОПОЛНИТЬ БАЛАНС'],
-  ['upgrader', '⬆️ АПГРЕЙДЕР'],
-  ['battle', '🛡️ БАТЛ'],
-  ['dice', '🎲 ДАЙСЫ'],
-  ['crash', '🚀 КРАШ'],
-  ['inventory', '🎒 ИНВЕНТАРЬ'],
-  ['quests', '📋 КВЕСТЫ'],
-  ['giveaways', '🏆 РОЗЫГРЫШИ'],
-  ['faq', '❓ FAQ'],
-  ['bonuses', '🍀 БОНУСЫ'],
+  ['home', 'Кейсы'],
+  ['upgrader', 'Апгрейдер'],
+  ['dice', 'Дайсы'],
+  ['crash', 'Краш'],
+  ['battle', 'Батл'],
+  ['inventory', 'Инвентарь'],
+  ['quests', 'Квесты'],
+  ['giveaways', 'Розыгрыши'],
+  ['bonuses', 'Бонусы'],
+  ['deposit', 'Пополнить баланс'],
+  ['faq', 'FAQ'],
 ];
 
 function renderDrawer(active) {
@@ -166,7 +186,7 @@ function renderDrawer(active) {
   for (const [key, label] of DRAWER_SECTIONS) {
     const btn = document.createElement('button');
     btn.className = 'drawer-item' + (key === active ? ' active' : '');
-    btn.textContent = label;
+    btn.innerHTML = `${icon(key)}<span>${label}</span>`;
     btn.addEventListener('click', () => { closeDrawer(); navigate(key); });
     root.appendChild(btn);
   }
@@ -184,6 +204,7 @@ function closeDrawer() {
 document.getElementById('btn-drawer').addEventListener('click', openDrawer);
 document.getElementById('drawer-overlay').addEventListener('click', closeDrawer);
 document.getElementById('btn-profile').addEventListener('click', () => navigate('profile'));
+document.getElementById('brand-home').addEventListener('click', () => navigate('home'));
 document.getElementById('drawer-profile').addEventListener('click', () => { closeDrawer(); navigate('profile'); });
 
 // ------------------------------------------------------------------- router
@@ -229,6 +250,7 @@ function skeletonGrid() {
 async function renderScreen(screen, params = {}) {
   closeStage();
   closeModal();
+  stopCrashLoops();
   renderDrawer(screen);
   const root = document.getElementById('screen');
   root.innerHTML = `<div class="section-title">&nbsp;</div>${skeletonGrid()}`;
@@ -704,7 +726,7 @@ function paintInventory(root, items) {
     if (r !== 'all' && !rarityCounts[r]) return '';
     const count = r === 'all' ? items.length : rarityCounts[r];
     const label = r === 'all' ? 'Все' : (items.find((i) => i.rarity === r) || {}).rarity_label || r;
-    const rc = r === 'all' ? '#5b7cfa' : (items.find((i) => i.rarity === r) || {}).rarity_color || '#8a93a8';
+    const rc = r === 'all' ? '#c6ff3d' : (items.find((i) => i.rarity === r) || {}).rarity_color || '#8a93a8';
     return `<button class="filter-chip ${inventoryFilter === r ? 'active' : ''}" style="--rc:${rc}" data-r="${r}">${label} (${count})</button>`;
   }).join('');
 
@@ -840,7 +862,7 @@ function ringArc(pct) {
 
 async function renderUpgraderScreen(root) {
   const { contribution, target } = upgraderState;
-  const chance = contribution && target ? computeChance(contribution.value, target.value) : 0;
+  const chance = contribution && target ? (target.chance_percent || computeChance(contribution.value, target.value)) : 0;
   const mult = contribution && target ? (target.value / contribution.value).toFixed(2) : null;
 
   const slot = (b, label, id) => `
@@ -968,10 +990,12 @@ function showUpgradeResult(root, res, contribution, target) {
   overlay.querySelector('.modal-close').addEventListener('click', () => renderUpgraderScreen(root));
 }
 
+// Запасной расчёт (сервер присылает chance_percent у каждой цели): те же
+// границы, что UPGRADER_MIN/MAX_CHANCE_PERCENT на сервере — минимум 75%.
 function computeChance(contributionValue, targetValue) {
   if (targetValue <= 0) return 95;
   const raw = Math.round((contributionValue / targetValue) * 100);
-  return Math.max(1, Math.min(95, raw));
+  return Math.max(75, Math.min(95, raw));
 }
 
 function openBrainrotPicker(title, list, emptyText, onPick) {
@@ -1007,158 +1031,377 @@ function openTargetPicker(targets, onPick) {
 // =================================================================== КРАШ
 
 let crashPollTimer = null;
+let crashRaf = 0;
+
+function stopCrashLoops() {
+  clearInterval(crashPollTimer);
+  cancelAnimationFrame(crashRaf);
+}
+
+function crashMultiplierAt(curve, seconds) {
+  const raw = Math.pow(1 + curve.growth_rate, seconds / curve.tick_seconds);
+  return Math.min(raw, curve.max_multiplier);
+}
 
 async function renderCrashScreen(root) {
-  clearInterval(crashPollTimer);
+  stopCrashLoops();
   const state = await api('/api/crash/state');
-  paintCrash(root, state);
-
-  root.querySelector('#btn-crash-pick')?.addEventListener('click', async () => {
-    const items = await api('/api/inventory?limit=100');
-    openItemPicker(items, async (item) => {
-      try {
-        await api('/api/crash/start', { method: 'POST', body: JSON.stringify({ item_id: item.id }) });
-        startCrashPolling(root);
-      } catch (err) { toast('Ошибка: ' + err.message, 'error'); }
-    });
-  });
-
-  root.querySelector('#btn-crash-cashout')?.addEventListener('click', async () => {
-    try {
-      const res = await api('/api/crash/cashout', { method: 'POST' });
-      clearInterval(crashPollTimer);
-      toast(`💰 Забрано ×${res.multiplier}: ${res.won_item.name} (${fmt(res.won_item.value)} 🎫)`, 'success');
-      renderCrashScreen(root);
-    } catch (err) { toast('Ошибка: ' + err.message, 'error'); }
-  });
-
-  if (state.active) startCrashPolling(root);
-}
-
-function startCrashPolling(root) {
-  clearInterval(crashPollTimer);
-  crashPollTimer = setInterval(async () => {
-    try {
-      const state = await api('/api/crash/state');
-      paintCrash(root, state);
-      if (!state.active) {
-        clearInterval(crashPollTimer);
-        if (state.crashed) toast(`💥 Крах на ×${state.multiplier}`, 'error');
-      }
-    } catch (e) { clearInterval(crashPollTimer); }
-  }, 900);
-}
-
-function paintCrash(root, state) {
-  const stakeLabel = state.stake ? `${escapeHtml(state.stake.name)} (${fmt(state.stake.value)} 🎫)` : 'предмет не выбран';
+  const history = (state.history || '').split(',').map((h) => h.trim()).filter((h) => h && h !== '—');
   root.innerHTML = `
     <div class="section-title">КРАШ</div>
-    <div class="muted" style="text-align:center">История: ${state.history}</div>
-    <div class="crash-stage">
-      <div class="crash-rocket">🚀</div>
-      <div class="crash-multiplier ${state.crashed ? 'crashed' : ''}">${(state.multiplier ?? 1).toFixed(2)}x</div>
-      <div class="crash-status">${state.active ? 'В ПОЛЁТЕ' : state.crashed ? 'КРАХ' : 'ГОТОВ К СТАРТУ'}</div>
+    <div class="crash-history">${history.slice(-10).reverse().map((h) => {
+      const v = parseFloat(h);
+      return `<span class="crash-chip ${v >= 2 ? 'hi' : v < 1.2 ? 'lo' : ''}">${escapeHtml(h)}</span>`;
+    }).join('') || '<span class="muted">История раундов появится после первого полёта</span>'}</div>
+    <div class="crash-board" id="crash-board">
+      <svg class="crash-graph" viewBox="0 0 300 180" preserveAspectRatio="none">
+        <defs>
+          <linearGradient id="crashFill" x1="0" y1="0" x2="0" y2="1"><stop offset="0" stop-color="#c6ff3d" stop-opacity=".35"/><stop offset="1" stop-color="#c6ff3d" stop-opacity="0"/></linearGradient>
+        </defs>
+        <g class="crash-grid">${[36, 72, 108, 144].map((y) => `<line x1="0" x2="300" y1="${y}" y2="${y}"/>`).join('')}</g>
+        <path id="crash-area" fill="url(#crashFill)" d=""/>
+        <path id="crash-line" class="crash-line" d=""/>
+        <circle id="crash-dot" class="crash-dot" r="5" cx="0" cy="180"/>
+      </svg>
+      <div class="crash-readout">
+        <div class="crash-mult" id="crash-mult">1.00×</div>
+        <div class="crash-status" id="crash-status">ГОТОВ К СТАРТУ</div>
+      </div>
     </div>
-    <div class="muted" style="margin-bottom:10px">Ставка: ${stakeLabel}</div>
-    ${state.active
-      ? '<button class="btn btn-gold" id="btn-crash-cashout">ЗАБРАТЬ ✋</button>'
-      : '<button class="btn btn-primary" id="btn-crash-pick">Выбрать брейнрота и начать</button>'}
+    <div class="crash-stake" id="crash-stake"></div>
+    <div id="crash-actions"></div>
   `;
+  paintCrashControls(root, state);
+  if (state.active) runCrashRound(root, state);
+}
+
+function paintCrashControls(root, state, pickedItem = null) {
+  const stake = state.active ? state.stake : pickedItem;
+  root.querySelector('#crash-stake').innerHTML = stake ? `
+    <div class="stake-card" style="${glowVars(stake)}">
+      ${brainrotArt(stake)}
+      <div><div class="stake-name">${escapeHtml(stake.name)}</div><div class="stake-value">Ставка · ${fmt(stake.value)} 🎫</div></div>
+      <div class="stake-win" id="crash-potential">${state.active ? '' : ''}</div>
+    </div>` : '';
+  const actions = root.querySelector('#crash-actions');
+  if (state.active) {
+    actions.innerHTML = `<button class="open-btn" id="btn-crash-cashout" style="--c1:#ffd24d;--c2:#ff9d2e"><span class="open-btn-shine"></span><span class="open-btn-label">Забрать</span><span class="open-btn-price" id="crash-cash-value">—</span></button>`;
+    actions.querySelector('#btn-crash-cashout').addEventListener('click', async (e) => {
+      e.currentTarget.disabled = true;
+      try {
+        const res = await api('/api/crash/cashout', { method: 'POST' });
+        stopCrashLoops();
+        haptic.success();
+        const board = root.querySelector('#crash-board');
+        board.classList.add('cashed');
+        root.querySelector('#crash-mult').textContent = res.multiplier.toFixed(2) + '×';
+        root.querySelector('#crash-status').textContent = `ЗАБРАНО · ${fmt(res.won_item.value)} 🎫`;
+        refreshMe().catch(() => {});
+        setTimeout(() => { if (location.hash === '#crash') renderCrashScreen(root); }, 2200);
+      } catch (err) {
+        toast('Не успел — ракета уже взорвалась', 'error');
+      }
+    });
+    return;
+  }
+  actions.innerHTML = `
+    <div class="btn-row">
+      <button class="btn btn-ghost" id="btn-crash-pick">${pickedItem ? 'Сменить брейнрота' : 'Выбрать брейнрота'}</button>
+    </div>
+    <button class="open-btn" id="btn-crash-start" ${pickedItem ? '' : 'disabled'} style="--c1:#c6ff3d;--c2:#5dffb0">
+      <span class="open-btn-shine"></span><span class="open-btn-label">Взлёт</span><span class="open-btn-price">${pickedItem ? fmt(pickedItem.value) + ' 🎫' : '—'}</span>
+    </button>`;
+  actions.querySelector('#btn-crash-pick').addEventListener('click', async () => {
+    const items = await api('/api/inventory?limit=200');
+    openItemPicker(items, (item) => paintCrashControls(root, state, item));
+  });
+  const startBtn = actions.querySelector('#btn-crash-start');
+  startBtn.addEventListener('click', async () => {
+    if (!pickedItem) return;
+    startBtn.disabled = true;
+    try {
+      const res = await api('/api/crash/start', { method: 'POST', body: JSON.stringify({ item_id: pickedItem.id }) });
+      haptic.impact('heavy');
+      paintCrashControls(root, res);
+      runCrashRound(root, res);
+    } catch (err) {
+      toast('Ошибка: ' + err.message, 'error');
+      startBtn.disabled = false;
+    }
+  });
+}
+
+/** Кривая рисуется локально по той же формуле, что и на сервере; сервер
+ * опрашивается только чтобы узнать момент взрыва (точку краша знает он один). */
+function runCrashRound(root, state) {
+  stopCrashLoops();
+  const t0 = performance.now() - state.elapsed * 1000;
+  const line = root.querySelector('#crash-line');
+  const area = root.querySelector('#crash-area');
+  const dot = root.querySelector('#crash-dot');
+  const multEl = root.querySelector('#crash-mult');
+  const statusEl = root.querySelector('#crash-status');
+  const board = root.querySelector('#crash-board');
+  board.classList.remove('crashed', 'cashed');
+  board.classList.add('flying');
+  statusEl.textContent = 'В ПОЛЁТЕ';
+  let ended = false;
+
+  function draw(now) {
+    if (ended) return;
+    const secs = (now - t0) / 1000;
+    const m = crashMultiplierAt(state, secs);
+    const span = Math.max(6, secs * 1.15);
+    const top = Math.max(2, m * 1.2);
+    const pts = [];
+    for (let i = 0; i <= 40; i++) {
+      const s = (secs * i) / 40;
+      const x = (s / span) * 300;
+      const y = 180 - ((crashMultiplierAt(state, s) - 1) / (top - 1)) * 170;
+      pts.push(`${x.toFixed(1)},${y.toFixed(1)}`);
+    }
+    const d = 'M' + pts.join(' L');
+    line.setAttribute('d', d);
+    area.setAttribute('d', d + ` L${pts[pts.length - 1].split(',')[0]},180 L0,180 Z`);
+    const [lx, ly] = pts[pts.length - 1].split(',');
+    dot.setAttribute('cx', lx); dot.setAttribute('cy', ly);
+    multEl.textContent = m.toFixed(2) + '×';
+    const cash = root.querySelector('#crash-cash-value');
+    if (cash && state.stake) cash.textContent = fmt(Math.round(state.stake.value * m)) + ' 🎫';
+    crashRaf = requestAnimationFrame(draw);
+  }
+  crashRaf = requestAnimationFrame(draw);
+
+  crashPollTimer = setInterval(async () => {
+    try {
+      const s = await api('/api/crash/state');
+      if (s.active) return;
+      ended = true;
+      stopCrashLoops();
+      if (s.crashed || !s.active) {
+        board.classList.remove('flying');
+        board.classList.add('crashed');
+        multEl.textContent = (s.multiplier || 1).toFixed(2) + '×';
+        statusEl.textContent = 'ВЗРЫВ';
+        haptic.impact('rigid');
+        const actions = root.querySelector('#crash-actions');
+        if (actions) actions.innerHTML = `<button class="open-btn" disabled style="--c1:#ff4d6d;--c2:#ff8a5c"><span class="open-btn-label">Ставка сгорела</span><span class="open-btn-price">${(s.multiplier || 1).toFixed(2)}×</span></button>`;
+        setTimeout(() => { if (location.hash === '#crash') renderCrashScreen(root); }, 2200);
+      }
+    } catch (e) { /* сеть моргнула — следующий опрос */ }
+  }, 500);
 }
 
 // =================================================================== ДАЙСЫ
 
-let diceState = { item: null, color: null };
+const DICE_COLORS = {
+  '🔴': ['#ff4d5e', 'Красный'],
+  '🟠': ['#ff9a2e', 'Оранжевый'],
+  '🟡': ['#ffd84d', 'Жёлтый'],
+  '🟢': ['#3ee08a', 'Зелёный'],
+  '🔵': ['#3f8cff', 'Синий'],
+  '🟣': ['#a66bff', 'Фиолетовый'],
+};
+// Грань кубика, которая смотрит на зрителя, для каждой из 6 граней: [rotX, rotY].
+const DIE_FACE_ROT = [[0, 0], [0, 180], [0, -90], [0, 90], [-90, 0], [90, 0]];
+const DIE_FACES = ['front', 'back', 'right', 'left', 'top', 'bottom'];
+
+let diceState = { item: null, color: null, rolling: false, spins: 0 };
 
 async function renderDiceScreen(root) {
   const rules = await api('/api/dice/rules');
   paintDice(root, rules);
 }
 
-function paintDice(root, rules) {
-  const { item, color } = diceState;
-  const colorMap = { '🔴': '#e5484d', '🟠': '#f0923c', '🟡': '#f0c043', '🟢': '#3ecf6e', '🔵': '#4c6fe0', '🟣': '#a04cf0' };
-  const colors = rules.colors.map((c) => `<button class="color-dot ${c === color ? 'active' : ''}" style="background:${colorMap[c] || '#888'}" data-color="${c}"></button>`).join('');
-  const rulesRows = Object.entries(rules.payout_table).map(([count, mult]) =>
-    `<div class="item-row"><span>${count}/4 совпадений</span><span class="${mult ? 'item-value' : ''}">${mult ? `×${mult}` : 'проигрыш'}</span></div>`
-  ).join('');
+function dieHtml(rules, i) {
+  const faces = rules.colors.map((c, f) => `<div class="die-face ${DIE_FACES[f]}" style="--fc:${DICE_COLORS[c][0]}"><span></span></div>`).join('');
+  return `<div class="die-wrap"><div class="die" id="die-${i}" style="transform:rotateX(-20deg) rotateY(${25 + i * 20}deg)">${faces}</div><div class="die-shadow"></div></div>`;
+}
 
+function paintDice(root, rules, lastResult = null) {
+  const { item, color } = diceState;
+  const table = Object.entries(rules.payout_table);
   root.innerHTML = `
     <div class="section-title">ДАЙСЫ</div>
-    <button class="slot ${item ? 'filled' : ''}" id="slot-dice-item" style="width:100%;margin-bottom:10px;flex-direction:row;gap:10px">
-      ${item ? `${brainrotArt(item)}Ставка: ${escapeHtml(item.name)} — ${fmt(item.value)} 🎫` : 'Выбрать предмет из инвентаря'}
+    <div class="dice-table" id="dice-table">
+      <div class="dice-felt"></div>
+      <div class="dice-row3d">${[0, 1, 2, 3].map((i) => dieHtml(rules, i)).join('')}</div>
+      <div class="dice-verdict" id="dice-verdict">${color ? `Ставка на <b style="color:${DICE_COLORS[color][0]}">${DICE_COLORS[color][1].toLowerCase()}</b>` : 'Выбери цвет и брейнрота'}</div>
+    </div>
+
+    <button class="stake-card stake-pick" id="dice-pick" style="${item ? glowVars(item) : ''}">
+      ${item ? `${brainrotArt(item)}<div><div class="stake-name">${escapeHtml(item.name)}</div><div class="stake-value">Ставка · ${fmt(item.value)} 🎫</div></div><span class="stake-change">Сменить</span>`
+             : `<div class="upg-slot-plus">+</div><div><div class="stake-name">Выбери брейнрота</div><div class="stake-value">Он станет ставкой</div></div>`}
     </button>
-    <div class="color-row">${colors}</div>
-    <button class="btn btn-primary" id="btn-dice-roll" ${item && color ? '' : 'disabled'}>БРОСИТЬ</button>
-    <h4 style="margin:18px 0 8px">Правила игры</h4>
-    <div class="card" style="padding:0">
-      ${rulesRows}
-      <div class="item-row"><span>🌈 БОНУС (${rules.bonus_chance_percent}%)</span><span class="item-value">×${rules.bonus_multiplier}</span></div>
+
+    <div class="color-pick">
+      ${rules.colors.map((c) => `
+        <button class="gem ${c === color ? 'active' : ''}" style="--gc:${DICE_COLORS[c][0]}" data-color="${c}" aria-label="${DICE_COLORS[c][1]}"><span></span></button>`).join('')}
+    </div>
+
+    <button class="open-btn" id="btn-dice-roll" ${item && color ? '' : 'disabled'} style="--c1:${color ? DICE_COLORS[color][0] : '#c6ff3d'};--c2:#ffffff">
+      <span class="open-btn-shine"></span><span class="open-btn-label">Бросить</span>
+      <span class="open-btn-price">${item ? fmt(item.value) + ' 🎫' : '—'}</span>
+    </button>
+
+    <div class="payouts">
+      ${table.map(([n, m]) => `<div class="payout ${m ? 'win' : ''}"><b>${n}/4</b><span>${m ? '×' + m : '—'}</span></div>`).join('')}
+      <div class="payout bonus"><b>Бонус</b><span>×${rules.bonus_multiplier} · ${rules.bonus_chance_percent}%</span></div>
     </div>
   `;
 
-  root.querySelector('#slot-dice-item').addEventListener('click', async () => {
-    const items = await api('/api/inventory?limit=100');
+  root.querySelector('#dice-pick').addEventListener('click', async () => {
+    if (diceState.rolling) return;
+    const items = await api('/api/inventory?limit=200');
     openItemPicker(items, (i) => { diceState.item = i; paintDice(root, rules); });
   });
-  root.querySelectorAll('.color-dot').forEach((el) =>
-    el.addEventListener('click', () => { diceState.color = el.dataset.color; paintDice(root, rules); })
-  );
+  root.querySelectorAll('.gem').forEach((el) => el.addEventListener('click', () => {
+    if (diceState.rolling) return;
+    haptic.tick();
+    diceState.color = el.dataset.color;
+    paintDice(root, rules);
+  }));
   const rollBtn = root.querySelector('#btn-dice-roll');
-  if (rollBtn) rollBtn.addEventListener('click', async () => {
+  rollBtn.addEventListener('click', async () => {
+    if (!diceState.item || !diceState.color || diceState.rolling) return;
+    diceState.rolling = true;
     rollBtn.disabled = true;
+    haptic.impact('heavy');
+    let res;
     try {
-      const res = await api('/api/dice/roll', {
-        method: 'POST',
-        body: JSON.stringify({ item_id: diceState.item.id, color: diceState.color }),
-      });
-      diceState = { item: null, color: null };
-      const diceStr = res.dice.join(' ');
-      if (res.win) toast(`${diceStr} — совпадений: ${res.match_count}${res.bonus ? ' 🌈 БОНУС' : ''}. Выигрыш ×${res.multiplier}: ${fmt(res.won_item.value)} 🎫`, 'success');
-      else toast(`${diceStr} — совпадений: ${res.match_count}. Проигрыш.`, 'error');
-      paintDice(root, rules);
+      res = await api('/api/dice/roll', { method: 'POST', body: JSON.stringify({ item_id: diceState.item.id, color: diceState.color }) });
     } catch (err) {
+      diceState.rolling = false; rollBtn.disabled = false;
       toast('Ошибка: ' + err.message, 'error');
-      rollBtn.disabled = false;
+      return;
     }
+    await animateDice(root, rules, res);
+    diceState.rolling = false;
+    showDiceVerdict(root, rules, res);
   });
+}
+
+async function animateDice(root, rules, res) {
+  diceState.spins += 1;
+  const dur = CaseArt.REDUCED ? 200 : 1500;
+  res.dice.forEach((c, i) => {
+    const die = root.querySelector(`#die-${i}`);
+    const [rx, ry] = DIE_FACE_ROT[rules.colors.indexOf(c)];
+    const turnsX = 360 * (2 + diceState.spins * 2 + i);
+    const turnsY = 360 * (3 + diceState.spins * 2 + i);
+    die.parentElement.classList.add('rolling');
+    die.style.transition = `transform ${dur + i * 180}ms cubic-bezier(.18,.9,.25,1.02)`;
+    die.style.transform = `rotateX(${rx - 12 + turnsX}deg) rotateY(${ry + 8 + turnsY}deg)`;
+  });
+  let ticks = 0;
+  const tick = setInterval(() => { haptic.tick(); if (++ticks > 8) clearInterval(tick); }, 140);
+  await sleep(dur + 3 * 180 + 80);
+  clearInterval(tick);
+  res.dice.forEach((c, i) => {
+    const wrap = root.querySelector(`#die-${i}`).parentElement;
+    wrap.classList.remove('rolling');
+    if (c === diceState.color) wrap.classList.add('match');
+  });
+}
+
+function showDiceVerdict(root, rules, res) {
+  const verdict = root.querySelector('#dice-verdict');
+  const table = root.querySelector('#dice-table');
+  table.classList.add(res.win ? 'won' : 'lost');
+  if (res.win) haptic.success(); else haptic.impact('rigid');
+  verdict.innerHTML = res.win
+    ? `<span class="v-win">${res.bonus ? 'Радужный бонус!' : `Совпадений: ${res.match_count}`} · ×${res.multiplier}</span><span class="v-sub">${escapeHtml(res.won_item.name)} → ${fmt(res.won_item.value)} 🎫</span>`
+    : `<span class="v-lose">Совпадений: ${res.match_count} — мимо</span><span class="v-sub">${escapeHtml(res.stake.name)} сгорел</span>`;
+  diceState.item = null;
+  refreshMe().catch(() => {});
+  const btn = root.querySelector('#btn-dice-roll');
+  btn.querySelector('.open-btn-label').textContent = 'Ещё раз';
+  btn.querySelector('.open-btn-price').textContent = '—';
+  btn.disabled = false;
+  // Основной обработчик броска молча выходит (diceState.item уже null),
+  // этот — перерисовывает стол для нового броска.
+  btn.addEventListener('click', () => paintDice(root, rules), { once: true });
 }
 
 // =================================================================== БАТЛ
 
 async function renderBattleScreen(root) {
-  const cases = await api('/api/battle/cases');
-  const rows = cases.map((c) => `
-    <button class="item-row" style="width:100%;background:none;border:none;color:inherit;cursor:pointer" data-id="${c.id}">
-      <span>${escapeHtml(c.name)}</span><span class="item-value">${c.price_tokens} 🎫</span>
-    </button>`).join('') || '<div class="empty-state">Нет доступных кейсов для батла.</div>';
-
+  const [cases, me] = await Promise.all([api('/api/battle/cases'), refreshMe()]);
   root.innerHTML = `
     <div class="section-title">БАТЛ</div>
-    <p class="muted">1×1 против бота-соперника: оба открывают один и тот же кейс, у кого дороже дроп — забирает оба предмета.</p>
-    <div class="card" style="padding:0">${rows}</div>
-  `;
-
+    <p class="screen-lead">Дуэль 1×1: ты и соперник открываете один и тот же кейс. У кого дроп дороже — забирает оба брейнрота. Ничья — возврат ставки.</p>
+    <div class="case-grid battle-grid">
+      ${cases.map((c, idx) => `
+        <button class="case-card battle-card fade-in-up" style="${caseThemeVars(c)};animation-delay:${Math.min(idx * 40, 320)}ms" data-id="${c.id}">
+          <div class="case-card-glow"></div>
+          <div class="case-card-art">${CaseArt.artifact(c, 'artifact-sm')}</div>
+          <div class="case-card-body">
+            <div class="case-card-name">${escapeHtml(c.name)}</div>
+            <div class="case-card-foot"><span class="case-card-count">вход</span><span class="price-chip">${fmt(c.price_tokens)} 🎫</span></div>
+          </div>
+        </button>`).join('') || '<div class="empty-state">Нет доступных кейсов для батла.</div>'}
+    </div>`;
   root.querySelectorAll('[data-id]').forEach((el) =>
-    el.addEventListener('click', async () => {
-      try {
-        const res = await api('/api/battle/start', { method: 'POST', body: JSON.stringify({ case_id: Number(el.dataset.id) }) });
-        renderBattleResult(res);
-      } catch (err) { toast('Ошибка: ' + err.message, 'error'); }
-    })
+    el.addEventListener('click', () => startBattle(root, cases.find((c) => c.id === Number(el.dataset.id))))
   );
 }
 
-function renderBattleResult(res) {
-  const title = res.winner === 'player' ? '🏆 Победа!' : res.winner === 'bot' ? '💀 Поражение' : '🤝 Ничья';
-  openModal(`
-    <button class="modal-close" onclick="closeModal()">✕</button>
-    <h2>${title}</h2>
-    <div class="item-row" style="--rc:${res.player_item.rarity_color}">${brainrotArt(res.player_item)}<span style="flex:1;margin:0 8px">Ты: ${escapeHtml(res.player_item.name)}</span><span class="item-value" style="color:${res.player_item.rarity_color}">${fmt(res.player_item.value)} 🎫</span></div>
-    <div class="item-row" style="--rc:${res.bot_item.rarity_color}">${brainrotArt(res.bot_item)}<span style="flex:1;margin:0 8px">Бот: ${escapeHtml(res.bot_item.name)}</span><span class="item-value" style="color:${res.bot_item.rarity_color}">${fmt(res.bot_item.value)} 🎫</span></div>
-    <style>#active-modal .item-row .p-tile{width:36px;height:36px;font-size:14px;flex-shrink:0}</style>
-    <button class="btn btn-primary" style="margin-top:14px" onclick="closeModal()">Готово</button>
-  `);
+async function startBattle(root, c) {
+  if (ME && ME.game_tokens < c.price_tokens) { toast(`Нужно ${fmt(c.price_tokens)} 🎫`, 'error'); return; }
+  const detail = await api(`/api/cases/${c.id}`);
+  const pool = detail.items.filter((i) => i.image_url);
+  const me = ME || {};
+  const overlay = openModal(`
+    <div class="duel" style="${caseThemeVars(c)}">
+      <div class="duel-title">${escapeHtml(c.name)}</div>
+      <div class="duel-row">
+        <div class="duel-side" id="duel-me"><div class="duel-who">${avatarHtml(me)}<span>Ты</span></div><div class="duel-slot"></div><div class="duel-value">…</div></div>
+        <div class="duel-vs">VS</div>
+        <div class="duel-side" id="duel-bot"><div class="duel-who"><div class="avatar"><span>B</span></div><span>Соперник</span></div><div class="duel-slot"></div><div class="duel-value">…</div></div>
+      </div>
+      <div class="duel-verdict" id="duel-verdict">Открываем…</div>
+      <button class="btn btn-primary hidden" id="duel-done">Готово</button>
+    </div>`);
+  overlay.onclick = null;
+
+  // Карусель картинок из реального пула кейса, пока ждём ответ сервера.
+  const slots = [...overlay.querySelectorAll('.duel-slot')];
+  let k = 0;
+  const shuffle = setInterval(() => {
+    slots.forEach((s, j) => { const b = pool[(k + j * 3) % pool.length]; s.innerHTML = brainrotArt(b); s.style.cssText = glowVars(b); });
+    k += 1; haptic.tick();
+  }, 90);
+
+  let res;
+  try {
+    [res] = await Promise.all([
+      api('/api/battle/start', { method: 'POST', body: JSON.stringify({ case_id: c.id }) }),
+      sleep(CaseArt.REDUCED ? 100 : 1600),
+    ]);
+  } catch (err) {
+    clearInterval(shuffle); closeModal(); toast('Ошибка: ' + err.message, 'error'); return;
+  }
+  clearInterval(shuffle);
+  const put = (id, b) => {
+    const side = overlay.querySelector(id);
+    side.querySelector('.duel-slot').innerHTML = brainrotArt(b);
+    side.querySelector('.duel-slot').style.cssText = glowVars(b);
+    side.querySelector('.duel-value').innerHTML = `<b>${escapeHtml(b.name)}</b><span>${fmt(b.value)} 🎫</span>`;
+    side.classList.add('landed');
+  };
+  put('#duel-me', res.player_item);
+  await sleep(350);
+  put('#duel-bot', res.bot_item);
+  await sleep(450);
+  const meSide = overlay.querySelector('#duel-me'), botSide = overlay.querySelector('#duel-bot');
+  const verdict = overlay.querySelector('#duel-verdict');
+  if (res.winner === 'player') { meSide.classList.add('win'); botSide.classList.add('lose'); verdict.innerHTML = `<span class="v-win">Победа · +${fmt(res.player_item.value + res.bot_item.value)} 🎫</span>`; haptic.success(); }
+  else if (res.winner === 'bot') { botSide.classList.add('win'); meSide.classList.add('lose'); verdict.innerHTML = '<span class="v-lose">Поражение</span>'; haptic.impact('rigid'); }
+  else { verdict.innerHTML = '<span class="v-sub">Ничья — ставка возвращена</span>'; }
+  refreshMe().catch(() => {});
+  const done = overlay.querySelector('#duel-done');
+  done.classList.remove('hidden');
+  done.addEventListener('click', () => { closeModal(); renderBattleScreen(root); });
 }
 
 // =================================================================== КВЕСТЫ

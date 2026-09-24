@@ -1,4 +1,4 @@
-# Brainrot Battle — Mini App
+# BrainCore — Mini App
 
 Веб-версия бота (Telegram Mini App): кейсы, апгрейдер, краш, дайсы, батл,
 квесты, розыгрыши, бонусы (стейкинг + рефералы) и FAQ в виде обычной
