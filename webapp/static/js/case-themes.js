@@ -196,7 +196,7 @@
       return p;
     }
 
-    const count = REDUCED ? 0 : Math.round(Math.min(60, (w * h) / 9000));
+    const count = REDUCED || kind === 'none' ? 0 : Math.round(Math.min(60, (w * h) / 9000));
     for (let i = 0; i < count; i++) ambient.push(spawn(true));
 
     function drawParticle(p, alpha) {

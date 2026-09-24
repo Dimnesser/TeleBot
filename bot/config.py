@@ -24,7 +24,10 @@ class Config:
     demo_starting_tokens: int = int(os.getenv("DEMO_STARTING_TOKENS", "2000"))
     demo_topup_tokens: int = int(os.getenv("DEMO_TOPUP_TOKENS", "1000"))
     # Апгрейдер: шанс всегда режется в этот диапазон, чтобы не было 0%/100% исходов.
-    upgrader_min_chance_percent: int = int(os.getenv("UPGRADER_MIN_CHANCE_PERCENT", "75"))
+    upgrader_min_chance_percent: int = int(os.getenv("UPGRADER_MIN_CHANCE_PERCENT", "1"))
+    # Mini App: в список целей апгрейдера попадают только брейнроты, для
+    # которых честный шанс (вклад / цель) не ниже этого порога.
+    upgrader_min_target_chance_percent: int = int(os.getenv("UPGRADER_MIN_TARGET_CHANCE_PERCENT", "75"))
     upgrader_max_chance_percent: int = int(os.getenv("UPGRADER_MAX_CHANCE_PERCENT", "95"))
     # Краш: интервал тика анимации, скорость роста множителя, safety-cap по времени.
     crash_tick_seconds: float = float(os.getenv("CRASH_TICK_SECONDS", "1.2"))

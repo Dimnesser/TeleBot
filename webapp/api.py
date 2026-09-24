@@ -369,7 +369,13 @@ async def get_upgrader_targets(request: web.Request) -> web.Response:
     items = await list_known_items(session)
     # Только брейнроты ростера: в «известных предметах» есть ещё гирсы из
     # обменника (Santas Sleigh и т.п.) — они не персонажи и без картинок.
-    eligible = [i for i in items if i.value > min_value and i.name != exclude_name and i.name in ROSTER_BY_NAME]
+    # Цели — только брейнроты ростера с честным шансом не ниже порога
+    # (по умолчанию 75%): цель стоит не дороже вклад / 0.75.
+    max_value = min_value * 100 / config.upgrader_min_target_chance_percent if min_value else float("inf")
+    eligible = [
+        i for i in items
+        if min_value < i.value <= max_value and i.name != exclude_name and i.name in ROSTER_BY_NAME
+    ]
     payload = []
     for i in eligible:
         entry = _brainrot_json(i.name, i.value)
@@ -396,6 +402,8 @@ async def post_upgrader_spin(request: web.Request) -> web.Response:
     known = {i.name: i.value for i in await list_known_items(session) if i.name in ROSTER_BY_NAME}
     if target_name not in known or known[target_name] <= item.value:
         return web.json_response({"error": "invalid_target"}, status=400)
+    if item.value * 100 < known[target_name] * config.upgrader_min_target_chance_percent:
+        return web.json_response({"error": "target_too_expensive"}, status=400)
     target_value = known[target_name]
 
     chance = chance_percent(item.value, target_value)

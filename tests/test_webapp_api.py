@@ -346,3 +346,12 @@ async def test_upgrader_rejects_unknown_target(client, auth_headers) -> None:
     assert r.status == 400
     # вклад не списан
     assert len(await (await client.get("/api/inventory", headers=auth_headers)).json()) == 1
+
+
+async def test_upgrader_targets_only_with_chance_at_least_75(client, auth_headers) -> None:
+    r = await client.get("/api/upgrader/targets?min_value=300", headers=auth_headers)
+    targets = await r.json()
+    assert targets, "в ростере есть брейнроты в диапазоне 300..400"
+    for t in targets:
+        assert 300 < t["value"] <= 400
+        assert t["chance_percent"] >= 75

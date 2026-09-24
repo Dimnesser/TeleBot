@@ -14,16 +14,12 @@ from bot.services.upgrader_service import (
 
 
 def test_chance_percent_is_ratio_of_contribution_to_target():
-    assert chance_percent(80, 100) == 80
-    assert chance_percent(90, 100) == 90
+    assert chance_percent(50, 100) == 50
+    assert chance_percent(25, 100) == 25
 
 
-def test_chance_percent_never_below_75():
-    assert chance_percent(1, 100000) == 75
-    assert chance_percent(50, 100) == 75
-
-
-def test_chance_percent_clamped_to_max():
+def test_chance_percent_clamped_to_config_bounds():
+    assert chance_percent(1, 100000) >= 1
     assert chance_percent(999, 1000) <= 95
 
 
@@ -38,7 +34,7 @@ def test_target_value_for_multiplier_always_strictly_above_contribution():
 
 def test_target_value_for_chance_is_consistent_with_chance_percent():
     contribution = 100
-    for chance in (75, 80, 90):
+    for chance in (30, 50, 75):
         target = target_value_for_chance(contribution, chance)
         assert chance_percent(contribution, target) == chance
 

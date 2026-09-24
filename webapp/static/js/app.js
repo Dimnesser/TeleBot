@@ -251,6 +251,7 @@ async function renderScreen(screen, params = {}) {
   closeStage();
   closeModal();
   stopCrashLoops();
+  if (upgraderFx) { upgraderFx.stop(); upgraderFx = null; }
   renderDrawer(screen);
   const root = document.getElementById('screen');
   root.innerHTML = `<div class="section-title">&nbsp;</div>${skeletonGrid()}`;
@@ -853,14 +854,16 @@ async function renderProfileScreen(root) {
 
 let upgraderState = { contribution: null, target: null };
 let upgraderSpinning = false;
+let upgraderFx = null;
 
 function ringArc(pct) {
-  // SVG-дуга зоны успеха: от 12 часов по часовой стрелке на pct% окружности.
+  // Зона успеха: от 12 часов по часовой стрелке на pct% окружности.
   const r = 88, c = 2 * Math.PI * r;
-  return `<circle class="upg-zone" cx="100" cy="100" r="${r}" stroke-dasharray="${(c * pct) / 100} ${c}" />`;
+  return `<circle class="upg-zone" id="upg-zone" cx="100" cy="100" r="${r}" stroke-dasharray="${(c * pct) / 100} ${c}" />`;
 }
 
 async function renderUpgraderScreen(root) {
+  if (upgraderFx) { upgraderFx.stop(); upgraderFx = null; }
   const { contribution, target } = upgraderState;
   const chance = contribution && target ? (target.chance_percent || computeChance(contribution.value, target.value)) : 0;
   const mult = contribution && target ? (target.value / contribution.value).toFixed(2) : null;
@@ -875,46 +878,55 @@ async function renderUpgraderScreen(root) {
     <div class="section-title">АПГРЕЙДЕР</div>
     <div class="upg-stage" id="upg-stage">
       <div class="upg-ring-wrap">
+        <canvas class="upg-fx" id="upg-fx"></canvas>
         <svg class="upg-ring" viewBox="0 0 200 200">
           <circle class="upg-track" cx="100" cy="100" r="88"/>
           ${ringArc(chance)}
           ${Array.from({ length: 60 }, (_, i) => `<line class="upg-tick ${i % 5 ? '' : 'major'}" x1="100" y1="${i % 5 ? 6 : 4}" x2="100" y2="${i % 5 ? 11 : 13}" transform="rotate(${i * 6} 100 100)"/>`).join('')}
         </svg>
-        <div class="upg-needle" id="upg-needle"><span></span></div>
-        <div class="upg-center">
+        <div class="upg-needle" id="upg-needle"><i class="upg-trail"></i><span></span></div>
+        <div class="upg-center" id="upg-center">
+          ${target ? `<div class="upg-center-art">${brainrotArt(target)}</div>` : ''}
           <div class="upg-chance" id="upg-chance">${contribution && target ? chance + '%' : '—'}</div>
-          <div class="upg-label">${mult ? '×' + mult : 'ШАНС'}</div>
+          <div class="upg-label" id="upg-label">${mult ? '×' + mult : 'ШАНС'}</div>
         </div>
       </div>
       <div class="upg-slots">
         ${slot(contribution, 'Твой брейнрот', 'slot-contribution')}
         <div class="upg-arrow">➜</div>
-        ${slot(target, 'Цель', 'slot-target')}
+        ${slot(target, 'Цель · шанс от 75%', 'slot-target')}
       </div>
     </div>
-    <button class="open-btn upg-btn" id="btn-spin" ${contribution && target ? '' : 'disabled'} style="--c1:#c6ff3d;--c2:#5dffb0">
-      <span class="open-btn-shine"></span>
-      <span class="open-btn-label">Прокачать</span>
-      <span class="open-btn-price">${contribution && target ? chance + '%' : '—'}</span>
-    </button>
-    <button class="btn btn-ghost" style="margin-top:8px" id="btn-reset">Сбросить</button>
-    <p class="fine-print">Зелёная зона — твой шанс. Стрелка остановится в ней — получаешь цель, мимо — вклад сгорает. Исход решает сервер до начала анимации.</p>
+    <div id="upg-actions">
+      <button class="open-btn upg-btn" id="btn-spin" ${contribution && target ? '' : 'disabled'} style="--c1:#c6ff3d;--c2:#5dffb0">
+        <span class="open-btn-shine"></span>
+        <span class="open-btn-label">Прокачать</span>
+        <span class="open-btn-price">${contribution && target ? chance + '%' : '—'}</span>
+      </button>
+      <button class="btn btn-ghost" style="margin-top:8px" id="btn-reset">Сбросить</button>
+    </div>
   `;
+  upgraderFx = CaseArt.particles(root.querySelector('#upg-fx'), 'none', ['#c6ff3d', '#ffffff']);
 
   root.querySelector('#slot-contribution').addEventListener('click', async () => {
     if (upgraderSpinning) return;
-    const items = await api('/api/inventory?limit=200');
-    openItemPicker(items, (item) => {
-      upgraderState = { contribution: item, target: null };
-      renderUpgraderScreen(root);
-    });
+    const [items, all] = await Promise.all([api('/api/inventory?limit=200'), api('/api/upgrader/targets?min_value=0')]);
+    // Вклад без хотя бы одной цели с шансом от 75% выбрать нельзя — иначе
+    // игрок упрётся в пустой список целей.
+    const hasTarget = (v) => all.some((t) => t.value > v && v * 100 >= t.value * 75);
+    openBrainrotPicker('Твой брейнрот', items.slice().sort((a, b) => b.value - a.value),
+      'Инвентарь пуст — сначала открой кейс.',
+      (item) => { upgraderState = { contribution: item, target: null }; renderUpgraderScreen(root); },
+      (b) => (hasTarget(b.value) ? null : 'нет целей 75%+'));
   });
   root.querySelector('#slot-target').addEventListener('click', async () => {
     if (upgraderSpinning) return;
-    if (!upgraderState.contribution) { toast('Сначала выбери своего брейнрота', 'error'); return; }
     const c = upgraderState.contribution;
+    if (!c) { toast('Сначала выбери своего брейнрота', 'error'); return; }
     const targets = await api(`/api/upgrader/targets?min_value=${c.value}&exclude_name=${encodeURIComponent(c.name)}`);
-    openTargetPicker(targets, (t) => { upgraderState.target = t; renderUpgraderScreen(root); });
+    openBrainrotPicker('Во что прокачать', targets,
+      'Для этого брейнрота нет целей с шансом от 75% — выбери другого.',
+      (t) => { upgraderState.target = t; renderUpgraderScreen(root); });
   });
   root.querySelector('#btn-reset').addEventListener('click', () => {
     if (upgraderSpinning) return;
@@ -927,84 +939,90 @@ async function renderUpgraderScreen(root) {
     if (upgraderSpinning || !contribution || !target) return;
     upgraderSpinning = true;
     spinBtn.disabled = true;
-    haptic.impact('heavy');
+    haptic.impact('medium');
     let res;
     try {
-      res = await api('/api/upgrader/spin', {
-        method: 'POST',
-        body: JSON.stringify({ contribution_item_id: contribution.id, target_name: target.name }),
-      });
+      res = await api('/api/upgrader/spin', { method: 'POST', body: JSON.stringify({ contribution_item_id: contribution.id, target_name: target.name }) });
     } catch (err) {
-      upgraderSpinning = false;
-      spinBtn.disabled = false;
+      upgraderSpinning = false; spinBtn.disabled = false;
       toast('Ошибка: ' + err.message, 'error');
       return;
     }
 
-    // Стрелка: 5 полных оборотов + точка остановки из ответа сервера.
-    const needle = root.querySelector('#upg-needle');
     const stage = root.querySelector('#upg-stage');
-    const finalDeg = 360 * 5 + (res.roll_point / 100) * 360;
-    const duration = CaseArt.REDUCED ? 300 : 4200;
+    const needle = root.querySelector('#upg-needle');
+    stage.classList.add('spinning');
+    // 6 оборотов + точка остановки; кривая — быстрый разгон, долгое мягкое торможение.
+    const finalDeg = 360 * 6 + (res.roll_point / 100) * 360;
+    const duration = CaseArt.REDUCED ? 300 : 5200;
     const start = performance.now();
-    const ease = (t) => 1 - Math.pow(1 - t, 4);
-    let lastTick = 0;
+    const ease = (t) => 1 - Math.pow(1 - t, 5);
+    let lastTick = 0, lastDeg = 0;
     await new Promise((resolve) => {
       function frame(now) {
         const t = Math.min(1, (now - start) / duration);
         const deg = finalDeg * ease(t);
+        const speed = Math.min(1, (deg - lastDeg) / 14);
+        lastDeg = deg;
         needle.style.transform = `rotate(${deg}deg)`;
-        if (Math.floor(deg / 12) !== lastTick) { lastTick = Math.floor(deg / 12); if (t < 0.95) haptic.tick(); }
+        needle.style.setProperty('--trail', speed.toFixed(3));
+        const tick = Math.floor(deg / 6);
+        if (tick !== lastTick) { lastTick = tick; if (t > 0.55 && t < 0.97) haptic.tick(); }
         if (t < 1) requestAnimationFrame(frame); else resolve();
       }
       requestAnimationFrame(frame);
     });
-
-    stage.classList.add(res.success ? 'upg-win' : 'upg-lose');
-    if (res.success) haptic.success(); else haptic.impact('rigid');
-    await sleep(CaseArt.REDUCED ? 50 : 700);
+    stage.classList.remove('spinning');
     upgraderSpinning = false;
     upgraderState = { contribution: null, target: null };
     refreshMe().catch(() => {});
-    showUpgradeResult(root, res, contribution, target);
+    showUpgradeOnWheel(root, res, contribution, target);
   });
 }
 
-function showUpgradeResult(root, res, contribution, target) {
-  const b = res.success ? res.won_item : contribution;
-  const overlay = openModal(`
-    <button class="modal-close" onclick="closeModal()">✕</button>
-    <div class="reveal ${res.success ? '' : 'upg-lost'}" style="${glowVars(b)}">
-      <div class="reveal-rays"></div>
-      <div class="upg-result-title">${res.success ? 'Прокачано!' : 'Не повезло'}</div>
-      <div class="reveal-art">${brainrotArt(b)}</div>
-      ${rarityBadge(b)}
-      <div class="reveal-name">${escapeHtml(b.name)}</div>
-      <div class="reveal-value">${res.success ? '+' : '−'}${fmt(b.value)} 🎫</div>
-      <div class="muted" style="position:relative">Шанс был ${res.chance}%</div>
-    </div>
-    <button class="btn btn-primary" style="margin-top:14px" id="upg-again">Ещё апгрейд</button>
-  `);
-  overlay.querySelector('#upg-again').addEventListener('click', () => { closeModal(); renderUpgraderScreen(root); });
-  overlay.addEventListener('click', (e) => { if (e.target === overlay) renderUpgraderScreen(root); });
-  overlay.querySelector('.modal-close').addEventListener('click', () => renderUpgraderScreen(root));
+/** Результат прямо на колесе, без модалок. Выигрыш — цель в центре и
+ * вспышка частиц; проигрыш — просто надпись «ФЕЙЛ». */
+function showUpgradeOnWheel(root, res, contribution, target) {
+  const stage = root.querySelector('#upg-stage');
+  const center = root.querySelector('#upg-center');
+  if (res.success) {
+    const b = res.won_item;
+    stage.classList.add('upg-win');
+    center.innerHTML = `
+      <div class="upg-center-art won">${brainrotArt(b)}</div>
+      <div class="upg-result-word win">WIN</div>
+      <div class="upg-label">+${fmt(b.value)} 🎫</div>`;
+    haptic.success();
+    const wrap = root.querySelector('.upg-ring-wrap');
+    if (upgraderFx) upgraderFx.burst(wrap.clientWidth / 2, wrap.clientHeight / 2, '#c6ff3d', 1.3);
+  } else {
+    stage.classList.add('upg-fail');
+    center.innerHTML = `<div class="upg-result-word fail">ФЕЙЛ</div><div class="upg-label">шанс был ${res.chance}%</div>`;
+  }
+  root.querySelector('#upg-actions').innerHTML = `
+    <button class="open-btn upg-btn" id="btn-again" style="--c1:#c6ff3d;--c2:#5dffb0">
+      <span class="open-btn-shine"></span><span class="open-btn-label">Новый апгрейд</span><span class="open-btn-price">↻</span>
+    </button>`;
+  root.querySelector('#btn-again').addEventListener('click', () => renderUpgraderScreen(root));
 }
 
-// Запасной расчёт (сервер присылает chance_percent у каждой цели): те же
-// границы, что UPGRADER_MIN/MAX_CHANCE_PERCENT на сервере — минимум 75%.
+// Запасной расчёт (сервер присылает chance_percent у каждой цели).
 function computeChance(contributionValue, targetValue) {
   if (targetValue <= 0) return 95;
   const raw = Math.round((contributionValue / targetValue) * 100);
-  return Math.max(75, Math.min(95, raw));
+  return Math.max(1, Math.min(95, raw));
 }
 
-function openBrainrotPicker(title, list, emptyText, onPick) {
-  const tiles = list.map((b, idx) => `
-    <button class="pick-tile" style="${glowVars(b)}" data-idx="${idx}">
+function openBrainrotPicker(title, list, emptyText, onPick, isDisabled = null) {
+  const tiles = list.map((b, idx) => {
+    const off = isDisabled && isDisabled(b);
+    return `
+    <button class="pick-tile ${off ? 'off' : ''}" style="${glowVars(b)}" data-idx="${idx}" ${off ? 'disabled' : ''}>
       ${brainrotArt(b)}
       <div class="pick-name">${escapeHtml(b.name)}</div>
-      <div class="pick-value">${fmt(b.value)} 🎫</div>
-    </button>`).join('') || `<div class="empty-state" style="grid-column:1/-1">${emptyText}</div>`;
+      <div class="pick-value">${off ? off : fmt(b.value) + ' 🎫'}</div>
+    </button>`;
+  }).join('') || `<div class="empty-state" style="grid-column:1/-1">${emptyText}</div>`;
   const overlay = openModal(`
     <button class="modal-close" onclick="closeModal()">✕</button>
     <h3 class="picker-title">${title}</h3>
@@ -1032,47 +1050,73 @@ function openTargetPicker(targets, onPick) {
 
 let crashPollTimer = null;
 let crashRaf = 0;
+let crashFx = null;
 
 function stopCrashLoops() {
   clearInterval(crashPollTimer);
   cancelAnimationFrame(crashRaf);
+  if (crashFx) { crashFx.stop(); crashFx = null; }
 }
 
 function crashMultiplierAt(curve, seconds) {
-  const raw = Math.pow(1 + curve.growth_rate, seconds / curve.tick_seconds);
-  return Math.min(raw, curve.max_multiplier);
+  return Math.min(Math.pow(1 + curve.growth_rate, seconds / curve.tick_seconds), curve.max_multiplier);
 }
+
+const ROCKET_SVG = `
+  <svg viewBox="0 0 64 64" class="rocket-svg" aria-hidden="true">
+    <g class="rocket-flame"><path d="M8 32 Q-6 26 -14 32 Q-6 38 8 32Z" fill="#ffb02e"/><path d="M8 32 Q0 29 -6 32 Q0 35 8 32Z" fill="#fff6c4"/></g>
+    <path d="M10 24 L30 24 Q50 24 58 32 Q50 40 30 40 L10 40 Z" fill="#eef1f8"/>
+    <path d="M30 24 Q50 24 58 32 L44 32 Q40 26 30 24Z" fill="#fff" opacity=".7"/>
+    <circle cx="38" cy="32" r="5" fill="#1a1d2b" stroke="#c6ff3d" stroke-width="2.4"/>
+    <path d="M14 24 L6 14 L20 24Z M14 40 L6 50 L20 40Z" fill="#c6ff3d"/>
+    <rect x="8" y="27" width="4" height="10" rx="1.5" fill="#9aa3b8"/>
+  </svg>`;
 
 async function renderCrashScreen(root) {
   stopCrashLoops();
   const state = await api('/api/crash/state');
-  const history = (state.history || '').split(',').map((h) => h.trim()).filter((h) => h && h !== '—');
+  const history = (state.history || '').split(',').map((h) => h.trim()).filter((h) => /\d/.test(h));
   root.innerHTML = `
     <div class="section-title">КРАШ</div>
-    <div class="crash-history">${history.slice(-10).reverse().map((h) => {
-      const v = parseFloat(h);
-      return `<span class="crash-chip ${v >= 2 ? 'hi' : v < 1.2 ? 'lo' : ''}">${escapeHtml(h)}</span>`;
-    }).join('') || '<span class="muted">История раундов появится после первого полёта</span>'}</div>
+    <div class="crash-history">
+      <span class="crash-history-label">Прошлые</span>
+      ${history.slice(-12).reverse().map((h) => {
+        const v = parseFloat(h);
+        return `<span class="crash-chip ${v >= 3 ? 'hi' : v >= 1.5 ? 'mid' : 'lo'}">${v.toFixed(2)}×</span>`;
+      }).join('') || '<span class="crash-chip">—</span>'}
+    </div>
     <div class="crash-board" id="crash-board">
-      <svg class="crash-graph" viewBox="0 0 300 180" preserveAspectRatio="none">
+      <div class="crash-stars s1"></div><div class="crash-stars s2"></div>
+      <div class="crash-yaxis" id="crash-yaxis"></div>
+      <svg class="crash-graph" id="crash-graph" viewBox="0 0 300 180" preserveAspectRatio="none">
         <defs>
-          <linearGradient id="crashFill" x1="0" y1="0" x2="0" y2="1"><stop offset="0" stop-color="#c6ff3d" stop-opacity=".35"/><stop offset="1" stop-color="#c6ff3d" stop-opacity="0"/></linearGradient>
+          <linearGradient id="crashStroke" x1="0" y1="1" x2="1" y2="0"><stop offset="0" stop-color="#5dffb0"/><stop offset=".6" stop-color="#c6ff3d"/><stop offset="1" stop-color="#ffd24d"/></linearGradient>
+          <linearGradient id="crashFill" x1="0" y1="0" x2="0" y2="1"><stop offset="0" stop-color="#c6ff3d" stop-opacity=".28"/><stop offset="1" stop-color="#c6ff3d" stop-opacity="0"/></linearGradient>
         </defs>
-        <g class="crash-grid">${[36, 72, 108, 144].map((y) => `<line x1="0" x2="300" y1="${y}" y2="${y}"/>`).join('')}</g>
         <path id="crash-area" fill="url(#crashFill)" d=""/>
         <path id="crash-line" class="crash-line" d=""/>
-        <circle id="crash-dot" class="crash-dot" r="5" cx="0" cy="180"/>
       </svg>
+      <div class="crash-rocket" id="crash-rocket">${ROCKET_SVG}</div>
+      <canvas class="crash-fx" id="crash-fx"></canvas>
       <div class="crash-readout">
         <div class="crash-mult" id="crash-mult">1.00×</div>
         <div class="crash-status" id="crash-status">ГОТОВ К СТАРТУ</div>
       </div>
     </div>
-    <div class="crash-stake" id="crash-stake"></div>
+    <div id="crash-stake"></div>
     <div id="crash-actions"></div>
   `;
+  crashFx = CaseArt.particles(root.querySelector('#crash-fx'), 'none', ['#ff4d6d', '#ffb02e']);
+  placeRocketIdle(root);
   paintCrashControls(root, state);
   if (state.active) runCrashRound(root, state);
+}
+
+function placeRocketIdle(root) {
+  const rocket = root.querySelector('#crash-rocket');
+  rocket.style.left = '14%'; rocket.style.top = '80%';
+  rocket.style.transform = 'translate(-50%,-50%) rotate(-12deg)';
+  rocket.classList.add('idle');
 }
 
 function paintCrashControls(root, state, pickedItem = null) {
@@ -1081,23 +1125,16 @@ function paintCrashControls(root, state, pickedItem = null) {
     <div class="stake-card" style="${glowVars(stake)}">
       ${brainrotArt(stake)}
       <div><div class="stake-name">${escapeHtml(stake.name)}</div><div class="stake-value">Ставка · ${fmt(stake.value)} 🎫</div></div>
-      <div class="stake-win" id="crash-potential">${state.active ? '' : ''}</div>
     </div>` : '';
   const actions = root.querySelector('#crash-actions');
   if (state.active) {
     actions.innerHTML = `<button class="open-btn" id="btn-crash-cashout" style="--c1:#ffd24d;--c2:#ff9d2e"><span class="open-btn-shine"></span><span class="open-btn-label">Забрать</span><span class="open-btn-price" id="crash-cash-value">—</span></button>`;
     actions.querySelector('#btn-crash-cashout').addEventListener('click', async (e) => {
-      e.currentTarget.disabled = true;
+      const btn = e.currentTarget;
+      btn.disabled = true;
       try {
         const res = await api('/api/crash/cashout', { method: 'POST' });
-        stopCrashLoops();
-        haptic.success();
-        const board = root.querySelector('#crash-board');
-        board.classList.add('cashed');
-        root.querySelector('#crash-mult').textContent = res.multiplier.toFixed(2) + '×';
-        root.querySelector('#crash-status').textContent = `ЗАБРАНО · ${fmt(res.won_item.value)} 🎫`;
-        refreshMe().catch(() => {});
-        setTimeout(() => { if (location.hash === '#crash') renderCrashScreen(root); }, 2200);
+        endCrashRound(root, 'cashed', res.multiplier, res.won_item);
       } catch (err) {
         toast('Не успел — ракета уже взорвалась', 'error');
       }
@@ -1105,12 +1142,14 @@ function paintCrashControls(root, state, pickedItem = null) {
     return;
   }
   actions.innerHTML = `
-    <div class="btn-row">
-      <button class="btn btn-ghost" id="btn-crash-pick">${pickedItem ? 'Сменить брейнрота' : 'Выбрать брейнрота'}</button>
-    </div>
+    <button class="stake-card stake-pick" id="btn-crash-pick" style="${pickedItem ? glowVars(pickedItem) : ''}">
+      ${pickedItem ? `${brainrotArt(pickedItem)}<div><div class="stake-name">${escapeHtml(pickedItem.name)}</div><div class="stake-value">Ставка · ${fmt(pickedItem.value)} 🎫</div></div><span class="stake-change">Сменить</span>`
+                   : `<div class="upg-slot-plus">+</div><div><div class="stake-name">Выбери брейнрота</div><div class="stake-value">Он полетит на ракете</div></div>`}
+    </button>
     <button class="open-btn" id="btn-crash-start" ${pickedItem ? '' : 'disabled'} style="--c1:#c6ff3d;--c2:#5dffb0">
       <span class="open-btn-shine"></span><span class="open-btn-label">Взлёт</span><span class="open-btn-price">${pickedItem ? fmt(pickedItem.value) + ' 🎫' : '—'}</span>
     </button>`;
+  root.querySelector('#crash-stake').innerHTML = '';
   actions.querySelector('#btn-crash-pick').addEventListener('click', async () => {
     const items = await api('/api/inventory?limit=200');
     openItemPicker(items, (item) => paintCrashControls(root, state, item));
@@ -1131,42 +1170,48 @@ function paintCrashControls(root, state, pickedItem = null) {
   });
 }
 
-/** Кривая рисуется локально по той же формуле, что и на сервере; сервер
- * опрашивается только чтобы узнать момент взрыва (точку краша знает он один). */
+/** Кривая рисуется локально по формуле сервера; сервер опрашивается только
+ * чтобы узнать момент взрыва (точку краша знает он один). */
 function runCrashRound(root, state) {
-  stopCrashLoops();
+  cancelAnimationFrame(crashRaf); clearInterval(crashPollTimer);
   const t0 = performance.now() - state.elapsed * 1000;
-  const line = root.querySelector('#crash-line');
-  const area = root.querySelector('#crash-area');
-  const dot = root.querySelector('#crash-dot');
-  const multEl = root.querySelector('#crash-mult');
-  const statusEl = root.querySelector('#crash-status');
-  const board = root.querySelector('#crash-board');
+  const q = (s) => root.querySelector(s);
+  const line = q('#crash-line'), area = q('#crash-area'), rocket = q('#crash-rocket');
+  const multEl = q('#crash-mult'), statusEl = q('#crash-status'), board = q('#crash-board'), yaxis = q('#crash-yaxis');
   board.classList.remove('crashed', 'cashed');
   board.classList.add('flying');
+  rocket.classList.remove('idle');
   statusEl.textContent = 'В ПОЛЁТЕ';
-  let ended = false;
+  let lastAxisTop = 0;
+  root._crashState = state;
 
   function draw(now) {
-    if (ended) return;
-    const secs = (now - t0) / 1000;
+    const secs = Math.max(0, (now - t0) / 1000);
     const m = crashMultiplierAt(state, secs);
-    const span = Math.max(6, secs * 1.15);
-    const top = Math.max(2, m * 1.2);
+    const span = Math.max(8, secs * 1.18);
+    const top = Math.max(2, 1 + (m - 1) * 1.35);
     const pts = [];
-    for (let i = 0; i <= 40; i++) {
-      const s = (secs * i) / 40;
-      const x = (s / span) * 300;
-      const y = 180 - ((crashMultiplierAt(state, s) - 1) / (top - 1)) * 170;
-      pts.push(`${x.toFixed(1)},${y.toFixed(1)}`);
+    for (let i = 0; i <= 48; i++) {
+      const s = (secs * i) / 48;
+      pts.push([(s / span) * 300, 180 - ((crashMultiplierAt(state, s) - 1) / (top - 1)) * 165]);
     }
-    const d = 'M' + pts.join(' L');
+    const d = 'M' + pts.map(([x, y]) => `${x.toFixed(1)},${y.toFixed(1)}`).join(' L');
     line.setAttribute('d', d);
-    area.setAttribute('d', d + ` L${pts[pts.length - 1].split(',')[0]},180 L0,180 Z`);
-    const [lx, ly] = pts[pts.length - 1].split(',');
-    dot.setAttribute('cx', lx); dot.setAttribute('cy', ly);
+    const [lx, ly] = pts[pts.length - 1];
+    area.setAttribute('d', `${d} L${lx.toFixed(1)},180 L0,180 Z`);
+    // Ракета на кончике кривой, повёрнута по касательной.
+    const [px, py] = pts[pts.length - 2];
+    const angle = Math.atan2((ly - py) * 0.6, lx - px) * 180 / Math.PI;
+    rocket.style.left = `calc(16px + (100% - 32px) * ${(lx / 300).toFixed(4)})`;
+    rocket.style.top = `calc(16px + (100% - 32px) * ${(ly / 180).toFixed(4)})`;
+    rocket.style.transform = `translate(-50%,-50%) rotate(${Math.max(-70, Math.min(0, angle))}deg)`;
     multEl.textContent = m.toFixed(2) + '×';
-    const cash = root.querySelector('#crash-cash-value');
+    board.style.setProperty('--speed', Math.min(4, 0.6 + (m - 1) * 0.5).toFixed(2));
+    if (top - lastAxisTop > 0.05 || !lastAxisTop) {
+      lastAxisTop = top;
+      yaxis.innerHTML = [0.25, 0.5, 0.75, 1].map((f) => `<span style="bottom:${f * 91.6}%">${(1 + (top - 1) * f).toFixed(1)}×</span>`).join('');
+    }
+    const cash = q('#crash-cash-value');
     if (cash && state.stake) cash.textContent = fmt(Math.round(state.stake.value * m)) + ' 🎫';
     crashRaf = requestAnimationFrame(draw);
   }
@@ -1176,20 +1221,36 @@ function runCrashRound(root, state) {
     try {
       const s = await api('/api/crash/state');
       if (s.active) return;
-      ended = true;
-      stopCrashLoops();
-      if (s.crashed || !s.active) {
-        board.classList.remove('flying');
-        board.classList.add('crashed');
-        multEl.textContent = (s.multiplier || 1).toFixed(2) + '×';
-        statusEl.textContent = 'ВЗРЫВ';
-        haptic.impact('rigid');
-        const actions = root.querySelector('#crash-actions');
-        if (actions) actions.innerHTML = `<button class="open-btn" disabled style="--c1:#ff4d6d;--c2:#ff8a5c"><span class="open-btn-label">Ставка сгорела</span><span class="open-btn-price">${(s.multiplier || 1).toFixed(2)}×</span></button>`;
-        setTimeout(() => { if (location.hash === '#crash') renderCrashScreen(root); }, 2200);
-      }
+      endCrashRound(root, 'crashed', s.multiplier || parseFloat(multEl.textContent) || 1);
     } catch (e) { /* сеть моргнула — следующий опрос */ }
-  }, 500);
+  }, 450);
+}
+
+function endCrashRound(root, outcome, mult, wonItem = null) {
+  cancelAnimationFrame(crashRaf); clearInterval(crashPollTimer);
+  const board = root.querySelector('#crash-board');
+  if (!board || board.classList.contains('crashed') || board.classList.contains('cashed')) return;
+  const rocket = root.querySelector('#crash-rocket');
+  board.classList.remove('flying');
+  board.classList.add(outcome);
+  root.querySelector('#crash-mult').textContent = mult.toFixed(2) + '×';
+  const actions = root.querySelector('#crash-actions');
+  if (outcome === 'crashed') {
+    root.querySelector('#crash-status').textContent = 'ВЗРЫВ';
+    const br = board.getBoundingClientRect(), rr = rocket.getBoundingClientRect();
+    if (crashFx) crashFx.burst(rr.left - br.left + rr.width / 2, rr.top - br.top + rr.height / 2, '#ff6a3d', 1.6);
+    rocket.classList.add('boom');
+    haptic.impact('heavy');
+    actions.innerHTML = `<button class="open-btn" id="btn-crash-again" style="--c1:#ff4d6d;--c2:#ff8a5c"><span class="open-btn-label">Ставка сгорела</span><span class="open-btn-price">Ещё раз</span></button>`;
+  } else {
+    root.querySelector('#crash-status').textContent = `ЗАБРАНО · +${fmt(wonItem.value)} 🎫`;
+    haptic.success();
+    const br = board.getBoundingClientRect(), rr = rocket.getBoundingClientRect();
+    if (crashFx) crashFx.burst(rr.left - br.left + rr.width / 2, rr.top - br.top + rr.height / 2, '#ffd24d', 1);
+    actions.innerHTML = `<button class="open-btn" id="btn-crash-again" style="--c1:#ffd24d;--c2:#c6ff3d"><span class="open-btn-shine"></span><span class="open-btn-label">Забрано ×${mult.toFixed(2)}</span><span class="open-btn-price">Ещё раз</span></button>`;
+  }
+  refreshMe().catch(() => {});
+  actions.querySelector('#btn-crash-again').addEventListener('click', () => renderCrashScreen(root));
 }
 
 // =================================================================== ДАЙСЫ
@@ -1289,6 +1350,9 @@ async function animateDice(root, rules, res) {
     const [rx, ry] = DIE_FACE_ROT[rules.colors.indexOf(c)];
     const turnsX = 360 * (2 + diceState.spins * 2 + i);
     const turnsY = 360 * (3 + diceState.spins * 2 + i);
+    die.parentElement.classList.remove('match', 'miss');
+    die.parentElement.style.setProperty('--i', i);
+    die.parentElement.classList.remove('rolling'); void die.offsetWidth;
     die.parentElement.classList.add('rolling');
     die.style.transition = `transform ${dur + i * 180}ms cubic-bezier(.18,.9,.25,1.02)`;
     die.style.transform = `rotateX(${rx - 12 + turnsX}deg) rotateY(${ry + 8 + turnsY}deg)`;
@@ -1301,6 +1365,7 @@ async function animateDice(root, rules, res) {
     const wrap = root.querySelector(`#die-${i}`).parentElement;
     wrap.classList.remove('rolling');
     if (c === diceState.color) wrap.classList.add('match');
+    else if (!res.bonus) wrap.classList.add('miss');
   });
 }
 
