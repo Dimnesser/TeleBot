@@ -195,6 +195,8 @@ const DRAWER_SECTIONS = [
   ['faq', 'FAQ'],
 ];
 
+const TOPNAV_SECTIONS = ['home', 'upgrader', 'dice', 'crash', 'battle', 'inventory', 'bonuses'];
+
 function renderDrawer(active) {
   const root = document.getElementById('drawer-items');
   root.innerHTML = '';
@@ -204,6 +206,15 @@ function renderDrawer(active) {
     btn.innerHTML = `${icon(key)}<span>${label}</span>`;
     btn.addEventListener('click', () => { closeDrawer(); navigate(key); });
     root.appendChild(btn);
+  }
+  // ПК: основные разделы прямо в шапке (виден только на широком экране)
+  const nav = document.getElementById('topnav');
+  if (nav) {
+    nav.innerHTML = TOPNAV_SECTIONS.map((key) => {
+      const label = DRAWER_SECTIONS.find(([k]) => k === key)[1];
+      return `<button class="topnav-item${key === active ? ' active' : ''}" data-nav="${key}">${icon(key)}<span>${label}</span></button>`;
+    }).join('');
+    nav.querySelectorAll('[data-nav]').forEach((b) => b.addEventListener('click', () => navigate(b.dataset.nav)));
   }
 }
 
