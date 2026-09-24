@@ -74,6 +74,9 @@ BRAINROT_ASSETS_DIR = Path(__file__).parent / "static" / "assets" / "brainrots"
 # Какие официальные рендеры реально лежат в ассетах — для остальных фронтенд
 # рисует явный плейсхолдер «нет ассета», а не случайную картинку.
 AVAILABLE_BRAINROT_IMAGES = {p.stem for p in BRAINROT_ASSETS_DIR.glob("*.webp")}
+# 3D-рендеры моделей кейсов (tools/case_renders) — по коду кейса.
+CASE_RENDERS_DIR = Path(__file__).parent / "static" / "assets" / "cases"
+AVAILABLE_CASE_RENDERS = {p.stem for p in CASE_RENDERS_DIR.glob("*.webp")}
 
 COLLECTIONS = [
     {"key": CaseCategory.STARTER.value, "title": "Кейсы", "categories": [CaseCategory.STARTER]},
@@ -109,6 +112,7 @@ def _case_json(case: Case) -> dict:
         "is_openable": case.is_openable,
         "top_item_name": case.top_item_name,
         "top_item_image_url": _brainrot_image_url(case.top_item_name) if case.top_item_name else None,
+        "image_url": f"/static/assets/cases/{case.code}.webp" if case.code in AVAILABLE_CASE_RENDERS else None,
         "best_rarity": best.value,
         "best_rarity_label": RARITY_LABEL[best],
         "best_rarity_color": RARITY_COLOR[best][0],

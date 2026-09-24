@@ -5,7 +5,7 @@ from __future__ import annotations
 
 from pathlib import Path
 
-from bot.data.brainrot_roster import POOR_ROSTER, ROSTER, ROSTER_BY_NAME, Rarity
+from bot.data.brainrot_roster import ROSTER, ROSTER_BY_NAME, Rarity
 from bot.data.coins import COIN_RARITY, coin_amount
 from bot.data.market import DEMAND, TIER
 from bot.data.seed_cases import CASE_THEMES, SEED_CASES, SEED_CASES_BY_CODE, TARGET_RTP, expected_value, price_for
@@ -14,10 +14,13 @@ from bot.database.models import CaseCategory
 ASSETS = Path(__file__).resolve().parent.parent / "webapp" / "static" / "assets" / "brainrots"
 
 
-def test_no_brainrot_god_and_top_roster_is_secret_or_og():
-    assert Rarity.BRAINROT_GOD not in {b.rarity for b in ROSTER}
-    poor = {b.name for b in POOR_ROSTER}
-    assert {b.rarity for b in ROSTER if b.name not in poor} <= {Rarity.SECRET, Rarity.OG}
+def test_roster_only_secret_and_og():
+    assert {b.rarity for b in ROSTER} <= {Rarity.SECRET, Rarity.OG}
+
+
+def test_every_case_has_a_3d_render():
+    renders = ASSETS.parent / "cases"
+    assert [c.code for c in SEED_CASES if not (renders / f"{c.code}.webp").exists()] == []
 
 
 def test_market_snapshot_only_for_roster():
@@ -29,7 +32,7 @@ def test_paid_cases_form_a_price_ladder_and_all_in_is_top():
     all_in = [c for c in SEED_CASES if c.category == CaseCategory.APEX]
     assert [c.price_tokens for c in main] == sorted(c.price_tokens for c in main)
     assert min(c.price_tokens for c in all_in) > max(c.price_tokens for c in main)
-    assert min(c.price_tokens for c in main) < 10  # с бесплатного можно раскрутиться
+    assert min(c.price_tokens for c in main) < 30  # дешёвые кейсы — как на референсе (~19–30)
 
 
 def test_coins_only_in_free_cases():

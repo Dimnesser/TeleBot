@@ -1,9 +1,10 @@
 """Каталог кейсов BrainCore.
 
-Каждый кейс назван по своему «герою» — самому дорогому брейнроту внутри
-(он же сидит в модели кейса), остальное — лестница дешевле. Содержимое —
-только реальные персонажи Steal a Brainrot из bot.data.brainrot_roster
-(ценности со скриншотов пользователя) и, в бесплатных кейсах, монеты.
+Как на референсе пользователя: во всех кейсах только Secret/OG (дешёвые
+кейсы — из дешёвых Secret), у каждого кейса — 3D-модель с героями внутри
+(webapp/static/assets/cases/<code>.webp, рендер tools/case_renders).
+Содержимое — только реальные персонажи Steal a Brainrot из
+bot.data.brainrot_roster; в бесплатных кейсах ещё и монеты.
 
 Логика кейса (вся выводится из данных, руками не проставлено ничего):
   * ценность предмета 🎫 — его ценность в B со скриншотов пользователя
@@ -23,7 +24,7 @@ from bot.data.coins import COIN_RARITY, coin_name
 from bot.database.models import CaseCategory
 from bot.services.cases_service import CASE_WEIGHT_EXPONENT
 
-CASES_CONTENT_VERSION = "14.1-hero-cases"
+CASES_CONTENT_VERSION = "15-secret-3d"
 
 TARGET_RTP = 0.6
 
@@ -105,83 +106,65 @@ def _case(
 
 K, A = CaseCategory.STARTER, CaseCategory.APEX
 
+# Самые дешёвые Secret — «дно» дешёвых кейсов, как на референсе.
+CHEAP = ["67", "La Grande Combinasion", "Money Money Puggy", "Nuclearo Dinossauro", "Tang Tang Keletang",
+         "Orcaledon", "Lavadorito Spinito", "Ventoliero Pavonero", "Ketchuru and Musturu", "Noodle Noodle Poodle"]
+
 SEED_CASES: list[SeedCase] = [
     # ------------------------------------------------------------ БЕСПЛАТНЫЕ
     _case(
         CaseCategory.FREE, "free", "Бесплатный", 1,
-        CaseTheme("junk", "none", ("#b08455", "#5e3d1f"), "#e0b98a"),
-        [1, 2, 3, 5, 10, "Noobini Pizzanini", "Lirilì Larilà", "Tim Cheese", "Fluriflura", "Pipi Kiwi", "Talpa Di Fero"],
+        CaseTheme("junk", "none", ("#a87a4c", "#5a3b1c"), "#e0b98a"),
+        [1, 2, 3, 5, "67", "La Grande Combinasion", "Money Money Puggy", "Nuclearo Dinossauro"],
         price=0,
     ),
     # Не продаётся: открывается только бесплатными открытиями, которые
-    # выдаёт партнёрский код (bot.services.partner_service).
+    # выдаёт партнёрский код (bot.services.partner_service). Дроп мелкий.
     _case(
         CaseCategory.REFERRAL, "referral", "Реферальный", 2,
         CaseTheme("coins", "sparkle", ("#2c2c31", "#0c0c0f"), "#ffc93c"),
-        [1, 2, 3, 5, "Noobini Pizzanini", "Tim Cheese", "Pipi Kiwi", "Trippi Troppi", "Boneca Ambalabu"],
+        [2, 3, 5, "67", "La Grande Combinasion", "Money Money Puggy", "Nuclearo Dinossauro", "Tang Tang Keletang",
+         "Orcaledon"],
     ),
     # ------------------------------------------------------------ КЕЙСЫ
-    _case(K, "sandbox", "Песочница", 1, CaseTheme("sand", "dust", ("#e2b765", "#8a5a1c"), "#ffe2a0"),
-          ["Bombardiro Crocodilo", "Cappuccino Assassino", "Brr Brr Patapim", "Boneca Ambalabu", "Gangster Footera",
-           "Trippi Troppi", "Pipi Kiwi", "Svinina Bombardino", "Talpa Di Fero", "Fluriflura", "Tim Cheese",
-           "Lirilì Larilà", "Noobini Pizzanini"]),
-    _case(K, "sahur", "Сахур", 2, CaseTheme("wood", "stars", ("#4150c4", "#141a4d"), "#9fb0ff"),
-          ["Tung Tung Tung Sahur", "Ta Ta Ta Ta Sahur", "Tric Trac Baraboom", "Bandito Bobritto", "Brr Brr Patapim",
-           "Svinina Bombardino", "Talpa Di Fero", "Tim Cheese", "Noobini Pizzanini"]),
-    _case(K, "crocodilo", "Крокодило", 3, CaseTheme("junk", "smoke", ("#66823e", "#26341a"), "#b4e06a"),
-          ["La Grande Combinasion", "Bombombini Gusini", "Bombardiro Crocodilo", "Frigo Camelo", "Rhino Toasterino",
-           "Glorbo Fruttodrillo", "Cacto Hipopotamo", "Trippi Troppi", "Gangster Footera", "Pipi Kiwi"]),
-    _case(K, "sixseven", "67", 4, CaseTheme("coins", "lightning", ("#2f74dc", "#163a7e"), "#ffe14d"),
-          ["67", "Chicleteira Bicicleteira", "Los Tralaleritos", "La Vacca Saturno Saturnita", "Burbaloni Loliloli",
-           "Ballerina Cappuccina", "Chimpanzini Bananini", "Trulimero Trulicina", "Cappuccino Assassino",
-           "Boneca Ambalabu", "Cacto Hipopotamo"]),
-    _case(K, "secret", "Секретный", 5, CaseTheme("coins", "sparkle", ("#2b2b35", "#0d0d12"), "#f2f2f7"),
-          ["Garama and Madundung", "Cash or Card", "67", "La Grande Combinasion", "Chicleteira Bicicleteira",
-           "Tung Tung Tung Sahur", "Los Tralaleritos", "La Vacca Saturno Saturnita", "Bombombini Gusini",
-           "Rhino Toasterino", "Glorbo Fruttodrillo"]),
-    _case(K, "capitano", "Капитан", 6, CaseTheme("water", "bubbles", ("#2a92a6", "#0e3c48"), "#6ff4ff"),
-          ["Fishino Clownino", "Moby Bros", "Jelly Moby", "Capitano Moby", "Cash or Card", "Garama and Madundung",
-           "67", "La Grande Combinasion", "Los Tralaleritos", "La Vacca Saturno Saturnita"]),
-    _case(K, "dragon", "Драгон", 7, CaseTheme("noodles", "fire", ("#a0703a", "#4a2c10"), "#ff8a1f"),
-          ["Dragon Cannelloni", "Cerberus", "Celestial Pegasus", "Popcuru and Fizzuru", "Burguro And Fryuro",
-           "Garama and Madundung", "67", "Tung Tung Tung Sahur", "Los Tralaleritos", "La Vacca Saturno Saturnita"]),
-    _case(K, "fastfood", "Фастфуд", 8, CaseTheme("food", "sparkle", ("#d8402f", "#7a1a12"), "#ffb23d"),
-          ["La Food Combinasion", "Popcuru and Fizzuru", "Pizza and Ranch", "Burguro And Fryuro", "Cash or Card",
-           "Garama and Madundung", "67", "La Grande Combinasion", "Chicleteira Bicicleteira",
-           "Tung Tung Tung Sahur", "La Vacca Saturno Saturnita"]),
-    _case(K, "boo", "Бу!", 9, CaseTheme("pumpkins", "smoke", ("#5d3894", "#231238"), "#ff9a2e"),
-          ["La Casa Boo", "Foxini Lanternini", "Dug dug dug", "Duggy Bros", "Cerberus", "Spooky and Pumpky",
-           "Garama and Madundung", "67", "Los Tralaleritos", "La Vacca Saturno Saturnita"]),
-    _case(K, "techno", "Техно", 10, CaseTheme("bolts", "lightning", ("#4c5d72", "#19212d"), "#3de0ff"),
-          ["Digi Narwhal", "Bumbatron", "Venuspino", "Quackini Snackini", "Globa Steppa", "Cash or Card",
-           "Garama and Madundung", "67", "Tung Tung Tung Sahur", "Chicleteira Bicicleteira"]),
-    _case(K, "safe", "Сейф", 11, CaseTheme("bills", "sparkle", ("#cda33c", "#6a4f10"), "#ffe07a"),
+    _case(K, "tirili", "Тирили", 1, CaseTheme("coins", "lightning", ("#2f74dc", "#163a7e"), "#ffe14d"),
+          ["Tirilikalika Tirilikalako", "Capitano Moby", "Burguro And Fryuro"] + CHEAP),
+    _case(K, "capitano", "Капитан", 2, CaseTheme("water", "bubbles", ("#2a92a6", "#0e3c48"), "#6ff4ff"),
+          ["Fishino Clownino", "Jelly Moby", "Capitano Moby", "Orcaledon", "Nuclearo Dinossauro", "Money Money Puggy",
+           "La Grande Combinasion", "Tang Tang Keletang", "Lavadorito Spinito", "Noodle Noodle Poodle",
+           "Ketchuru and Musturu"]),
+    _case(K, "safe", "Сейф", 3, CaseTheme("bills", "sparkle", ("#cda33c", "#6a4f10"), "#ffe07a"),
           ["Rico Dinero", "Los Secret Combinasionas", "Los Sekolahs", "Fortunu and Cashuru", "Los Amigos",
-           "Cash or Card", "Garama and Madundung", "67", "La Grande Combinasion", "Chicleteira Bicicleteira"]),
-    _case(K, "griffin", "Грифон", 12, CaseTheme("embers", "fire", ("#8e1d1d", "#2a0606"), "#ff3b2f"),
-          ["Griffin", "Dragon Gingerini", "Hydra Dragon Cannelloni", "Dragon Cannelloni", "Cerberus",
-           "Celestial Pegasus", "Spooky and Pumpky", "Garama and Madundung", "67"]),
-    _case(K, "sweet", "Сладкий", 13, CaseTheme("candy", "sparkle", ("#f1e7e1", "#b8423a"), "#ff6b6b"),
-          ["Ginger Gerat", "Sammyni Cakini", "Pancake and Syrup", "La Breakfast Combinasion", "Cooki and Milki",
-           "Fragrama and Chocrama", "Popcuru and Fizzuru", "Burguro And Fryuro", "Garama and Madundung", "67"]),
-    _case(K, "party", "Праздник", 14, CaseTheme("gifts", "confetti", ("#e0508f", "#7a1846"), "#ffd1e6"),
+           "Cash or Card", "Money Money Puggy", "Garama and Madundung", "Ventoliero Pavonero", "Tang Tang Keletang"]),
+    _case(K, "boo", "Бу!", 4, CaseTheme("pumpkins", "smoke", ("#5d3894", "#231238"), "#ff9a2e"),
+          ["La Casa Boo", "Foxini Lanternini", "Dug dug dug", "Duggy Bros", "Cerberus", "Spooky and Pumpky",
+           "Garama and Madundung", "Tang Tang Keletang", "Orcaledon", "Lavadorito Spinito"]),
+    _case(K, "fastfood", "Фастфуд", 5, CaseTheme("food", "sparkle", ("#d8402f", "#7a1a12"), "#ffb23d"),
+          ["Sammyni Cakini", "Pancake and Syrup", "Cooki and Milki", "Fragrama and Chocrama", "La Food Combinasion",
+           "Popcuru and Fizzuru", "Pizza and Ranch", "Burguro And Fryuro", "Ketchuru and Musturu",
+           "Noodle Noodle Poodle", "Garama and Madundung"]),
+    _case(K, "party", "Праздник", 6, CaseTheme("gifts", "confetti", ("#e0508f", "#7a1846"), "#ffd1e6"),
           ["Kalika Bros", "Hydra Bunny", "Bunny and Eggy", "Rosey and Teddy", "Reinito Sleighito", "Sammyni Fattini",
-           "Cooki and Milki", "Fragrama and Chocrama", "La Food Combinasion", "Pizza and Ranch",
-           "Garama and Madundung"]),
-    _case(K, "crystal", "Кристальный", 15, CaseTheme("crystals", "crystal", ("#b7a1de", "#5e4a8f"), "#e2d6ff"),
-          ["Dragon Aquanini", "Kraken", "La Supreme Combinasion", "Tirilikalika Tirilikalako",
-           "Hydra Dragon Cannelloni", "Dragon Cannelloni", "Los Sekolahs", "Reinito Sleighito", "Capitano Moby",
-           "Celestial Pegasus", "Cash or Card"]),
-    _case(K, "legend", "Легенда", 16, CaseTheme("coins", "fire", ("#ffcb3d", "#8a5a00"), "#fff0a8"),
+           "Cooki and Milki", "Fragrama and Chocrama", "La Food Combinasion"]),
+    _case(K, "dragon", "Драгон", 7, CaseTheme("noodles", "fire", ("#a0703a", "#4a2c10"), "#ff8a1f"),
+          ["Dragon Gingerini", "Dragon Aquanini", "Hydra Dragon Cannelloni", "Dragon Cannelloni", "Cerberus",
+           "Celestial Pegasus", "Globa Steppa"]),
+    _case(K, "crystal", "Кристальный", 8, CaseTheme("crystals", "crystal", ("#b7a1de", "#5e4a8f"), "#e2d6ff"),
+          ["Kraken", "La Supreme Combinasion", "Tirilikalika Tirilikalako", "Hydra Dragon Cannelloni",
+           "Dragon Cannelloni", "Los Sekolahs", "Reinito Sleighito", "Globa Steppa", "Spooky and Pumpky", "Cerberus"]),
+    _case(K, "phantom", "Фантомный", 9, CaseTheme("smoke", "smoke", ("#3c3f47", "#131418"), "#d4dbea"),
+          ["Griffin", "Digi Narwhal", "Hydra Dragon Cannelloni", "La Casa Boo", "Foxini Lanternini", "Duggy Bros",
+           "Los Sekolahs", "Fortunu and Cashuru", "Los Amigos"]),
+    _case(K, "legend", "Легенда", 10, CaseTheme("embers", "fire", ("#8e1d1d", "#2a0606"), "#ff3b2f"),
           ["Antonio", "Dragon Gingerini", "Kalika Bros", "Fishino Clownino", "La Supreme Combinasion", "Hydra Bunny",
-           "Dragon Cannelloni", "La Casa Boo", "Rico Dinero", "Los Sekolahs", "Fortunu and Cashuru"]),
+           "Dragon Cannelloni", "La Casa Boo", "Rico Dinero", "Los Sekolahs"]),
     # ------------------------------------------------------------ ALL-IN
-    _case(A, "phantom", "Фантомный", 1, CaseTheme("smoke", "smoke", ("#3c3f47", "#131418"), "#d4dbea"),
-          ["Meowl", "Skibidi Toilet", "Love Love Bear", "Griffin", "Antonio", "Kalika Bros", "Digi Narwhal",
-           "Hydra Dragon Cannelloni", "Dragon Cannelloni"]),
-    _case(A, "frigo", "Фриго", 2, CaseTheme("snow", "snow", ("#a3d6f2", "#3a6f8f"), "#e8f8ff"),
+    _case(A, "frigo", "Фриго", 1, CaseTheme("snow", "snow", ("#a3d6f2", "#3a6f8f"), "#e8f8ff"),
           ["Elefanto Frigo", "Arcadragon", "Love Love Bear", "Antonio", "Dragon Gingerini", "Fishino Clownino",
            "La Supreme Combinasion", "Ginger Gerat", "Dragon Cannelloni"]),
+    _case(A, "og", "OG", 2, CaseTheme("coins", "sparkle", ("#6a1f8f", "#2a0838"), "#ffd84d"),
+          ["Meowl", "Skibidi Toilet", "John Pork", "Love Love Bear", "Griffin", "Antonio", "Kalika Bros",
+           "Digi Narwhal", "Tirilikalika Tirilikalako"]),
     _case(A, "strawberry", "Клубничный", 3, CaseTheme("strawberries", "leaves", ("#e8384a", "#7a0f1c"), "#ff9aa8"),
           ["Strawberry Elephant", "Signore Carapace", "John Pork", "Meowl", "Skibidi Toilet", "Elefanto Frigo",
            "Antonio", "Kalika Bros", "Dragon Aquanini"]),

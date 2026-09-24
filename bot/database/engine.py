@@ -23,12 +23,16 @@ CASES_VERSION_KEY = "cases_content_version"
 # чтобы уже выданные открытия, промокоды и партнёрские коды не «повисли» на
 # исчезнувшем кейсе после пересева.
 LEGACY_CASE_CODES = {
+    # v12–13
     "referral_gift": "referral", "free_handout": "free",
-    "nonna_kitchen": "fastfood", "ghost_lantern": "boo", "hybrid_lab": "techno", "combo_vault": "safe",
-    "dragon_forge": "dragon", "abyss_dive": "capitano", "party_popper": "party", "og_throne": "strawberry",
+    "nonna_kitchen": "fastfood", "ghost_lantern": "boo", "hybrid_lab": "crystal", "combo_vault": "safe",
+    "dragon_forge": "dragon", "abyss_dive": "capitano", "party_popper": "party", "og_throne": "og",
     "market_hype": "legend", "market_blue_chips": "crystal", "market_runners": "party", "market_illiquid": "phantom",
-    "eco_cardboard": "sandbox", "eco_bin": "sandbox", "eco_lunchbox": "sandbox", "eco_toolbox": "crocodilo",
-    "eco_piggy": "sahur", "eco_sahur": "sahur", "eco_mystery": "sixseven", "eco_first_secret": "secret",
+    "eco_cardboard": "tirili", "eco_bin": "tirili", "eco_lunchbox": "tirili", "eco_toolbox": "tirili",
+    "eco_piggy": "tirili", "eco_sahur": "tirili", "eco_mystery": "tirili", "eco_first_secret": "capitano",
+    # v14
+    "sandbox": "tirili", "sahur": "tirili", "crocodilo": "tirili", "sixseven": "tirili", "secret": "capitano",
+    "techno": "crystal", "griffin": "dragon", "sweet": "fastfood",
 }
 
 

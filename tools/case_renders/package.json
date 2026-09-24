@@ -1,0 +1,9 @@
+{
+  "name": "braincore-case-renders",
+  "private": true,
+  "description": "Offline 3D renders of BrainCore case models (three.js + headless Chromium).",
+  "dependencies": {
+    "playwright": "^1.48.0",
+    "three": "0.169.0"
+  }
+}

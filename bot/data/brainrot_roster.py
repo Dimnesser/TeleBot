@@ -13,9 +13,8 @@
 На скриншоте было «Signora Carapace» — на вики персонаж называется
 Signore Carapace, используется написание вики.
 
-В основных кейсах — только Secret и OG. «Нищие» Common…Mythic и дешёвые
-Secret (POOR_ROSTER) — только для бесплатного и эконом-кейсов. Brainrot God
-не используется.
+В кейсах — только Secret и OG (как на референсе пользователя: даже самые
+дешёвые кейсы там из Secret). Brainrot God не используется.
 """
 from __future__ import annotations
 
@@ -93,7 +92,6 @@ class RosterBrainrot:
         return WIKI_BASE_URL + self.name.replace(" ", "_")
 
 
-C, R, E, L, M = Rarity.COMMON, Rarity.RARE, Rarity.EPIC, Rarity.LEGENDARY, Rarity.MYTHIC
 S, OG = Rarity.SECRET, Rarity.OG
 
 ROSTER: list[RosterBrainrot] = [
@@ -156,46 +154,23 @@ ROSTER: list[RosterBrainrot] = [
     RosterBrainrot("Strawberry Elephant", OG, 42509, "750B", "750M"),
 ]
 
-# «Нищие» брейнроты для бесплатного и эконом-кейсов — тоже реальные, с
-# рендерами и данными из вики. На скриншотах пользователя их нет, поэтому
-# ценность считается из реальной цены в игре одной формулой, привязанной к
-# самому дешёвому брейнроту со скриншота (Garama and Madundung: $10B ↔ 41):
-#     value = max(1, round(41 · (cost / 10B) ^ 0.15))
-# Brainrot God не используется — по просьбе пользователя.
-POOR_ROSTER: list[RosterBrainrot] = [
-    RosterBrainrot("Noobini Pizzanini", C, 2, "25", "1"),
-    RosterBrainrot("Lirilì Larilà", C, 3, "250", "3"),
-    RosterBrainrot("Tim Cheese", C, 3, "500", "5"),
-    RosterBrainrot("Fluriflura", C, 3, "750", "7"),
-    RosterBrainrot("Talpa Di Fero", C, 4, "1K", "9"),
-    RosterBrainrot("Svinina Bombardino", C, 4, "1.25K", "10"),
-    RosterBrainrot("Pipi Kiwi", C, 4, "1.5K", "13"),
-    RosterBrainrot("Trippi Troppi", R, 4, "2K", "15"),
-    RosterBrainrot("Gangster Footera", R, 4, "4K", "30"),
-    RosterBrainrot("Bandito Bobritto", R, 5, "4.5K", "35"),
-    RosterBrainrot("Boneca Ambalabu", R, 5, "5K", "40"),
-    RosterBrainrot("Cacto Hipopotamo", R, 5, "6.5K", "50"),
-    RosterBrainrot("Ta Ta Ta Ta Sahur", R, 5, "7.5K", "55"),
-    RosterBrainrot("Tric Trac Baraboom", R, 5, "9K", "65"),
-    RosterBrainrot("Cappuccino Assassino", E, 5, "10K", "75"),
-    RosterBrainrot("Brr Brr Patapim", E, 5, "15K", "100"),
-    RosterBrainrot("Trulimero Trulicina", E, 6, "20K", "125"),
-    RosterBrainrot("Burbaloni Loliloli", L, 6, "35K", "200"),
-    RosterBrainrot("Chimpanzini Bananini", L, 7, "50K", "300"),
-    RosterBrainrot("Ballerina Cappuccina", L, 7, "100K", "500"),
-    RosterBrainrot("Glorbo Fruttodrillo", L, 8, "200K", "750"),
-    RosterBrainrot("Frigo Camelo", M, 9, "350K", "2K"),
-    RosterBrainrot("Rhino Toasterino", M, 9, "450K", "2.15K"),
-    RosterBrainrot("Bombardiro Crocodilo", M, 9, "500K", "2.5K"),
-    RosterBrainrot("Bombombini Gusini", M, 10, "1M", "5K"),
-    RosterBrainrot("La Vacca Saturno Saturnita", S, 20, "80M", "325K"),
-    RosterBrainrot("Los Tralaleritos", S, 21, "100M", "500K"),
-    RosterBrainrot("Tung Tung Tung Sahur", S, 26, "500M", "1.5M"),
-    RosterBrainrot("Chicleteira Bicicleteira", S, 28, "750M", "3.5M"),
-    RosterBrainrot("La Grande Combinasion", S, 29, "1B", "10M"),
-    RosterBrainrot("67", S, 30, "1.25B", "7.5M"),
+# Дешёвые Secret — как в дешёвых кейсах на референсе пользователя: имена и
+# ценность `value` в B — буквально с его скриншота раздела «Что может
+# выпасть» (там же видно, что даже самые дешёвые кейсы состоят из Secret).
+# Тир, цена и доход в игре — из вики, как и у остальных.
+CHEAP_SECRETS: list[RosterBrainrot] = [
+    RosterBrainrot("67", S, 5, "1.25B", "7.5M"),
+    RosterBrainrot("La Grande Combinasion", S, 9, "1B", "10M"),
+    RosterBrainrot("Money Money Puggy", S, 14, "2.6B", "21M"),
+    RosterBrainrot("Nuclearo Dinossauro", S, 15, "2.5B", "15M"),
+    RosterBrainrot("Tang Tang Keletang", S, 25, "4.5B", "33.5M"),
+    RosterBrainrot("Orcaledon", S, 28, "7B", "40M"),
+    RosterBrainrot("Lavadorito Spinito", S, 31, "8B", "45M"),
+    RosterBrainrot("Ventoliero Pavonero", S, 41, "15.5B", "65M"),
+    RosterBrainrot("Ketchuru and Musturu", S, 51, "7.5B", "42.5M"),
+    RosterBrainrot("Noodle Noodle Poodle", S, 54, "3B", "27.5M"),
 ]
-ROSTER = ROSTER + POOR_ROSTER
+ROSTER = ROSTER + CHEAP_SECRETS
 
 ROSTER_BY_NAME: dict[str, RosterBrainrot] = {b.name: b for b in ROSTER}
 

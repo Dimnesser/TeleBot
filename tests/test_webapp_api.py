@@ -321,6 +321,7 @@ async def test_cases_catalog_grouped_by_collections(client, auth_headers) -> Non
             assert case["theme"]["filling"] and case["theme"]["aura"]
             assert case["top_item_image_url"].endswith(".webp")
             assert case["heroes"] and case["heroes"][0]["name"] == case["top_item_name"]
+            assert case["image_url"] == f"/static/assets/cases/{case['code']}.webp"
 
 
 async def test_free_case_gives_coins_or_brainrot_then_cooldown(client, auth_headers) -> None:

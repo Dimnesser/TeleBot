@@ -1,0 +1,368 @@
+<!DOCTYPE html>
+<html>
+<head>
+<meta charset="utf-8">
+<title>BrainCore case renderer</title>
+<style>html,body{margin:0;background:#04060b}canvas{display:block}</style>
+<script type="importmap">
+{ "imports": {
+  "three": "/node_modules/three/build/three.module.js",
+  "three/addons/": "/node_modules/three/examples/jsm/"
+} }
+</script>
+</head>
+<body>
+<script type="module">
+/* Офлайн-рендер моделей кейсов BrainCore (three.js).
+ *
+ * Кейс — жёсткий кейс-чемодан с откинутой крышкой; внутри 3D-наполнитель по
+ * теме и герои кейса (официальные рендеры брейнротов как плоскости), вокруг
+ * — аура с bloom-свечением. window.renderCase(spec) → dataURL PNG.
+ */
+import * as THREE from 'three';
+import { RoundedBoxGeometry } from 'three/addons/geometries/RoundedBoxGeometry.js';
+import { EffectComposer } from 'three/addons/postprocessing/EffectComposer.js';
+import { RenderPass } from 'three/addons/postprocessing/RenderPass.js';
+import { UnrealBloomPass } from 'three/addons/postprocessing/UnrealBloomPass.js';
+import { OutputPass } from 'three/addons/postprocessing/OutputPass.js';
+
+const W = 720, H = 600;
+const BG = 0x04060b;
+
+const renderer = new THREE.WebGLRenderer({ antialias: true, preserveDrawingBuffer: true });
+renderer.setPixelRatio(1);
+renderer.setSize(W, H);
+renderer.toneMapping = THREE.ACESFilmicToneMapping;
+renderer.toneMappingExposure = 0.95;
+renderer.outputColorSpace = THREE.SRGBColorSpace;
+renderer.shadowMap.enabled = true;
+renderer.shadowMap.type = THREE.PCFSoftShadowMap;
+document.body.appendChild(renderer.domElement);
+
+// --------------------------------------------------------------- helpers
+function rng(seedStr) {
+  let h = 1779033703 ^ seedStr.length;
+  for (let i = 0; i < seedStr.length; i++) { h = Math.imul(h ^ seedStr.charCodeAt(i), 3432918353); h = (h << 13) | (h >>> 19); }
+  return () => { h = Math.imul(h ^ (h >>> 16), 2246822507); h = Math.imul(h ^ (h >>> 13), 3266489909); return ((h ^= h >>> 16) >>> 0) / 4294967296; };
+}
+const col = (c) => new THREE.Color(c);
+const glow = (c, k = 3) => new THREE.MeshBasicMaterial({ color: col(c).multiplyScalar(k), toneMapped: false });
+function std(c, o = {}) { return new THREE.MeshStandardMaterial({ color: col(c), roughness: 0.45, metalness: 0.1, ...o }); }
+function phys(c, o = {}) { return new THREE.MeshPhysicalMaterial({ color: col(c), roughness: 0.38, metalness: 0.05, clearcoat: 0.8, clearcoatRoughness: 0.25, ...o }); }
+function rbox(w, h, d, r = 0.06) { return new RoundedBoxGeometry(w, h, d, 4, Math.min(r, w / 2 - 0.001, h / 2 - 0.001, d / 2 - 0.001)); }
+function mesh(g, m, x = 0, y = 0, z = 0) { const o = new THREE.Mesh(g, m); o.position.set(x, y, z); o.castShadow = true; o.receiveShadow = true; return o; }
+
+function canvasTex(w, h, draw) {
+  const c = document.createElement('canvas'); c.width = w; c.height = h;
+  draw(c.getContext('2d'), w, h);
+  const t = new THREE.CanvasTexture(c); t.colorSpace = THREE.SRGBColorSpace; t.anisotropy = 8;
+  return t;
+}
+const softTex = canvasTex(128, 128, (g, w, h) => {
+  const gr = g.createRadialGradient(64, 64, 0, 64, 64, 64);
+  gr.addColorStop(0, 'rgba(255,255,255,1)'); gr.addColorStop(0.4, 'rgba(255,255,255,.55)'); gr.addColorStop(1, 'rgba(255,255,255,0)');
+  g.fillStyle = gr; g.fillRect(0, 0, w, h);
+});
+const starTex = canvasTex(128, 128, (g) => {
+  g.translate(64, 64); g.fillStyle = '#fff';
+  const gr = g.createRadialGradient(0, 0, 0, 0, 0, 20); gr.addColorStop(0, 'rgba(255,255,255,1)'); gr.addColorStop(1, 'rgba(255,255,255,0)');
+  g.fillStyle = gr; g.beginPath(); g.arc(0, 0, 20, 0, 7); g.fill();
+  g.fillStyle = '#fff'; g.beginPath();
+  for (let i = 0; i < 8; i++) { const a = (i / 8) * Math.PI * 2, r = i % 2 ? 7 : 60; g.lineTo(Math.cos(a) * r, Math.sin(a) * r); }
+  g.closePath(); g.fill();
+});
+function sprite(tex, color, size, opacity = 1, additive = true) {
+  const m = new THREE.SpriteMaterial({ map: tex, color: col(color), transparent: true, opacity, depthWrite: false, blending: additive ? THREE.AdditiveBlending : THREE.NormalBlending, toneMapped: !additive });
+  if (additive) m.color.multiplyScalar(1.1);
+  const s = new THREE.Sprite(m); s.scale.set(size, size, 1); return s;
+}
+
+const loader = new THREE.TextureLoader();
+async function imagePlane(url, maxHeight, maxWidth) {
+  const tex = await loader.loadAsync(url);
+  tex.colorSpace = THREE.SRGBColorSpace; tex.anisotropy = 8;
+  const aspect = tex.image.width / tex.image.height;
+  const height = Math.min(maxHeight, maxWidth / aspect); // широкие брейнроты не раздуваются
+  const m = new THREE.MeshBasicMaterial({ map: tex, transparent: true, alphaTest: 0.08, side: THREE.DoubleSide, toneMapped: false });
+  m.color.setScalar(0.93);
+  const g = new THREE.PlaneGeometry(height * aspect, height);
+  g.translate(0, height / 2, 0);
+  const p = new THREE.Mesh(g, m);
+  p.userData.width = height * aspect;
+  return p;
+}
+
+// --------------------------------------------------------------- корпус
+const CW = 4.6, CH = 1.45, CD = 2.9, T = 0.14; // ширина, высота, глубина, толщина стенки
+
+function nameplate(accent, dark) {
+  const tex = canvasTex(512, 128, (g, w, h) => {
+    g.fillStyle = dark; g.fillRect(0, 0, w, h);
+    g.fillStyle = 'rgba(0,0,0,.35)'; g.fillRect(8, 8, w - 16, h - 16);
+    g.strokeStyle = 'rgba(255,255,255,.18)'; g.lineWidth = 4; g.strokeRect(10, 10, w - 20, h - 20);
+    g.font = 'italic 900 68px Arial Black, Arial, sans-serif'; g.textAlign = 'center'; g.textBaseline = 'middle';
+    g.fillStyle = accent; g.shadowColor = accent; g.shadowBlur = 12;
+    g.fillText('BrainCore', w / 2, h / 2 + 4);
+  });
+  const m = new THREE.MeshStandardMaterial({ map: tex, roughness: 0.35, metalness: 0.3, emissive: col('#ffffff'), emissiveMap: tex, emissiveIntensity: 0.35 });
+  return new THREE.Mesh(new THREE.PlaneGeometry(1.7, 0.42), m);
+}
+
+function lining(theme, r) {
+  // Внутренняя обивка крышки: мягкий «поролон» в цвет корпуса + узор темы.
+  return canvasTex(512, 320, (g, w, h) => {
+    const [light, dark] = theme.shell;
+    const gr = g.createLinearGradient(0, 0, 0, h); gr.addColorStop(0, dark); gr.addColorStop(1, light);
+    g.fillStyle = gr; g.fillRect(0, 0, w, h);
+    g.globalAlpha = 0.18; g.fillStyle = '#000';
+    for (let y = 0; y < h; y += 22) for (let x = (y / 22) % 2 ? 11 : 0; x < w; x += 22) { g.beginPath(); g.arc(x, y, 7, 0, 7); g.fill(); }
+    g.globalAlpha = 0.22; g.strokeStyle = theme.accent; g.lineWidth = 5;
+    for (let i = 0; i < 9; i++) {
+      g.beginPath(); const cx = r() * w, cy = r() * h, rr = 30 + r() * 70;
+      for (let a = 0; a < 12; a += 0.2) g.lineTo(cx + Math.cos(a) * rr * (a / 12), cy + Math.sin(a) * rr * (a / 12));
+      g.stroke();
+    }
+    g.globalAlpha = 1;
+  });
+}
+
+function buildCase(theme, r) {
+  const [light, dark] = theme.shell;
+  const shell = phys(light);
+  const trim = phys(dark, { roughness: 0.55, clearcoat: 0.3 });
+  const metal = std('#c9ced6', { metalness: 0.9, roughness: 0.28 });
+  const grp = new THREE.Group();
+
+  // корпус (открытый сверху)
+  grp.add(mesh(rbox(CW, T, CD, 0.07), shell, 0, T / 2, 0));
+  grp.add(mesh(rbox(CW, CH, T, 0.07), shell, 0, CH / 2, CD / 2 - T / 2));
+  grp.add(mesh(rbox(CW, CH, T, 0.07), shell, 0, CH / 2, -CD / 2 + T / 2));
+  grp.add(mesh(rbox(T, CH, CD, 0.07), shell, -CW / 2 + T / 2, CH / 2, 0));
+  grp.add(mesh(rbox(T, CH, CD, 0.07), shell, CW / 2 - T / 2, CH / 2, 0));
+  // кант по верхней кромке
+  grp.add(mesh(rbox(CW + 0.06, 0.1, T + 0.06, 0.04), trim, 0, CH - 0.02, CD / 2 - T / 2));
+  grp.add(mesh(rbox(T + 0.06, 0.1, CD + 0.06, 0.04), trim, -CW / 2 + T / 2, CH - 0.02, 0));
+  grp.add(mesh(rbox(T + 0.06, 0.1, CD + 0.06, 0.04), trim, CW / 2 - T / 2, CH - 0.02, 0));
+  // рельеф передней стенки: пояс и рёбра
+  const fz = CD / 2 + 0.02;
+  grp.add(mesh(rbox(CW - 0.3, 0.14, 0.08, 0.03), trim, 0, 0.62, fz));
+  for (const x of [-1.25, 1.25]) grp.add(mesh(rbox(0.12, CH - 0.35, 0.08, 0.03), trim, x, CH / 2 - 0.05, fz));
+  // бамперы на углах
+  for (const x of [-CW / 2 + 0.05, CW / 2 - 0.05]) for (const z of [CD / 2 - 0.05, -CD / 2 + 0.05]) grp.add(mesh(rbox(0.26, CH + 0.04, 0.26, 0.08), trim, x, CH / 2, z));
+  // ножки
+  for (const x of [-1.7, 1.7]) grp.add(mesh(rbox(0.5, 0.08, 0.3, 0.03), trim, x, -0.02, CD / 2 - 0.3));
+  // замки
+  for (const x of [-1.72, 1.72]) {
+    grp.add(mesh(rbox(0.42, 0.42, 0.12, 0.04), trim, x, CH - 0.28, fz + 0.03));
+    grp.add(mesh(rbox(0.3, 0.2, 0.1, 0.03), metal, x, CH - 0.24, fz + 0.09));
+  }
+  // шильдик
+  const plate = nameplate(theme.accent, dark);
+  plate.position.set(0, 0.3, fz + 0.05);
+  grp.add(plate);
+  // ручка сверху передней стенки не нужна — у кейса ручка сзади на крышке
+
+  // крышка: лоток, откинутый назад на петлях задней кромки
+  const lid = new THREE.Group();
+  const LH = 0.5;
+  lid.add(mesh(rbox(CW, T, CD, 0.07), shell, 0, LH - T / 2, 0));
+  lid.add(mesh(rbox(CW, LH, T, 0.07), shell, 0, LH / 2, CD / 2 - T / 2));
+  lid.add(mesh(rbox(CW, LH, T, 0.07), shell, 0, LH / 2, -CD / 2 + T / 2));
+  lid.add(mesh(rbox(T, LH, CD, 0.07), shell, -CW / 2 + T / 2, LH / 2, 0));
+  lid.add(mesh(rbox(T, LH, CD, 0.07), shell, CW / 2 - T / 2, LH / 2, 0));
+  lid.add(mesh(rbox(CW + 0.06, 0.1, T + 0.06, 0.04), trim, 0, 0.02, CD / 2 - T / 2));
+  for (const x of [-CW / 2 + 0.05, CW / 2 - 0.05]) for (const z of [CD / 2 - 0.05, -CD / 2 + 0.05]) lid.add(mesh(rbox(0.26, LH + 0.04, 0.26, 0.08), trim, x, LH / 2, z));
+  const lin = new THREE.Mesh(new THREE.PlaneGeometry(CW - 2 * T, CD - 2 * T), std('#ffffff', { map: lining(theme, r), roughness: 0.9 }));
+  lin.rotation.x = Math.PI / 2; lin.position.y = LH - T - 0.005; lid.add(lin);
+  // крышку строим «закрытой» над корпусом и поворачиваем вокруг задней кромки
+  lid.children.forEach((c) => { c.position.z += CD / 2; });
+  const hinge = new THREE.Group();
+  hinge.position.set(0, CH, -CD / 2);
+  hinge.add(lid);
+  hinge.rotation.x = -1.83; // ~105°: внутренняя сторона смотрит на камеру
+  grp.add(hinge);
+  // свет изнутри кейса
+  const inner = new THREE.PointLight(col(theme.accent), 2.2, 4, 1.8);
+  inner.position.set(0, CH + 0.2, 0.3); grp.add(inner);
+  return grp;
+}
+
+// --------------------------------------------------------------- наполнитель
+const FILL = {
+  coins: () => {
+    const g = new THREE.CylinderGeometry(0.17, 0.17, 0.045, 28);
+    const m = std('#f2b82a', { metalness: 1, roughness: 0.3 });
+    return { parts: [[g, m]], n: 360, size: 1, tilt: 1.1 };
+  },
+  junk: () => ({ parts: [[rbox(0.32, 0.2, 0.26, 0.04), std('#8a6a4a')], [new THREE.CylinderGeometry(0.12, 0.12, 0.3, 12), std('#7a7f88', { metalness: 0.7, roughness: 0.4 })], [new THREE.DodecahedronGeometry(0.16), std('#a1845f')], [rbox(0.4, 0.06, 0.2, 0.02), std('#4f5a4a')]], n: 170, size: 1, tilt: 3 }),
+  noodles: () => {
+    const parts = [];
+    for (const c of ['#f0a045', '#f5b95c', '#d8352a']) {
+      const pts = []; for (let i = 0; i < 8; i++) pts.push(new THREE.Vector3(i * 0.09 - 0.32, Math.sin(i * 1.3) * 0.06, Math.cos(i * 1.7) * 0.07));
+      parts.push([new THREE.TubeGeometry(new THREE.CatmullRomCurve3(pts), 24, 0.035, 8), std(c, { roughness: 0.5 })]);
+    }
+    return { parts, n: 300, size: 1, tilt: 3 };
+  },
+  food: () => ({ parts: [[rbox(0.06, 0.06, 0.46, 0.02), std('#ffc93c')], [rbox(0.06, 0.06, 0.4, 0.02), std('#ffd35a')], [new THREE.SphereGeometry(0.2, 18, 10, 0, Math.PI * 2, 0, Math.PI / 2), std('#e0913a')], [new THREE.CylinderGeometry(0.2, 0.2, 0.06, 18), std('#6b3a1e')]], n: 230, size: 1, tilt: 3 }),
+  bills: () => ({ parts: [[rbox(0.5, 0.02, 0.24, 0.01), std('#5fae5a', { roughness: 0.7 })], [rbox(0.5, 0.02, 0.24, 0.01), std('#78c46c', { roughness: 0.7 })], [new THREE.CylinderGeometry(0.17, 0.17, 0.045, 24), std('#ffcc3a', { metalness: 1, roughness: 0.22 })]], n: 280, size: 1, tilt: 1.2 }),
+  pumpkins: () => ({ parts: [[new THREE.SphereGeometry(0.22, 16, 12).scale(1, 0.75, 1), std('#ff8a1f', { roughness: 0.55 })], [new THREE.SphereGeometry(0.14, 12, 10), std('#6b3fa0')], [new THREE.SphereGeometry(0.1, 10, 8), std('#39e07a', { emissive: col('#39e07a'), emissiveIntensity: 0.6 })]], n: 170, size: 1, tilt: 0.4 }),
+  water: () => ({ parts: [[new THREE.SphereGeometry(0.1, 16, 12), std('#f4fbff', { metalness: 0.2, roughness: 0.1 })], [new THREE.CylinderGeometry(0.16, 0.16, 0.05, 20), std('#ffcc3a', { metalness: 1, roughness: 0.2 })], [new THREE.IcosahedronGeometry(0.14), std('#2fb6d8', { roughness: 0.15, transparent: true, opacity: 0.85 })]], n: 280, size: 1, tilt: 2 }),
+  bolts: () => ({ parts: [[new THREE.CylinderGeometry(0.14, 0.14, 0.08, 6), std('#9aa4b2', { metalness: 0.85, roughness: 0.3 })], [rbox(0.34, 0.04, 0.24, 0.01), std('#1d6b4a', { emissive: col('#3de0ff'), emissiveIntensity: 0.25 })], [new THREE.TorusGeometry(0.1, 0.03, 8, 16), std('#c9a13a', { metalness: 0.9, roughness: 0.3 })]], n: 260, size: 1, tilt: 3 }),
+  gifts: () => ({ parts: ['#ff4f8b', '#4fe3ff', '#ffd84d', '#9b6bff', '#5ed36a'].map((c) => [rbox(0.28, 0.26, 0.28, 0.03), phys(c)]), n: 140, size: 1, tilt: 0.6 }),
+  candy: () => ({ parts: [['#ff6b6b', '#ffd84d', '#4fe3ff', '#ff9ef0', '#7cf06a'].map((c) => [new THREE.SphereGeometry(0.12, 14, 10), phys(c)]), [[new THREE.TorusGeometry(0.12, 0.05, 10, 20), phys('#ffffff')]]].flat(), n: 260, size: 1, tilt: 3 }),
+  crystals: () => ({ parts: [[new THREE.OctahedronGeometry(0.2).scale(0.7, 1.4, 0.7), phys('#b79dff', { emissive: col('#7a4dff'), emissiveIntensity: 0.4, roughness: 0.1 })], [new THREE.OctahedronGeometry(0.16).scale(0.7, 1.5, 0.7), phys('#e6dcff', { emissive: col('#9d7bff'), emissiveIntensity: 0.3, roughness: 0.1 })]], n: 200, size: 1, tilt: 0.8 }),
+  embers: () => ({ parts: [[new THREE.DodecahedronGeometry(0.17), std('#2a1512', { roughness: 0.9 })], [new THREE.DodecahedronGeometry(0.12), std('#3a1a10', { emissive: col('#ff4a12'), emissiveIntensity: 1.6 })]], n: 220, size: 1, tilt: 3 }),
+  smoke: () => ({ parts: [[new THREE.SphereGeometry(0.2, 12, 10), std('#4a4e56', { roughness: 1 })], [new THREE.CylinderGeometry(0.16, 0.16, 0.045, 24), std('#c9ced6', { metalness: 1, roughness: 0.25 })]], n: 200, size: 1, tilt: 1.5 }),
+  snow: () => ({ parts: [[new THREE.SphereGeometry(0.16, 14, 10), std('#f4fbff', { roughness: 0.7 })], [rbox(0.24, 0.24, 0.24, 0.04), phys('#bfe8ff', { roughness: 0.05, transparent: true, opacity: 0.8 })]], n: 220, size: 1, tilt: 1 }),
+  strawberries: () => {
+    const berry = new THREE.SphereGeometry(0.16, 16, 12); berry.scale(1, 1.25, 1);
+    return { parts: [[berry, phys('#e8283c', { roughness: 0.3 })], [new THREE.ConeGeometry(0.12, 0.08, 6), std('#3fae4a')]], n: 230, size: 1, tilt: 1.2 };
+  },
+  sand: () => ({ parts: [[new THREE.SphereGeometry(0.16, 10, 8), std('#e8c27a', { roughness: 1 })], [new THREE.CylinderGeometry(0.17, 0.17, 0.045, 24), std('#ffcc3a', { metalness: 1, roughness: 0.22 })]], n: 260, size: 1, tilt: 1.5 }),
+  wood: () => ({ parts: [[new THREE.CylinderGeometry(0.09, 0.09, 0.5, 10), std('#8a5a2c', { roughness: 0.85 })]], n: 170, size: 1, tilt: 3 }),
+};
+
+function buildFilling(kind, r) {
+  const spec = (FILL[kind] || FILL.coins)();
+  const grp = new THREE.Group();
+  const counts = spec.parts.map(() => 0);
+  const per = Math.ceil(spec.n / spec.parts.length);
+  const inst = spec.parts.map(([g, m]) => { const im = new THREE.InstancedMesh(g, m, per); im.castShadow = true; im.receiveShadow = true; grp.add(im); return im; });
+  const dummy = new THREE.Object3D();
+  const ix = CW / 2 - T - 0.12, iz = CD / 2 - T - 0.12;
+  for (let i = 0; i < spec.n; i++) {
+    const k = i % spec.parts.length;
+    const x = (r() * 2 - 1) * ix, z = (r() * 2 - 1) * iz;
+    const mound = Math.cos((x / ix) * Math.PI / 2) * Math.cos((z / iz) * Math.PI / 2);
+    const y = 0.95 + mound * 0.62 + r() * 0.16;
+    dummy.position.set(x, y, z);
+    dummy.rotation.set((r() - 0.5) * spec.tilt, r() * Math.PI * 2, (r() - 0.5) * spec.tilt);
+    const s = spec.size * (0.85 + r() * 0.3); dummy.scale.set(s, s, s);
+    dummy.updateMatrix();
+    inst[k].setMatrixAt(counts[k]++, dummy.matrix);
+  }
+  inst.forEach((im, k) => { im.count = counts[k]; im.instanceMatrix.needsUpdate = true; });
+  return grp;
+}
+
+// --------------------------------------------------------------- аура
+function ringCurve(r, radius, y0, y1, turns, jitter = 0.25, back = false) {
+  // back: дуга только по задней половине (z < 0) — не закрывает героев.
+  const pts = []; const a0 = back ? Math.PI * (0.92 + r() * 0.2) : r() * Math.PI * 2;
+  for (let i = 0; i <= 40; i++) {
+    const t = i / 40, a = a0 + t * Math.PI * 2 * turns;
+    const rr = radius * (1 + (r() - 0.5) * jitter * 0.3);
+    pts.push(new THREE.Vector3(Math.cos(a) * rr * 1.25, y0 + (y1 - y0) * t + Math.sin(t * 9) * 0.12, Math.sin(a) * rr * 0.8));
+  }
+  return new THREE.CatmullRomCurve3(pts);
+}
+
+function buildAura(kind, theme, r) {
+  const g = new THREE.Group();
+  const acc = theme.accent;
+  const around = (n, fn) => { for (let i = 0; i < n; i++) { const a = r() * Math.PI * 2, rr = 2.6 + r() * 1.3; fn(Math.cos(a) * rr * 1.15, 0.2 + r() * 3.4, Math.sin(a) * rr * 0.7 - 0.3, i); } };
+  switch (kind) {
+    case 'fire':
+      for (let i = 0; i < 7; i++) g.add(new THREE.Mesh(new THREE.TubeGeometry(ringCurve(r, 2.45 + r() * 0.35, 0.3 + r() * 0.7, 2.4 + r() * 1.6, 0.42 + r() * 0.1, 0.2, true), 120, 0.018 + r() * 0.025, 8), glow(i % 3 ? '#ff6a1a' : '#ffc24a', 1.6)));
+      around(40, (x, y, z) => { const s = sprite(softTex, r() < 0.5 ? '#ff5a1f' : '#ffb03a', 0.08 + r() * 0.18, 0.95); s.position.set(x, y, z); g.add(s); });
+      break;
+    case 'lightning':
+      for (let i = 0; i < 9; i++) {
+        const a = (i / 9) * Math.PI * 2 + r() * 0.4; const pts = [];
+        let x = Math.cos(a) * 2.9, z = Math.sin(a) * 1.6 - 0.3, y = 0.3 + r() * 2.2;
+        for (let j = 0; j < 7; j++) { pts.push(new THREE.Vector3(x, y, z)); x += Math.cos(a) * 0.25 + (r() - 0.5) * 0.4; y += (r() - 0.35) * 0.55; z += Math.sin(a) * 0.15 + (r() - 0.5) * 0.3; }
+        g.add(new THREE.Mesh(new THREE.TubeGeometry(new THREE.CatmullRomCurve3(pts, false, 'catmullrom', 0), 60, 0.02, 6), glow(i % 2 ? '#fff4a0' : acc, 1.8)));
+      }
+      around(26, (x, y, z) => { const s = sprite(softTex, '#fff4a0', 0.06 + r() * 0.14, 0.9); s.position.set(x, y, z); g.add(s); });
+      break;
+    case 'sparkle':
+      around(36, (x, y, z) => { const s = sprite(starTex, r() < 0.6 ? acc : '#ffffff', 0.3 + r() * 0.6, 0.95); s.position.set(x, y, z); g.add(s); });
+      for (let i = 0; i < 14; i++) { const c = mesh(new THREE.CylinderGeometry(0.17, 0.17, 0.045, 24), std('#ffcc3a', { metalness: 1, roughness: 0.2 })); const a = r() * Math.PI * 2; c.position.set(Math.cos(a) * (2.4 + r()), 1.4 + r() * 2.2, Math.sin(a) * 1.2); c.rotation.set(r() * 3, r() * 3, r() * 3); g.add(c); }
+      break;
+    case 'dust': case 'stars':
+      around(34, (x, y, z) => { const s = sprite(kind === 'stars' ? starTex : softTex, kind === 'stars' ? '#ffffff' : acc, 0.06 + r() * 0.16, 0.9); s.position.set(x, y, z); g.add(s); });
+      break;
+    case 'smoke':
+      for (let i = 0; i < 70; i++) { const a = r() * Math.PI * 2, rr = 1.9 + r() * 1.8; const s = sprite(softTex, r() < 0.5 ? '#5a5f69' : '#3a3e46', 1.2 + r() * 1.6, 0.55, false); s.position.set(Math.cos(a) * rr * 1.2, r() * 2.2, Math.sin(a) * rr * 0.8 - 0.4); g.add(s); }
+      break;
+    case 'bubbles':
+      around(38, (x, y, z) => { const b = mesh(new THREE.SphereGeometry(0.08 + r() * 0.16, 20, 14), phys(acc, { transparent: true, opacity: 0.35, roughness: 0, clearcoat: 1, emissive: col(acc), emissiveIntensity: 0.4 })); b.position.set(x, y, z); g.add(b); });
+      break;
+    case 'confetti':
+      around(90, (x, y, z) => { const c = mesh(new THREE.PlaneGeometry(0.14, 0.07), new THREE.MeshStandardMaterial({ color: col(['#ff4f8b', '#4fe3ff', '#ffd84d', '#9b6bff', '#5ed36a'][(r() * 5) | 0]), side: THREE.DoubleSide, emissive: col('#222') })); c.position.set(x, y, z); c.rotation.set(r() * 6, r() * 6, r() * 6); g.add(c); });
+      break;
+    case 'crystal':
+      for (let i = 0; i < 16; i++) {
+        const a = Math.PI * (0.1 + r() * 0.8) * (r() < 0.5 ? 1 : -1) + Math.PI / 2 * 0; const side = r() < 0.5 ? -1 : 1;
+        const cr = mesh(new THREE.OctahedronGeometry(0.3 + r() * 0.35).scale(0.55, 1.8, 0.55), phys(r() < 0.5 ? '#b79dff' : '#e6dcff', { emissive: col('#7a4dff'), emissiveIntensity: 0.5, roughness: 0.05 }));
+        cr.position.set(side * (2.4 + r() * 0.9), 0.3 + r() * 0.8, -1.3 + r() * 2.2); cr.rotation.set((r() - 0.5) * 0.8, r() * 3, side * -(0.2 + r() * 0.4)); g.add(cr);
+      }
+      around(20, (x, y, z) => { const s = sprite(starTex, '#d8c8ff', 0.3 + r() * 0.4, 0.9); s.position.set(x, y, z); g.add(s); });
+      break;
+    case 'snow':
+      around(60, (x, y, z) => { const s = sprite(r() < 0.5 ? starTex : softTex, '#e8f8ff', 0.08 + r() * 0.2, 0.9); s.position.set(x, y, z); g.add(s); });
+      for (let i = 0; i < 10; i++) { const side = r() < 0.5 ? -1 : 1; const ic = mesh(rbox(0.3, 0.3, 0.3, 0.05), phys('#bfe8ff', { transparent: true, opacity: 0.8, roughness: 0.05 })); ic.position.set(side * (2.5 + r() * 0.6), 0.15, -1 + r() * 2.2); ic.rotation.y = r() * 3; g.add(ic); }
+      break;
+    case 'leaves':
+      for (let i = 0; i < 5; i++) g.add(new THREE.Mesh(new THREE.TubeGeometry(ringCurve(r, 2.9 + r() * 0.4, 0, 2.6 + r(), 0.45, 0.25, true), 100, 0.05, 8), std('#3fae4a', { roughness: 0.6 })));
+      around(26, (x, y, z) => { const b = new THREE.SphereGeometry(0.2, 16, 12); b.scale(1, 1.25, 1); const s = mesh(b, phys('#e8283c', { roughness: 0.3 })); s.position.set(x, y, z); g.add(s); });
+      around(30, (x, y, z) => { const l = mesh(new THREE.CircleGeometry(0.16, 12).scale(1.6, 0.8, 1), new THREE.MeshStandardMaterial({ color: col('#3fae4a'), side: THREE.DoubleSide })); l.position.set(x, y, z); l.rotation.set(r() * 6, r() * 6, r() * 6); g.add(l); });
+      break;
+    default: break;
+  }
+  return g;
+}
+
+// --------------------------------------------------------------- сцена
+async function renderCase(spec) {
+  const r = rng(spec.code);
+  const scene = new THREE.Scene();
+  scene.background = new THREE.Color(BG);
+
+  const cam = new THREE.PerspectiveCamera(30, W / H, 0.1, 100);
+  cam.position.set(0, 6.3, 12.8);
+  cam.lookAt(0, 1.55, 0);
+
+  scene.add(new THREE.HemisphereLight(0xdfe8ff, 0x1a1410, 0.55));
+  const key = new THREE.DirectionalLight(0xfff2e0, 2.0);
+  key.position.set(3.5, 7, 6); key.castShadow = true; key.shadow.mapSize.set(2048, 2048);
+  Object.assign(key.shadow.camera, { left: -5, right: 5, top: 5, bottom: -5 }); key.shadow.bias = -0.0005;
+  scene.add(key);
+  const fill = new THREE.DirectionalLight(0xbfd0ff, 0.45); fill.position.set(-5, 3, 4); scene.add(fill);
+  const rim = new THREE.DirectionalLight(col(spec.theme.accent), 1.6); rim.position.set(0, 4, -6); scene.add(rim);
+
+  // мягкая тень под кейсом
+  const shadow = new THREE.Mesh(new THREE.PlaneGeometry(9, 5), new THREE.MeshBasicMaterial({ map: softTex, color: 0x000000, transparent: true, opacity: 0.85, depthWrite: false }));
+  shadow.rotation.x = -Math.PI / 2; shadow.position.y = -0.03; scene.add(shadow);
+  const halo = sprite(softTex, spec.theme.accent, 8, 0.16, false); halo.position.set(0, 1.9, -2.2); scene.add(halo);
+
+  const model = new THREE.Group();
+  model.add(buildCase(spec.theme, r));
+  model.add(buildFilling(spec.theme.filling, r));
+  model.rotation.y = -0.2; // лёгкий ракурс 3/4, как у кейсов на референсе
+  scene.add(model);
+  scene.add(buildAura(spec.theme.aura, spec.theme, r));
+
+  // герои: главный по центру, второй левее и чуть глубже
+  const heroes = spec.heroes.filter(Boolean);
+  const main = heroes[0] && await imagePlane(heroes[0], 2.75, 2.9);
+  const second = heroes[1] && await imagePlane(heroes[1], 2.2, 2.1);
+  if (main) { main.position.set(second ? 0.55 : 0, 1.0, 0.15); scene.add(main); }
+  if (second) { second.position.set(-1.05, 1.05, -0.35); scene.add(second); }
+  for (const p of [main, second]) if (p) p.lookAt(cam.position.x * 0.3, p.position.y + 1, cam.position.z);
+
+  const composer = new EffectComposer(renderer);
+  composer.addPass(new RenderPass(scene, cam));
+  composer.addPass(new UnrealBloomPass(new THREE.Vector2(W, H), 0.55, 0.35, 0.96));
+  composer.addPass(new OutputPass());
+  composer.render();
+  const url = renderer.domElement.toDataURL('image/png');
+  composer.dispose();
+  scene.traverse((o) => { if (o.geometry) o.geometry.dispose(); });
+  return url;
+}
+window.renderCase = renderCase;
+window.ready = true;
+</script>
+</body>
+</html>
