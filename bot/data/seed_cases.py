@@ -22,7 +22,7 @@ from dataclasses import dataclass, field
 from bot.data.brainrot_roster import ROSTER_BY_NAME
 from bot.database.models import CaseCategory
 
-CASES_CONTENT_VERSION = "7-secret-og-from-screenshots"
+CASES_CONTENT_VERSION = "9-chest-models"
 
 TARGET_RTP = 0.9
 
@@ -40,7 +40,7 @@ class CaseTheme:
 
     tagline: str
     lore: str
-    shape: str  # силуэт артефакта кейса: plate | flask | drum | lantern | bolt | vault | anvil | crown
+    shape: str  # скин модели кейса-сундука: crate | crypt | hazmat | vault | forge | sunken | gift | royal
     particles: str  # эффект сцены: steam | bubbles | beats | wisps | sparks | dust | embers | prism
     colors: tuple[str, str, str]  # основной, акцент, глубина фона
 
@@ -101,7 +101,7 @@ SEED_CASES: list[SeedCase] = [
         CaseTheme(
             tagline="Фастфуд, десерты и Ginger Gerat на дне кастрюли",
             lore="Вся еда Secret-тира: бургеры, пицца, попкорн, панкейки и торт Sammyni Cakini.",
-            shape="plate", particles="steam", colors=("#ff5a3c", "#ffd36b", "#2a0d08"),
+            shape="crate", particles="steam", colors=("#ff5a3c", "#ffd36b", "#2a0d08"),
         ),
         ["Burguro And Fryuro", "Pizza and Ranch", "Popcuru and Fizzuru", "La Food Combinasion",
          "Fragrama and Chocrama", "Cooki and Milki", "Quackini Snackini", "La Breakfast Combinasion",
@@ -110,19 +110,19 @@ SEED_CASES: list[SeedCase] = [
     _case(
         CaseCategory.STARTER, "ghost_lantern", "Фонарь Призраков", 2,
         CaseTheme(
-            tagline="Что-то светится в темноте. И это Kraken.",
+            tagline="В La Casa Boo снова горит свет",
             lore="Хэллоуинская ночь: La Casa Boo, Spooky and Pumpky, Foxini Lanternini и Cerberus у ворот.",
-            shape="lantern", particles="wisps", colors=("#b86bff", "#ff7ad9", "#12061f"),
+            shape="crypt", particles="wisps", colors=("#b86bff", "#ff7ad9", "#12061f"),
         ),
         ["Garama and Madundung", "Spooky and Pumpky", "Cerberus", "Duggy Bros", "Dug dug dug",
-         "Foxini Lanternini", "Venuspino", "La Casa Boo", "Kraken"],
+         "Foxini Lanternini", "Venuspino", "La Casa Boo"],
     ),
     _case(
         CaseCategory.STARTER, "hybrid_lab", "Гибрид-Лаб", 3,
         CaseTheme(
             tagline="Скрещено. Не проверено. Elefanto Frigo сбежал.",
             lore="Техника, растения и роботы: Bumbatron, Digi Narwhal, Venuspino и холодильник-слон.",
-            shape="flask", particles="bubbles", colors=("#7dff4a", "#18e0c8", "#06170c"),
+            shape="hazmat", particles="bubbles", colors=("#7dff4a", "#18e0c8", "#06170c"),
         ),
         ["Cash or Card", "Globa Steppa", "Quackini Snackini", "Venuspino", "Bumbatron",
          "Tirilikalika Tirilikalako", "Digi Narwhal", "Elefanto Frigo"],
@@ -144,7 +144,7 @@ SEED_CASES: list[SeedCase] = [
         CaseTheme(
             tagline="Куётся в огне. Выпадает в пламени.",
             lore="Крылатые и огнедышащие: все драконы-каннеллони, Griffin и Arcadragon на наковальне.",
-            shape="anvil", particles="embers", colors=("#ff3d1f", "#ffb02e", "#1a0400"),
+            shape="forge", particles="embers", colors=("#ff3d1f", "#ffb02e", "#1a0400"),
         ),
         ["Celestial Pegasus", "Cerberus", "Dragon Cannelloni", "Hydra Dragon Cannelloni",
          "Dragon Aquanini", "Dragon Gingerini", "Griffin", "Arcadragon"],
@@ -154,7 +154,7 @@ SEED_CASES: list[SeedCase] = [
         CaseTheme(
             tagline="Шесть морских секретов. Kraken не спит.",
             lore="Спуск на дно: Capitano Moby, Jelly Moby, Moby Bros, Digi Narwhal и Fishino Clownino.",
-            shape="porthole", particles="bubbles", colors=("#1fb6ff", "#5dfff0", "#020c1f"),
+            shape="sunken", particles="bubbles", colors=("#1fb6ff", "#5dfff0", "#020c1f"),
         ),
         ["Capitano Moby", "Jelly Moby", "Moby Bros", "Digi Narwhal", "Fishino Clownino", "Kraken"],
     ),
@@ -163,7 +163,7 @@ SEED_CASES: list[SeedCase] = [
         CaseTheme(
             tagline="Праздник каждый день. Love Love Bear — в конфетти.",
             lore="Все праздники Steal a Brainrot: день рождения, Рождество, Пасха и День святого Валентина.",
-            shape="popper", particles="confetti", colors=("#ff4f8b", "#4fe3ff", "#1a0612"),
+            shape="gift", particles="confetti", colors=("#ff4f8b", "#4fe3ff", "#1a0612"),
         ),
         ["Sammyni Fattini", "Reinito Sleighito", "Rosey and Teddy", "Bunny and Eggy",
          "Sammyni Cakini", "Hydra Bunny", "Kalika Bros", "Love Love Bear"],
@@ -174,7 +174,7 @@ SEED_CASES: list[SeedCase] = [
         CaseTheme(
             tagline="Четыре короны. Один трон.",
             lore="Единственный кейс с OG-тиром: Skibidi Toilet, John Pork, Meowl и Strawberry Elephant.",
-            shape="crown", particles="prism", colors=("#ff4fd8", "#ffd84d", "#10061a"),
+            shape="royal", particles="prism", colors=("#ff4fd8", "#ffd84d", "#10061a"),
         ),
         ["Antonio", "Griffin", "Love Love Bear", "Arcadragon", "Elefanto Frigo", "Skibidi Toilet",
          "John Pork", "Meowl", "Signore Carapace", "Strawberry Elephant"],

@@ -1,9 +1,10 @@
 /* Визуальные темы кейсов Brainrot Battle.
  *
- * Каждый кейс — «артефакт» со своим силуэтом (тарелка, фонарь, колба,
- * сейф, наковальня, иллюминатор, хлопушка, корона), нарисованный здесь
- * в SVG. Внутри артефакта — официальный рендер самого дорогого брейнрота
- * кейса (реальный ассет, не рисунок). Сами брейнроты здесь НЕ рисуются.
+ * Каждый кейс — модель открытого сундука со своей тематикой (деревянный
+ * ящик Нонны, склеп, хим-контейнер, сейф, кованый сундук, затонувший,
+ * подарок, королевский ларец), нарисованная здесь в SVG. Внутри —
+ * официальный рендер самого дорогого брейнрота кейса (реальный ассет, не
+ * рисунок). Сами брейнроты здесь НЕ рисуются.
  *
  * API:
  *   CaseArt.artifact(caseJson, extraClass) -> HTML
@@ -12,186 +13,145 @@
 (function () {
   let uid = 0;
 
-  // Каждая форма: back (под брейнротом) и front (поверх него). a/b/c — цвета темы.
-  const SHAPES = {
-    plate(id, [a, b, c]) {
-      return {
-        back: `
-          <defs>
-            <pattern id="${id}g" width="16" height="16" patternUnits="userSpaceOnUse" patternTransform="rotate(12)">
-              <rect width="16" height="16" fill="#fff4e0"/>
-              <rect width="8" height="16" fill="${a}" opacity=".55"/>
-              <rect width="16" height="8" fill="${a}" opacity=".55"/>
-            </pattern>
-            <radialGradient id="${id}r" cx="50%" cy="42%" r="60%">
-              <stop offset="0" stop-color="${b}" stop-opacity=".9"/>
-              <stop offset=".55" stop-color="${a}" stop-opacity=".35"/>
-              <stop offset="1" stop-color="${c}"/>
-            </radialGradient>
-          </defs>
-          <ellipse cx="100" cy="112" rx="94" ry="78" fill="${c}" opacity=".6"/>
-          <circle cx="100" cy="104" r="88" fill="url(#${id}g)"/>
-          <circle cx="100" cy="104" r="88" fill="none" stroke="${a}" stroke-width="3"/>
-          <circle cx="100" cy="104" r="64" fill="url(#${id}r)" stroke="#fff4e0" stroke-width="5"/>`,
-        front: `<path d="M34 70 A74 74 0 0 1 120 32" fill="none" stroke="#fff" stroke-width="5" stroke-linecap="round" opacity=".45"/>`,
-      };
+  /* ------------------------------------------------------------------
+   * Модель кейса — открытый сундук в псевдо-3D (крышка откинута назад,
+   * брейнрот «сидит» внутри и выглядывает из проёма). Геометрия общая,
+   * тематику задаёт скин: материал корпуса, окантовка, узор, эмблема на
+   * замке, свечение изнутри и декор вокруг.
+   * viewBox 0..200. Проём — y≈96..112, передняя стенка — y 112..188.
+   * ------------------------------------------------------------------ */
+
+  const EMBLEMS = {
+    pizza: (c) => `<path d="M-11 -9 L11 -9 L0 13 Z" fill="#ffcf5a" stroke="${c}" stroke-width="2" stroke-linejoin="round"/>
+      <path d="M-11 -9 Q0 -14 11 -9" fill="none" stroke="#c9772f" stroke-width="4" stroke-linecap="round"/>
+      <circle cx="-3" cy="-3" r="2.4" fill="#d8352a"/><circle cx="4" cy="-2" r="2.4" fill="#d8352a"/><circle cx="0" cy="5" r="2" fill="#d8352a"/>`,
+    pumpkin: () => `<ellipse cx="0" cy="2" rx="13" ry="10" fill="#ff8a1f"/><ellipse cx="0" cy="2" rx="5" ry="10" fill="#ff9d3c"/>
+      <rect x="-1.5" y="-12" width="3" height="5" rx="1" fill="#3f8a2b"/>
+      <path d="M-7 -1 L-3 -1 L-5 -5 Z M3 -1 L7 -1 L5 -5 Z" fill="#2a0c00"/><path d="M-7 5 Q0 10 7 5 L4 6 L2 4 L0 6 L-2 4 L-4 6 Z" fill="#2a0c00"/>`,
+    biohazard: (c) => `<circle r="13" fill="#11160a"/><g fill="${c}"><circle cx="0" cy="-6" r="5"/><circle cx="-5.5" cy="3.5" r="5"/><circle cx="5.5" cy="3.5" r="5"/></g>
+      <circle r="3.5" fill="#11160a"/><circle r="1.6" fill="${c}"/>`,
+    dial: (c) => `<circle r="13" fill="#1a1405" stroke="${c}" stroke-width="2"/>
+      ${Array.from({ length: 12 }, (_, i) => `<line x1="0" y1="-11" x2="0" y2="-8" stroke="${c}" stroke-width="1.5" transform="rotate(${i * 30})"/>`).join('')}
+      <circle r="5" fill="${c}"/><line x1="0" y1="0" x2="0" y2="-9" stroke="#1a1405" stroke-width="2" transform="rotate(35)"/>`,
+    flame: () => `<path d="M0 -14 C8 -6 11 0 8 7 C6 12 -6 12 -8 7 C-10 1 -6 -3 -3 -6 C-3 -1 0 1 2 -1 C3 -5 1 -9 0 -14 Z" fill="#ff5a1f"/>
+      <path d="M0 -3 C4 1 5 4 3 8 C1 10 -3 10 -4 7 C-5 4 -2 2 0 -3 Z" fill="#ffd34a"/>`,
+    anchor: (c) => `<g fill="none" stroke="${c}" stroke-width="3" stroke-linecap="round"><circle cx="0" cy="-9" r="3"/><line x1="0" y1="-6" x2="0" y2="11"/>
+      <line x1="-6" y1="-2" x2="6" y2="-2"/><path d="M-10 4 Q-8 11 0 11 Q8 11 10 4"/></g>`,
+    star: () => `<path d="M0 -13 L3.8 -4 L13 -4 L5.6 1.8 L8.4 11 L0 5.4 L-8.4 11 L-5.6 1.8 L-13 -4 L-3.8 -4 Z" fill="#fff36b" stroke="#ff4f8b" stroke-width="1.5"/>`,
+    crown: () => `<path d="M-12 7 L-12 -6 L-6 0 L0 -10 L6 0 L12 -6 L12 7 Z" fill="#ffd84d" stroke="#fff6c4" stroke-width="1.2"/>
+      <circle cx="0" cy="2" r="2.6" fill="#ff4fd8"/><circle cx="-7" cy="3" r="1.8" fill="#7cf3ff"/><circle cx="7" cy="3" r="1.8" fill="#7cf3ff"/>`,
+  };
+
+  // Скины: body (светлый/тёмный), trim (окантовка), lidIn (внутренняя сторона крышки),
+  // glow (свечение изнутри), emblem, pattern(id) → узор передней стенки, deco → декор.
+  const SKINS = {
+    crate: {
+      body: ['#b46a3a', '#6b3518'], trim: '#3a1d0c', lidIn: '#4a250f', glow: '#ffd36b', emblem: 'pizza', plate: '#fff4e0',
+      pattern: () => `<g stroke="#5a2c12" stroke-width="2" opacity=".7"><line x1="30" y1="137" x2="170" y2="137"/><line x1="30" y1="162" x2="170" y2="162"/></g>
+        <g stroke="#e0935a" stroke-width="1" opacity=".35"><path d="M40 124 q20 3 40 0 t40 0"/><path d="M60 150 q20 3 40 0 t40 0"/><path d="M36 176 q20 3 40 0 t40 0"/></g>`,
+      frontDeco: (id) => `<defs><pattern id="${id}gh" width="10" height="10" patternUnits="userSpaceOnUse"><rect width="10" height="10" fill="#fff"/><rect width="5" height="10" fill="#e8372a" opacity=".75"/><rect width="10" height="5" fill="#e8372a" opacity=".75"/></pattern></defs>
+        <path d="M24 108 L176 108 L176 122 Q166 132 156 122 Q146 132 136 122 Q126 132 116 122 Q106 132 96 122 Q86 132 76 122 Q66 132 56 122 Q46 132 36 122 Q30 128 24 122 Z" fill="url(#${id}gh)" stroke="#b3241b" stroke-width="1.5"/>`,
     },
-    lantern(id, [a, b, c]) {
-      return {
-        back: `
-          <defs>
-            <radialGradient id="${id}l" cx="50%" cy="55%" r="55%">
-              <stop offset="0" stop-color="${b}" stop-opacity=".95"/>
-              <stop offset=".5" stop-color="${a}" stop-opacity=".55"/>
-              <stop offset="1" stop-color="${c}" stop-opacity=".95"/>
-            </radialGradient>
-          </defs>
-          <circle cx="100" cy="112" r="92" fill="${a}" opacity=".18" class="art-pulse"/>
-          <path d="M84 20 a16 16 0 0 1 32 0" fill="none" stroke="${b}" stroke-width="5"/>
-          <path d="M62 44 L138 44 L128 26 L72 26 Z" fill="${c}" stroke="${a}" stroke-width="3"/>
-          <rect x="48" y="44" width="104" height="132" rx="18" fill="url(#${id}l)" stroke="${a}" stroke-width="4"/>`,
-        front: `
-          <g stroke="${c}" stroke-width="4" opacity=".7">
-            <line x1="82" y1="46" x2="82" y2="174"/><line x1="118" y1="46" x2="118" y2="174"/>
-          </g>
-          <path d="M56 176 L144 176 L136 192 L64 192 Z" fill="${c}" stroke="${a}" stroke-width="3"/>
-          <rect x="56" y="52" width="10" height="70" rx="5" fill="#fff" opacity=".25"/>`,
-      };
+    crypt: {
+      body: ['#4a2a6e', '#1c0d2e'], trim: '#0c0614', lidIn: '#140a22', glow: '#c37bff', emblem: 'pumpkin', plate: '#2a1740',
+      pattern: () => `<g fill="none" stroke="#7a4cb0" stroke-width="1.5" opacity=".6"><path d="M50 184 L50 150 Q50 132 64 132 Q78 132 78 150 L78 184"/><path d="M122 184 L122 150 Q122 132 136 132 Q150 132 150 150 L150 184"/></g>`,
+      backDeco: () => `<g fill="#1c0d2e"><path d="M22 58 q10 -8 20 0 q-4 -10 6 -14 q-10 2 -14 -6 q-2 10 -12 8 q8 4 0 12 z" opacity=".9"/><path d="M160 36 q9 -7 18 0 q-3 -9 5 -12 q-9 2 -12 -5 q-2 9 -11 7 q7 4 0 10 z" opacity=".9"/></g>`,
+      frontDeco: () => `<g fill="#0c0614"><path d="M26 112 L30 96 L34 112 Z"/><path d="M166 112 L170 96 L174 112 Z"/></g>
+        <g><rect x="176" y="150" width="6" height="30" rx="2" fill="#f4ecd8"/><path d="M179 150 q-4 -8 0 -14 q4 6 0 14" fill="#ffb13b" class="art-flicker"/></g>`,
     },
-    flask(id, [a, b, c]) {
-      const body = 'M82 18 L118 18 L118 70 L168 170 Q172 188 152 188 L48 188 Q28 188 32 170 L82 70 Z';
-      return {
-        back: `
-          <defs>
-            <clipPath id="${id}c"><path d="${body}"/></clipPath>
-            <linearGradient id="${id}f" x1="0" y1="0" x2="0" y2="1">
-              <stop offset="0" stop-color="${b}"/><stop offset="1" stop-color="${a}"/>
-            </linearGradient>
-          </defs>
-          <path d="${body}" fill="${c}" opacity=".85"/>
-          <g clip-path="url(#${id}c)">
-            <path class="art-wave" d="M0 120 Q25 110 50 120 T100 120 T150 120 T200 120 T250 120 V200 H0 Z" fill="url(#${id}f)" opacity=".85"/>
-          </g>`,
-        front: `
-          <path d="${body}" fill="none" stroke="${b}" stroke-width="4" opacity=".9"/>
-          <rect x="76" y="12" width="48" height="10" rx="5" fill="${b}"/>
-          <path d="M92 78 L52 160" stroke="#fff" stroke-width="6" stroke-linecap="round" opacity=".3"/>`,
-      };
+    hazmat: {
+      body: ['#dfe6ea', '#7f8c95'], trim: '#2b3238', lidIn: '#3a454d', glow: '#7dff4a', emblem: 'biohazard', plate: '#11160a',
+      pattern: (id) => `<defs><pattern id="${id}hz" width="14" height="14" patternUnits="userSpaceOnUse" patternTransform="rotate(45)"><rect width="14" height="14" fill="#ffd21f"/><rect width="7" height="14" fill="#15181a"/></pattern></defs>
+        <rect x="30" y="170" width="140" height="12" fill="url(#${id}hz)"/>
+        <rect x="44" y="122" width="40" height="22" rx="4" fill="#0d2a12" stroke="#2b3238" stroke-width="2"/><rect x="47" y="125" width="34" height="16" rx="3" fill="#7dff4a" opacity=".35" class="art-pulse"/>`,
+      frontDeco: () => `<g fill="#9dff6b" opacity=".85"><path d="M150 112 q3 10 0 16 q-4 4 -4 -3 q0 -8 4 -13 z"/><path d="M66 112 q2 6 0 10 q-3 3 -3 -2 q0 -5 3 -8 z"/></g>`,
     },
-    vault(id, [a, b, c]) {
-      const bolts = Array.from({ length: 12 }, (_, i) => {
-        const t = (i / 12) * Math.PI * 2;
-        return `<circle cx="${100 + Math.cos(t) * 80}" cy="${104 + Math.sin(t) * 80}" r="5" fill="${b}"/>`;
-      }).join('');
-      const ticks = Array.from({ length: 36 }, (_, i) => {
-        const t = (i / 36) * Math.PI * 2;
-        const r1 = 62, r2 = i % 3 ? 66 : 70;
-        return `<line x1="${100 + Math.cos(t) * r1}" y1="${104 + Math.sin(t) * r1}" x2="${100 + Math.cos(t) * r2}" y2="${104 + Math.sin(t) * r2}"/>`;
-      }).join('');
-      return {
-        back: `
-          <defs>
-            <radialGradient id="${id}v" cx="40%" cy="35%" r="75%">
-              <stop offset="0" stop-color="${b}"/><stop offset=".45" stop-color="${a}"/><stop offset="1" stop-color="${c}"/>
-            </radialGradient>
-          </defs>
-          <circle cx="100" cy="104" r="94" fill="url(#${id}v)"/>
-          <circle cx="100" cy="104" r="94" fill="none" stroke="${c}" stroke-width="4" opacity=".6"/>
-          ${bolts}
-          <g class="art-spin" style="transform-origin:100px 104px" stroke="${c}" stroke-width="2">${ticks}</g>
-          <circle cx="100" cy="104" r="58" fill="${c}" opacity=".88"/>`,
-        front: `<path d="M40 64 A70 70 0 0 1 96 30" fill="none" stroke="#fff" stroke-width="4" stroke-linecap="round" opacity=".5"/>`,
-      };
+    vault: {
+      body: ['#2b2616', '#0f0c05'], trim: '#ffc94a', lidIn: '#1a1506', glow: '#ffe28a', emblem: 'dial', plate: '#1a1405',
+      pattern: () => `<g stroke="#ffc94a" stroke-width="1" opacity=".22">${Array.from({ length: 7 }, (_, i) => `<line x1="${30 + i * 24}" y1="112" x2="${54 + i * 24 - 24}" y2="188"/>`).join('')}</g>
+        <g stroke="#ffc94a" stroke-width="3" fill="none"><rect x="36" y="118" width="128" height="64" rx="6" opacity=".5"/></g>`,
+      frontDeco: () => `<g>${[[40, 190], [58, 194], [150, 192], [166, 188], [132, 196]].map(([x, y], i) => `<ellipse cx="${x}" cy="${y}" rx="9" ry="4" fill="#ffc94a" stroke="#a87a12" stroke-width="1.2" transform="rotate(${i % 2 ? 12 : -10} ${x} ${y})"/>`).join('')}</g>
+        <g fill="#ffc94a"><ellipse cx="72" cy="100" rx="8" ry="3.5"/><ellipse cx="128" cy="101" rx="8" ry="3.5"/></g>`,
     },
-    anvil(id, [a, b, c]) {
-      return {
-        back: `
-          <defs>
-            <radialGradient id="${id}h" cx="50%" cy="70%" r="60%">
-              <stop offset="0" stop-color="${b}"/><stop offset=".5" stop-color="${a}" stop-opacity=".7"/><stop offset="1" stop-color="${c}" stop-opacity="0"/>
-            </radialGradient>
-          </defs>
-          <ellipse cx="100" cy="120" rx="96" ry="86" fill="url(#${id}h)"/>
-          <g class="art-flame" fill="${a}" opacity=".8">
-            <path d="M60 150 Q48 96 76 70 Q72 104 92 112 Q86 70 112 40 Q112 90 132 100 Q134 78 146 70 Q164 110 140 150 Z"/>
-          </g>
-          <g class="art-flame art-flame-2" fill="${b}" opacity=".85">
-            <path d="M78 150 Q72 116 92 98 Q92 122 106 126 Q104 100 120 82 Q124 116 136 150 Z"/>
-          </g>`,
-        front: `
-          <path d="M34 150 L166 150 Q170 150 168 156 Q150 164 132 166 L128 178 L148 190 L52 190 L72 178 L68 166 Q40 162 30 156 Q28 150 34 150 Z"
-                fill="${c}" stroke="${a}" stroke-width="3"/>
-          <path d="M40 154 L160 154" stroke="${b}" stroke-width="3" opacity=".8"/>`,
-      };
+    forge: {
+      body: ['#3b3f47', '#15171b'], trim: '#0a0b0d', lidIn: '#1c1e22', glow: '#ff7a1f', emblem: 'flame', plate: '#1c1e22',
+      pattern: () => `<g fill="none" stroke="#ff6a1f" stroke-width="2.2" stroke-linecap="round" class="art-flicker"><path d="M52 118 l8 12 l-6 10 l10 14"/><path d="M142 124 l-6 10 l8 8 l-4 16"/><path d="M96 168 l8 6 l-2 10"/></g>
+        <g fill="#6c727d">${[[38, 120], [162, 120], [38, 180], [162, 180]].map(([x, y]) => `<circle cx="${x}" cy="${y}" r="3.5"/>`).join('')}</g>`,
+      backDeco: () => `<g class="art-flame" fill="#ff3d1f" opacity=".75"><path d="M30 118 Q22 80 44 60 Q42 88 58 94 Q54 64 76 40 Q78 76 92 86 L92 118 Z"/><path d="M170 118 Q178 80 156 60 Q158 88 142 94 Q146 64 124 40 Q122 76 108 86 L108 118 Z"/></g>`,
     },
-    porthole(id, [a, b, c]) {
-      const bolts = Array.from({ length: 8 }, (_, i) => {
-        const t = (i / 8) * Math.PI * 2 + Math.PI / 8;
-        return `<circle cx="${100 + Math.cos(t) * 84}" cy="${104 + Math.sin(t) * 84}" r="6" fill="${c}" stroke="${b}" stroke-width="2"/>`;
-      }).join('');
-      return {
-        back: `
-          <defs>
-            <radialGradient id="${id}w" cx="50%" cy="30%" r="80%">
-              <stop offset="0" stop-color="${b}" stop-opacity=".9"/><stop offset=".5" stop-color="${a}" stop-opacity=".7"/><stop offset="1" stop-color="${c}"/>
-            </radialGradient>
-          </defs>
-          <circle cx="100" cy="104" r="72" fill="url(#${id}w)"/>
-          <g class="art-rays" opacity=".35" fill="#fff">
-            <path d="M80 34 L92 34 L70 176 L50 176 Z"/><path d="M112 34 L122 34 L134 176 L116 176 Z"/>
-          </g>`,
-        front: `
-          <circle cx="100" cy="104" r="84" fill="none" stroke="${a}" stroke-width="22"/>
-          <circle cx="100" cy="104" r="84" fill="none" stroke="${b}" stroke-width="3" opacity=".7"/>
-          ${bolts}
-          <path d="M52 78 A56 56 0 0 1 88 48" fill="none" stroke="#fff" stroke-width="6" stroke-linecap="round" opacity=".45"/>`,
-      };
+    sunken: {
+      body: ['#2f7c7a', '#0f3534'], trim: '#1b2a24', lidIn: '#0f2a2a', glow: '#5dfff0', emblem: 'anchor', plate: '#0f3534',
+      pattern: () => `<g stroke="#0c2b2a" stroke-width="2" opacity=".8"><line x1="30" y1="137" x2="170" y2="137"/><line x1="30" y1="162" x2="170" y2="162"/></g>
+        <g fill="#d9e6d6" stroke="#8aa396" stroke-width="1">${[[46, 176, 5], [56, 181, 3.5], [150, 128, 4.5], [158, 134, 3], [140, 180, 4]].map(([x, y, r]) => `<circle cx="${x}" cy="${y}" r="${r}"/>`).join('')}</g>`,
+      frontDeco: () => `<g fill="none" stroke="#3fbf6a" stroke-width="4" stroke-linecap="round" class="art-sway"><path d="M24 192 q-8 -18 2 -32 q8 -12 0 -26"/><path d="M178 192 q8 -16 -2 -30 q-8 -12 2 -22"/></g>`,
     },
-    popper(id, [a, b, c]) {
-      const rays = Array.from({ length: 10 }, (_, i) => {
-        const t = -Math.PI * 0.95 + (i / 9) * Math.PI * 0.9;
-        return `<line x1="100" y1="120" x2="${100 + Math.cos(t) * 96}" y2="${120 + Math.sin(t) * 96}" stroke="${i % 2 ? a : b}"/>`;
-      }).join('');
-      return {
-        back: `
-          <circle cx="100" cy="104" r="90" fill="${c}" opacity=".7"/>
-          <g class="art-pulse" stroke-width="7" stroke-linecap="round" opacity=".75">${rays}</g>`,
-        front: `
-          <g transform="rotate(-24 100 170)">
-            <path d="M72 150 L128 150 L106 198 L94 198 Z" fill="${a}" stroke="#fff" stroke-width="2"/>
-            <path d="M80 164 L120 164 M86 178 L114 178" stroke="${b}" stroke-width="5"/>
-            <ellipse cx="100" cy="150" rx="28" ry="7" fill="${b}"/>
-          </g>`,
-      };
+    gift: {
+      body: ['#ff4f8b', '#a3124e'], trim: '#6a0a31', lidIn: '#7a0e3a', glow: '#fff36b', emblem: 'star', plate: '#4fe3ff',
+      pattern: () => `<rect x="90" y="112" width="20" height="76" fill="#4fe3ff"/><rect x="30" y="140" width="140" height="16" fill="#4fe3ff"/>
+        <g fill="#fff" opacity=".35">${[[48, 124], [140, 126], [62, 172], [150, 176], [128, 168]].map(([x, y]) => `<circle cx="${x}" cy="${y}" r="3"/>`).join('')}</g>`,
+      frontDeco: () => `<g fill="#4fe3ff" stroke="#1ea7c2" stroke-width="1.5"><path d="M46 118 Q24 96 22 112 Q22 126 46 118 Z"/><path d="M46 118 Q60 96 70 108 Q74 122 46 118 Z"/><circle cx="46" cy="118" r="5"/>
+        <path d="M44 122 L36 138 M48 122 L54 138" stroke-width="4" stroke-linecap="round"/></g>`,
     },
-    crown(id, [a, b, c]) {
-      return {
-        back: `
-          <defs>
-            <linearGradient id="${id}p" x1="0" y1="0" x2="1" y2="1">
-              <stop offset="0" stop-color="${a}"/><stop offset=".35" stop-color="#7cf3ff"/>
-              <stop offset=".65" stop-color="${b}"/><stop offset="1" stop-color="${a}"/>
-            </linearGradient>
-          </defs>
-          <polygon class="art-spin-slow" style="transform-origin:100px 110px" points="100,22 172,66 172,154 100,198 28,154 28,66" fill="url(#${id}p)" opacity=".85"/>
-          <polygon points="100,40 156,74 156,146 100,180 44,146 44,74" fill="${c}" opacity=".85"/>`,
-        front: `
-          <path d="M58 44 L70 10 L86 32 L100 4 L114 32 L130 10 L142 44 Z" fill="${b}" stroke="#fff" stroke-width="2"/>
-          <circle cx="100" cy="30" r="5" fill="${a}"/><circle cx="76" cy="34" r="4" fill="#7cf3ff"/><circle cx="124" cy="34" r="4" fill="#7cf3ff"/>`,
-      };
+    royal: {
+      body: ['#6a1f8f', '#2a0838'], trim: '#ffd84d', lidIn: '#3a0c4e', glow: '#ff9ef0', emblem: 'crown', plate: '#2a0838',
+      pattern: () => `<g stroke="#ffd84d" stroke-width="1" opacity=".28">${Array.from({ length: 6 }, (_, i) => `<line x1="${30 + i * 28}" y1="112" x2="${58 + i * 28}" y2="188"/><line x1="${58 + i * 28}" y1="112" x2="${30 + i * 28}" y2="188"/>`).join('')}</g>
+        <g>${[[52, 128, '#7cf3ff'], [148, 128, '#ff4fd8'], [52, 174, '#ff4fd8'], [148, 174, '#7cf3ff']].map(([x, y, c]) => `<path d="M${x} ${y - 6} L${x + 5} ${y} L${x} ${y + 6} L${x - 5} ${y} Z" fill="${c}" stroke="#fff" stroke-width=".8"/>`).join('')}</g>`,
+      lidDeco: () => `<path d="M80 46 L84 30 L92 40 L100 24 L108 40 L116 30 L120 46 Z" fill="#ffd84d" stroke="#fff6c4" stroke-width="1.2"/>`,
     },
   };
 
+  function chest(id, skinKey, colors) {
+    const s = SKINS[skinKey] || SKINS.vault;
+    const [light, dark] = s.body;
+    const back = `
+      <defs>
+        <linearGradient id="${id}b" x1="0" y1="0" x2="0" y2="1"><stop offset="0" stop-color="${light}"/><stop offset="1" stop-color="${dark}"/></linearGradient>
+        <linearGradient id="${id}l" x1="0" y1="1" x2="0" y2="0"><stop offset="0" stop-color="${s.lidIn}"/><stop offset="1" stop-color="${dark}"/></linearGradient>
+        <radialGradient id="${id}g" cx="50%" cy="70%" r="60%"><stop offset="0" stop-color="${s.glow}" stop-opacity=".95"/><stop offset=".45" stop-color="${colors[0]}" stop-opacity=".45"/><stop offset="1" stop-color="${colors[0]}" stop-opacity="0"/></radialGradient>
+      </defs>
+      <ellipse cx="100" cy="190" rx="84" ry="9" fill="#000" opacity=".45"/>
+      <ellipse cx="100" cy="92" rx="96" ry="86" fill="url(#${id}g)" class="art-pulse"/>
+      ${s.backDeco ? s.backDeco(id) : ''}
+      <!-- крышка, откинутая назад -->
+      <path d="M40 98 L160 98 L152 34 Q100 22 48 34 Z" fill="url(#${id}l)" stroke="${s.trim}" stroke-width="4" stroke-linejoin="round"/>
+      <path d="M48 34 Q100 22 152 34 L150 24 Q100 10 50 24 Z" fill="${dark}" stroke="${s.trim}" stroke-width="3" stroke-linejoin="round"/>
+      <path d="M52 92 L148 92 L142 42 Q100 32 58 42 Z" fill="none" stroke="${s.trim}" stroke-width="1.5" opacity=".5"/>
+      ${s.lidDeco ? s.lidDeco(id) : ''}
+      <!-- проём со свечением -->
+      <path d="M28 112 L172 112 L160 96 L40 96 Z" fill="${dark}" stroke="${s.trim}" stroke-width="3" stroke-linejoin="round"/>
+      <ellipse cx="100" cy="104" rx="58" ry="8" fill="${s.glow}" opacity=".85" class="art-pulse"/>
+      <path class="art-rays" d="M58 104 L30 20 L70 20 Z M100 104 L92 6 L108 6 Z M142 104 L130 20 L170 20 Z" fill="${s.glow}" opacity=".25"/>`;
+    const E = EMBLEMS[s.emblem] || EMBLEMS.star;
+    const front = `
+      <!-- передняя стенка -->
+      <clipPath id="${id}fc"><path d="M28 112 L172 112 L168 186 Q168 190 164 190 L36 190 Q32 190 32 186 Z"/></clipPath>
+      <path d="M28 112 L172 112 L168 186 Q168 190 164 190 L36 190 Q32 190 32 186 Z" fill="url(#${id}b)" stroke="${s.trim}" stroke-width="4" stroke-linejoin="round"/>
+      <g clip-path="url(#${id}fc)">${s.pattern(id)}</g>
+      <path d="M30 116 L170 116" stroke="#fff" stroke-width="2" opacity=".25"/>
+      <!-- уголки -->
+      <g fill="${s.trim}">
+        <path d="M28 112 L48 112 L46 122 L30 124 Z"/><path d="M172 112 L152 112 L154 122 L170 124 Z"/>
+        <path d="M32 190 L50 190 L48 180 L33 178 Z"/><path d="M168 190 L150 190 L152 180 L167 178 Z"/>
+      </g>
+      ${s.frontDeco ? s.frontDeco(id) : ''}
+      <!-- замок с эмблемой темы -->
+      <g transform="translate(100 150)">
+        <rect x="-20" y="-24" width="40" height="46" rx="10" fill="${s.trim}"/>
+        <rect x="-17" y="-21" width="34" height="40" rx="8" fill="${s.plate}"/>
+        <g transform="translate(0 -1)">${E(colors[0])}</g>
+      </g>`;
+    return { back, front };
+  }
+
   function artifact(c, extraClass = '') {
     const theme = c.theme || { shape: 'vault', colors: ['#8b93ff', '#d7dcff', '#0b0d1f'] };
-    const shape = SHAPES[theme.shape] || SHAPES.vault;
     const id = 'ca' + (uid++);
-    const { back, front } = shape(id, theme.colors);
+    const { back, front } = chest(id, theme.shape, theme.colors);
     const hero = c.top_item_image_url
       ? `<img class="artifact-hero" src="${c.top_item_image_url}" alt="${c.top_item_name || ''}" loading="lazy" draggable="false">`
       : `<div class="artifact-hero artifact-hero-missing">нет ассета</div>`;
     return `
-      <div class="artifact shape-${theme.shape} ${extraClass}">
+      <div class="artifact case-model skin-${theme.shape} ${extraClass}">
         <svg class="artifact-svg" viewBox="0 0 200 200" aria-hidden="true">${back}</svg>
         ${hero}
         <svg class="artifact-svg artifact-front" viewBox="0 0 200 200" aria-hidden="true">${front}</svg>
