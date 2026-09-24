@@ -4,7 +4,7 @@ from __future__ import annotations
 import enum
 from datetime import datetime
 
-from sqlalchemy import BigInteger, DateTime, ForeignKey, Integer, JSON, String
+from sqlalchemy import BigInteger, DateTime, Float, ForeignKey, Integer, JSON, String, UniqueConstraint
 from sqlalchemy import Enum as SAEnum
 from sqlalchemy import func
 from sqlalchemy.orm import DeclarativeBase, Mapped, mapped_column, relationship
@@ -51,6 +51,9 @@ class User(Base):
     referral_code: Mapped[str] = mapped_column(String(16), unique=True)
     referred_by_id: Mapped[int | None] = mapped_column(ForeignKey("users.id"), nullable=True)
     referral_earned_total: Mapped[int] = mapped_column(Integer, default=0)
+    # Партнёр: персональный % реферальной комиссии, выданный админом;
+    # перекрывает тир по числу рефералов. None — обычный пользователь.
+    partner_percent: Mapped[float | None] = mapped_column(Float, nullable=True)
     created_at: Mapped[datetime] = mapped_column(DateTime, server_default=func.now())
 
 
@@ -276,3 +279,46 @@ class StarsDeposit(Base):
     telegram_charge_id: Mapped[str | None] = mapped_column(String(128), nullable=True)
     created_at: Mapped[datetime] = mapped_column(DateTime, server_default=func.now())
     paid_at: Mapped[datetime | None] = mapped_column(DateTime, nullable=True)
+
+
+class CaseCredit(Base):
+    """Бесплатные открытия кейса, выданные админом или промокодом."""
+
+    __tablename__ = "case_credits"
+    __table_args__ = (UniqueConstraint("user_id", "case_code"),)
+
+    id: Mapped[int] = mapped_column(primary_key=True)
+    user_id: Mapped[int] = mapped_column(ForeignKey("users.id"))
+    # code, а не id: id кейсов меняются при пересеве каталога.
+    case_code: Mapped[str] = mapped_column(String(64))
+    count: Mapped[int] = mapped_column(Integer, default=0)
+
+
+class PromoKind(str, enum.Enum):
+    TOKENS = "tokens"  # демо-фишки 🎫
+    BALANCE = "balance"  # баланс B
+    CASE = "case"  # бесплатные открытия кейса
+
+
+class PromoCode(Base):
+    __tablename__ = "promo_codes"
+
+    id: Mapped[int] = mapped_column(primary_key=True)
+    code: Mapped[str] = mapped_column(String(32), unique=True, index=True)
+    kind: Mapped[PromoKind] = mapped_column(SAEnum(PromoKind))
+    amount: Mapped[int] = mapped_column(Integer)
+    case_code: Mapped[str | None] = mapped_column(String(64), nullable=True)
+    max_uses: Mapped[int] = mapped_column(Integer, default=1)
+    uses: Mapped[int] = mapped_column(Integer, default=0)
+    created_by_tg_id: Mapped[int] = mapped_column(BigInteger)
+    created_at: Mapped[datetime] = mapped_column(DateTime, server_default=func.now())
+
+
+class PromoRedemption(Base):
+    __tablename__ = "promo_redemptions"
+    __table_args__ = (UniqueConstraint("promo_id", "user_id"),)
+
+    id: Mapped[int] = mapped_column(primary_key=True)
+    promo_id: Mapped[int] = mapped_column(ForeignKey("promo_codes.id"))
+    user_id: Mapped[int] = mapped_column(ForeignKey("users.id"))
+    redeemed_at: Mapped[datetime] = mapped_column(DateTime, server_default=func.now())

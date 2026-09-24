@@ -49,7 +49,7 @@ async function api(path, opts = {}) {
   const res = await fetch(url, { ...opts, headers });
   let body = null;
   try { body = await res.json(); } catch (e) { /* no body */ }
-  if (!res.ok) throw new Error((body && body.error) || 'request_failed');
+  if (!res.ok) throw new Error((body && (body.message || body.error)) || 'request_failed');
   return body;
 }
 
@@ -288,7 +288,7 @@ function caseCard(c, idx) {
         <div class="case-card-name">${escapeHtml(c.name)}</div>
         <div class="case-card-tagline">${escapeHtml(c.theme ? c.theme.tagline : '')}</div>
         <div class="case-card-foot">
-          <span class="case-card-count">${c.item_count_label} брейнротов</span>
+          <span class="case-card-count"></span>
           <span class="price-chip">${fmt(c.price_tokens)} 🎫</span>
         </div>
       </div>
@@ -333,7 +333,6 @@ async function renderCasesScreen(root) {
     <section class="collection">
       <div class="collection-head">
         <h2 class="collection-title">${escapeHtml(col.title)}</h2>
-        <div class="collection-sub">${escapeHtml(col.subtitle)}</div>
       </div>
       <div class="case-grid ${col.cases.length === 1 ? 'single' : ''}">${col.cases.map(caseCard).join('')}</div>
     </section>`).join('');
@@ -346,8 +345,7 @@ async function renderCasesScreen(root) {
     </div>
     ${hero}
     ${ticker}
-    ${sections}
-    <p class="fine-print">Внутри кейсов — только реальные брейнроты Steal a Brainrot тиров Secret и OG с официальными изображениями из вики игры. Шанс каждого — обратно пропорционален его ценности, цена кейса выведена из содержимого.</p>`;
+    ${sections}`;
 
   root.querySelectorAll('[data-case-id]').forEach((el) =>
     el.addEventListener('click', () => openCaseStage(Number(el.dataset.caseId)))
@@ -366,12 +364,27 @@ async function renderCasesScreen(root) {
 
 function renderDepositPlaceholder(root) {
   root.innerHTML = `
-    <div class="section-title">ПОПОЛНИТЬ БАЛАНС</div>
-    <div class="card">
-      <p class="muted">Пополнение через обменник (брейнроты/гирсы/Stars) с очередью на подтверждение пока доступно
-      только в самом боте — это первая версия Mini App, раздел ещё не перенесён сюда.</p>
-      <p class="muted">Открой пополнение прямо в чате с ботом (кнопка «💰 ПОПОЛНИТЬ БАЛАНС» в его меню).</p>
-    </div>`;
+    <div class="section-title">ПОПОЛНИТЬ</div>
+    <div class="topup-card">
+      <div class="topup-badge">ТЕСТ</div>
+      <div class="topup-amount">+1 000 🎫</div>
+      <button class="open-btn" id="btn-test-topup" style="--c1:#c6ff3d;--c2:#5dffb0">
+        <span class="open-btn-shine"></span><span class="open-btn-label">Пополнить</span><span class="open-btn-price" id="topup-balance">${fmt(ME ? ME.game_tokens : 0)} 🎫</span>
+      </button>
+    </div>
+    <div class="card"><p class="muted" style="margin:0">Пополнение брейнротами, гирсами и Stars — в чате с ботом.</p></div>`;
+  root.querySelector('#btn-test-topup').addEventListener('click', async (e) => {
+    const btn = e.currentTarget;
+    btn.disabled = true;
+    try {
+      const res = await api('/api/demo-topup', { method: 'POST' });
+      haptic.success();
+      toast(`+${fmt(res.amount)} 🎫`, 'success');
+      root.querySelector('#topup-balance').textContent = `${fmt(res.game_tokens)} 🎫`;
+      await refreshMe();
+    } catch (err) { toast('Ошибка: ' + err.message, 'error'); }
+    btn.disabled = false;
+  });
 }
 
 // =================================================================== СЦЕНА КЕЙСА
@@ -409,23 +422,19 @@ async function openCaseStage(caseId, qty = 1) {
       </header>
       <div class="stage-hero" id="stage-hero">
         <div class="stage-art">${CaseArt.artifact(c, 'artifact-lg artifact-float')}</div>
-        <div class="eyebrow">${escapeHtml(c.item_count_label + ' брейнротов · до ' + c.best_rarity_label)}</div>
         <h1 class="stage-name">${escapeHtml(c.name)}</h1>
         <p class="stage-lore">${escapeHtml(c.theme ? c.theme.lore : '')}</p>
       </div>
       <div class="stage-reels hidden" id="stage-reels"></div>
       <div class="stage-controls" id="stage-controls"></div>
       <section class="stage-contents">
-        <div class="contents-head">
-          <h3>Что внутри</h3>
-          <span class="muted">средний дроп ${fmt(Math.round(c.expected_value))} 🎫 · возврат ~${c.target_rtp_percent}%</span>
-        </div>
+        <div class="contents-head"><h3>Что внутри</h3></div>
         <div class="contents-grid">
           ${c.items.map((i, idx) => `
             <button class="content-tile fade-in-up" style="${glowVars(i)};animation-delay:${Math.min(idx * 30, 360)}ms" data-item="${idx}">
               ${brainrotArt(i)}
               <div class="content-name">${escapeHtml(i.name)}</div>
-              <div class="content-meta"><span class="content-value">${fmt(i.value)}</span><span class="content-chance">${formatChance(i.chance_percent)}</span></div>
+              <div class="content-meta"><span class="content-value">${fmt(i.value)} 🎫</span></div>
             </button>`).join('')}
         </div>
       </section>
@@ -445,18 +454,24 @@ function formatChance(p) {
   return p.toFixed(3) + '%';
 }
 
+function caseCreditsLeft(c) {
+  return (ME && ME.case_credits && ME.case_credits[c.code]) || 0;
+}
+
 function paintStageControls(stage, c, qty) {
   const controls = stage.querySelector('#stage-controls');
   const total = c.price_tokens * qty;
-  const enough = ME && ME.game_tokens >= total;
+  const credits = caseCreditsLeft(c);
+  const free = credits >= qty;
+  const enough = free || (ME && ME.game_tokens >= total);
   controls.innerHTML = `
     <div class="qty-switch" role="tablist">
       ${[1, 3, 5].map((q) => `<button class="qty-opt ${q === qty ? 'active' : ''}" data-qty="${q}">×${q}</button>`).join('')}
     </div>
-    <button class="open-btn" id="btn-open" ${enough ? '' : 'data-poor="1"'}>
+    <button class="open-btn ${free ? 'is-free' : ''}" id="btn-open" ${enough ? '' : 'data-poor="1"'}>
       <span class="open-btn-shine"></span>
-      <span class="open-btn-label">${enough ? 'Открыть' : 'Не хватает 🎫'}</span>
-      <span class="open-btn-price">${fmt(total)} 🎫</span>
+      <span class="open-btn-label">${free ? 'Бесплатно' : enough ? 'Открыть' : 'Не хватает 🎫'}</span>
+      <span class="open-btn-price">${free ? `🎁 ${credits}` : fmt(total) + ' 🎫'}</span>
     </button>`;
   controls.querySelectorAll('.qty-opt').forEach((el) =>
     el.addEventListener('click', () => { haptic.tick(); paintStageControls(stage, c, Number(el.dataset.qty)); })
@@ -483,7 +498,7 @@ async function runOpening(stage, c, qty) {
   let res;
   try {
     [res] = await Promise.all([
-      api(`/api/cases/${c.id}/open`, { method: 'POST', body: JSON.stringify({ qty }) }),
+      api(`/api/cases/${c.id}/open`, { method: 'POST', body: JSON.stringify({ qty, use_credits: caseCreditsLeft(c) >= qty }) }),
       sleep(CaseArt.REDUCED ? 100 : 900),
     ]);
   } catch (err) {
@@ -494,6 +509,7 @@ async function runOpening(stage, c, qty) {
     return;
   }
   ME.game_tokens = res.game_tokens;
+  if (ME.case_credits) ME.case_credits[c.code] = res.credits_left;
   const walletEl = stage.querySelector('#stage-tokens');
   walletEl.textContent = fmt(res.game_tokens);
   popNumber(walletEl);
@@ -698,7 +714,7 @@ function openBrainrotSheet(b) {
       <div class="reveal-art">${brainrotArt(b)}</div>
       ${rarityBadge(b)}
       <div class="reveal-name">${escapeHtml(b.name)}</div>
-      <div class="reveal-value">${fmt(b.value)} 🎫 · шанс ${formatChance(b.chance_percent)}</div>
+      <div class="reveal-value">${fmt(b.value)} 🎫</div>
       ${gameInfoHtml(b)}
     </div>`);
 }
@@ -847,8 +863,190 @@ async function renderProfileScreen(root) {
       <button class="btn btn-ghost" onclick="navigate('inventory')">🎒 Инвентарь</button>
       <button class="btn btn-primary" onclick="navigate('home')">Открыть кейс</button>
     </div>
+    ${promoCardHtml()}
+    ${me.is_admin ? adminPanelHtml() : ''}
   `;
+  bindPromoForm(root);
+  if (me.is_admin) bindAdminPanel(root);
 }
+// =================================================================== ПРОМОКОД + АДМИНКА
+
+function promoCardHtml() {
+  return `
+    <div class="panel">
+      <div class="panel-title">Промокод</div>
+      <form class="inline-form" id="promo-form" autocomplete="off">
+        <input class="field" id="promo-input" placeholder="Введи код" maxlength="32" autocapitalize="characters" />
+        <button class="btn-chip" type="submit">Активировать</button>
+      </form>
+    </div>`;
+}
+
+function bindPromoForm(root) {
+  const form = root.querySelector('#promo-form');
+  if (!form) return;
+  form.addEventListener('submit', async (e) => {
+    e.preventDefault();
+    const input = form.querySelector('#promo-input');
+    const btn = form.querySelector('button');
+    if (!input.value.trim()) return;
+    btn.disabled = true;
+    try {
+      const res = await api('/api/promo/redeem', { method: 'POST', body: JSON.stringify({ code: input.value }) });
+      const p = res.promo;
+      const what = p.kind === 'tokens' ? `+${fmt(p.amount)} 🎫` : p.kind === 'balance' ? `+${fmt(p.amount)} 🪙` : `🎁 ${p.amount} бесплатн. открытий кейса`;
+      haptic.success();
+      toast(`Промокод активирован: ${what}`, 'success');
+      input.value = '';
+      await refreshMe();
+      renderProfileScreen(root);
+    } catch (err) {
+      const msg = { not_found: 'Такого промокода нет', exhausted: 'Промокод закончился', already_used: 'Ты уже активировал этот промокод', empty: 'Введи промокод' }[err.message] || err.message;
+      toast(msg, 'error');
+    }
+    btn.disabled = false;
+  });
+}
+
+let adminCases = null;
+
+function adminPanelHtml() {
+  return `
+    <div class="panel admin-panel">
+      <div class="panel-title">Админ-панель <span class="admin-badge">ADMIN</span></div>
+
+      <form class="inline-form" id="admin-find" autocomplete="off">
+        <input class="field" id="admin-q" placeholder="@username или Telegram ID" />
+        <button class="btn-chip" type="submit">Найти</button>
+      </form>
+      <div id="admin-user"></div>
+
+      <div class="admin-sub">Промокод</div>
+      <form class="admin-grid" id="admin-promo" autocomplete="off">
+        <select class="field" id="promo-kind">
+          <option value="tokens">🎫 Фишки</option>
+          <option value="balance">🪙 Баланс B</option>
+          <option value="case">🎁 Кейс</option>
+        </select>
+        <input class="field" id="promo-amount" type="number" min="1" placeholder="Сколько" />
+        <select class="field hidden" id="promo-case"></select>
+        <input class="field" id="promo-uses" type="number" min="1" value="1" placeholder="Активаций" />
+        <input class="field" id="promo-code" placeholder="Свой код (необязательно)" maxlength="32" />
+        <button class="btn-chip" type="submit">Сгенерировать</button>
+      </form>
+      <div id="admin-promo-result"></div>
+      <div class="admin-sub">Последние промокоды</div>
+      <div id="admin-promos" class="promo-list"></div>
+    </div>`;
+}
+
+function caseOptions() {
+  return (adminCases || []).map((c) => `<option value="${c.code}">${escapeHtml(c.name)}</option>`).join('');
+}
+
+function adminUserHtml(u) {
+  const credits = Object.entries(u.case_credits || {}).map(([code, n]) => {
+    const c = (adminCases || []).find((x) => x.code === code);
+    return `${escapeHtml(c ? c.name : code)} ×${n}`;
+  }).join(', ');
+  return `
+    <div class="admin-user">
+      <div class="admin-user-head">
+        <b>${u.username ? '@' + escapeHtml(u.username) : escapeHtml(u.first_name || 'игрок')}</b>
+        <span class="muted">ID ${u.tg_id}</span>
+      </div>
+      <div class="admin-stats">
+        <span>${fmt(u.game_tokens)} 🎫</span><span>${fmt(u.balance)} 🪙</span>
+        <span>реф. ${u.referral_count}</span>
+        <span class="${u.partner_percent != null ? 'hl' : ''}">${u.partner_percent != null ? 'партнёр ' + u.partner_percent + '%' : 'не партнёр'}</span>
+      </div>
+      ${credits ? `<div class="muted" style="font-size:12px;margin-top:4px">Кейсы: ${credits}</div>` : ''}
+      <div class="admin-actions">
+        <div class="inline-form"><input class="field" id="g-tokens" type="number" min="1" placeholder="🎫" /><button class="btn-chip" data-grant="tokens">Выдать 🎫</button></div>
+        <div class="inline-form"><input class="field" id="g-balance" type="number" min="1" placeholder="🪙 B" /><button class="btn-chip" data-grant="balance">Выдать B</button></div>
+        <div class="inline-form"><select class="field" id="g-case">${caseOptions()}</select><input class="field narrow" id="g-case-n" type="number" min="1" value="1" /><button class="btn-chip" data-grant="case">Выдать кейс</button></div>
+        <div class="inline-form"><input class="field" id="g-partner" type="number" min="0.1" max="50" step="0.1" placeholder="% партнёрки" value="${u.partner_percent ?? ''}" /><button class="btn-chip" id="g-partner-set">Партнёрка</button>${u.partner_percent != null ? '<button class="btn-chip ghost" id="g-partner-off">Снять</button>' : ''}</div>
+      </div>
+    </div>`;
+}
+
+async function bindAdminPanel(root) {
+  const panel = root.querySelector('.admin-panel');
+  if (!panel) return;
+  if (!adminCases) adminCases = (await api('/api/cases')).collections.flatMap((col) => col.cases);
+  panel.querySelector('#promo-case').innerHTML = caseOptions();
+  let current = null;
+
+  const userBox = panel.querySelector('#admin-user');
+  function showUser(u) {
+    current = u;
+    userBox.innerHTML = adminUserHtml(u);
+    userBox.querySelectorAll('[data-grant]').forEach((b) => b.addEventListener('click', async () => {
+      const kind = b.dataset.grant;
+      const body = { user: String(current.tg_id), kind };
+      if (kind === 'tokens') body.amount = userBox.querySelector('#g-tokens').value;
+      if (kind === 'balance') body.amount = userBox.querySelector('#g-balance').value;
+      if (kind === 'case') { body.case_code = userBox.querySelector('#g-case').value; body.amount = userBox.querySelector('#g-case-n').value; }
+      try {
+        showUser(await api('/api/admin/grant', { method: 'POST', body: JSON.stringify(body) }));
+        toast('Выдано', 'success'); haptic.success();
+      } catch (err) { toast('Ошибка: ' + err.message, 'error'); }
+    }));
+    const setPartner = async (percent) => {
+      try {
+        showUser(await api('/api/admin/partner', { method: 'POST', body: JSON.stringify({ user: String(current.tg_id), percent }) }));
+        toast(percent == null ? 'Партнёрка снята' : `Партнёрка ${percent}%`, 'success');
+      } catch (err) { toast('Ошибка: ' + err.message, 'error'); }
+    };
+    userBox.querySelector('#g-partner-set').addEventListener('click', () => setPartner(userBox.querySelector('#g-partner').value));
+    userBox.querySelector('#g-partner-off')?.addEventListener('click', () => setPartner(null));
+  }
+
+  panel.querySelector('#admin-find').addEventListener('submit', async (e) => {
+    e.preventDefault();
+    const q = panel.querySelector('#admin-q').value.trim();
+    if (!q) return;
+    try { showUser(await api('/api/admin/user?q=' + encodeURIComponent(q))); }
+    catch (err) { userBox.innerHTML = `<div class="muted" style="margin:8px 2px">Не найден. Игрок должен хотя бы раз открыть бота.</div>`; }
+  });
+
+  const kindSel = panel.querySelector('#promo-kind');
+  kindSel.addEventListener('change', () => panel.querySelector('#promo-case').classList.toggle('hidden', kindSel.value !== 'case'));
+
+  async function loadPromos() {
+    const list = await api('/api/admin/promos');
+    panel.querySelector('#admin-promos').innerHTML = list.map((p) => `
+      <div class="promo-row">
+        <code>${escapeHtml(p.code)}</code>
+        <span>${p.kind === 'tokens' ? fmt(p.amount) + ' 🎫' : p.kind === 'balance' ? fmt(p.amount) + ' 🪙' : '🎁 ' + p.amount + ' · ' + escapeHtml(((adminCases || []).find((c) => c.code === p.case_code) || {}).name || p.case_code)}</span>
+        <span class="muted">${p.uses}/${p.max_uses}</span>
+      </div>`).join('') || '<div class="muted">Пока нет</div>';
+  }
+  loadPromos();
+
+  panel.querySelector('#admin-promo').addEventListener('submit', async (e) => {
+    e.preventDefault();
+    const body = {
+      kind: kindSel.value,
+      amount: panel.querySelector('#promo-amount').value,
+      max_uses: panel.querySelector('#promo-uses').value || 1,
+      case_code: panel.querySelector('#promo-case').value,
+      code: panel.querySelector('#promo-code').value,
+    };
+    try {
+      const p = await api('/api/admin/promos', { method: 'POST', body: JSON.stringify(body) });
+      const out = panel.querySelector('#admin-promo-result');
+      out.innerHTML = `<button class="promo-created" id="promo-copy"><code>${escapeHtml(p.code)}</code><span>Скопировать</span></button>`;
+      out.querySelector('#promo-copy').addEventListener('click', async () => {
+        try { await navigator.clipboard.writeText(p.code); toast('Скопировано', 'success'); } catch (_) { toast(p.code); }
+      });
+      panel.querySelector('#promo-code').value = '';
+      haptic.success();
+      loadPromos();
+    } catch (err) { toast('Ошибка: ' + err.message, 'error'); }
+  });
+}
+
 
 // =================================================================== АПГРЕЙДЕР
 
@@ -871,7 +1069,7 @@ async function renderUpgraderScreen(root) {
   const slot = (b, label, id) => `
     <button class="upg-slot ${b ? 'filled' : ''}" id="${id}" style="${b ? glowVars(b) : ''}">
       ${b ? `${brainrotArt(b)}<div class="upg-slot-name">${escapeHtml(b.name)}</div><div class="upg-slot-value">${fmt(b.value)} 🎫</div>`
-          : `<div class="upg-slot-plus">+</div><div class="upg-slot-label">${label}</div>`}
+          : '<div class="upg-slot-plus">+</div>'}
     </button>`;
 
   root.innerHTML = `
@@ -1245,15 +1443,14 @@ function paintCrashIdle(root, state, picked = null) {
   root.querySelector('#crash-status').textContent = 'ГОТОВ К СТАРТУ';
   root.querySelector('#crash-prize').innerHTML = picked ? `
     <div class="ladder-preview">
-      <div class="ladder-title">Чем выше ×, тем лучше брейнрот</div>
       <div class="ladder-row">${(picked.ladder || []).slice(0, 12).map((s) => `
-        <div class="ladder-step" style="${glowVars(s)}">${brainrotArt(s)}<span>×${s.at.toFixed(2)}</span></div>`).join('') || '<span class="muted">Это уже самый дорогой брейнрот — забирай его назад на любом ×</span>'}</div>
+        <div class="ladder-step" style="${glowVars(s)}">${brainrotArt(s)}<span>×${s.at.toFixed(2)}</span></div>`).join('') || ''}</div>
     </div>` : '';
   const actions = root.querySelector('#crash-actions');
   actions.innerHTML = `
     <button class="stake-card stake-pick" id="btn-crash-pick" style="${picked ? glowVars(picked) : ''}">
       ${picked ? `${brainrotArt(picked)}<div><div class="stake-name">${escapeHtml(picked.name)}</div><div class="stake-value">Ставка · ${fmt(picked.value)} 🎫</div></div><span class="stake-change">Сменить</span>`
-               : `<div class="upg-slot-plus">+</div><div><div class="stake-name">Выбери брейнрота</div><div class="stake-value">Он полетит на ракете</div></div>`}
+               : `<div class="upg-slot-plus">+</div><div><div class="stake-name">Выбери брейнрота</div></div>`}
     </button>
     <button class="open-btn" id="btn-crash-start" ${picked ? '' : 'disabled'} style="--c1:#c6ff3d;--c2:#5dffb0">
       <span class="open-btn-shine"></span><span class="open-btn-label">Взлёт</span><span class="open-btn-price">${picked ? fmt(picked.value) + ' 🎫' : '—'}</span>
@@ -1418,12 +1615,12 @@ function paintDice(root, rules, lastResult = null) {
     <div class="dice-table" id="dice-table">
       <div class="dice-felt"></div>
       <div class="dice-row3d">${[0, 1, 2, 3].map((i) => dieHtml(rules, i)).join('')}</div>
-      <div class="dice-verdict" id="dice-verdict">${color ? `Ставка на <b style="color:${DICE_COLORS[color][0]}">${DICE_COLORS[color][1].toLowerCase()}</b>` : 'Выбери цвет и брейнрота'}</div>
+      <div class="dice-verdict" id="dice-verdict">${color ? `Ставка на <b style="color:${DICE_COLORS[color][0]}">${DICE_COLORS[color][1].toLowerCase()}</b>` : ''}</div>
     </div>
 
     <button class="stake-card stake-pick" id="dice-pick" style="${item ? glowVars(item) : ''}">
       ${item ? `${brainrotArt(item)}<div><div class="stake-name">${escapeHtml(item.name)}</div><div class="stake-value">Ставка · ${fmt(item.value)} 🎫</div></div><span class="stake-change">Сменить</span>`
-             : `<div class="upg-slot-plus">+</div><div><div class="stake-name">Выбери брейнрота</div><div class="stake-value">Он станет ставкой</div></div>`}
+             : `<div class="upg-slot-plus">+</div><div><div class="stake-name">Выбери брейнрота</div></div>`}
     </button>
 
     <div class="color-pick">
@@ -1525,7 +1722,6 @@ async function renderBattleScreen(root) {
   const [cases, me] = await Promise.all([api('/api/battle/cases'), refreshMe()]);
   root.innerHTML = `
     <div class="section-title">БАТЛ</div>
-    <p class="screen-lead">Дуэль 1×1: ты и соперник открываете один и тот же кейс. У кого дроп дороже — забирает оба брейнрота. Ничья — возврат ставки.</p>
     <div class="case-grid battle-grid">
       ${cases.map((c, idx) => `
         <button class="case-card battle-card fade-in-up" style="${caseThemeVars(c)};animation-delay:${Math.min(idx * 40, 320)}ms" data-id="${c.id}">
@@ -1533,7 +1729,7 @@ async function renderBattleScreen(root) {
           <div class="case-card-art">${CaseArt.artifact(c, 'artifact-sm')}</div>
           <div class="case-card-body">
             <div class="case-card-name">${escapeHtml(c.name)}</div>
-            <div class="case-card-foot"><span class="case-card-count">вход</span><span class="price-chip">${fmt(c.price_tokens)} 🎫</span></div>
+            <div class="case-card-foot"><span class="case-card-count"></span><span class="price-chip">${fmt(c.price_tokens)} 🎫</span></div>
           </div>
         </button>`).join('') || '<div class="empty-state">Нет доступных кейсов для батла.</div>'}
     </div>`;

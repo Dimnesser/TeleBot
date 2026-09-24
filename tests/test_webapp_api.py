@@ -151,15 +151,13 @@ async def test_case_open_reel_lands_on_server_decided_winner(client, auth_header
         assert landed["rarity"] == won["rarity"]
 
 
-async def test_case_detail_drop_chances_sum_to_100(client, auth_headers) -> None:
+async def test_case_detail_hides_chances(client, auth_headers) -> None:
     r = await client.get("/api/cases?category=starter", headers=auth_headers)
     for case in (await r.json())["cases"]:
-        if not case["is_openable"]:
-            continue
         r = await client.get(f"/api/cases/{case['id']}", headers=auth_headers)
         detail = await r.json()
-        total = sum(i["chance_percent"] for i in detail["items"])
-        assert 99.0 <= total <= 101.0, f"{case['name']}: chances sum to {total}"
+        assert detail["items"]
+        assert all("chance_percent" not in i for i in detail["items"])
 
 
 async def test_case_open_rejects_insufficient_tokens(client, auth_headers) -> None:
@@ -365,3 +363,75 @@ async def test_upgrader_targets_chance_between_75_and_1(client, auth_headers) ->
     for t in targets:
         assert 400 <= t["value"] <= 30000
         assert 1 <= t["chance_percent"] <= 75
+
+
+
+# ---------------------------------------------------------- админка/промокоды
+
+
+@pytest.fixture
+def admin_headers(monkeypatch):
+    from bot import config as config_module
+    import webapp.api as api_module
+
+    monkeypatch.setattr(api_module, "is_admin", lambda tg_id: tg_id == 777000)
+    return {"Authorization": "tma " + _init_data(777000, username="boss")}
+
+
+async def test_admin_endpoints_forbidden_for_regular_user(client, auth_headers) -> None:
+    for method, path in (("get", "/api/admin/promos"), ("post", "/api/admin/grant"), ("post", "/api/admin/partner")):
+        r = await getattr(client, method)(path, headers=auth_headers, **({"json": {}} if method == "post" else {}))
+        assert r.status == 403
+    me = await (await client.get("/api/me", headers=auth_headers)).json()
+    assert me["is_admin"] is False
+
+
+async def test_admin_grant_tokens_and_partner(client, auth_headers, admin_headers) -> None:
+    await client.get("/api/me", headers=auth_headers)  # создаём игрока 999111
+    me_admin = await (await client.get("/api/me", headers=admin_headers)).json()
+    assert me_admin["is_admin"] is True
+
+    r = await client.post("/api/admin/grant", headers=admin_headers, json={"user": "999111", "kind": "tokens", "amount": 500})
+    assert r.status == 200
+    before = (await r.json())["game_tokens"]
+    me = await (await client.get("/api/me", headers=auth_headers)).json()
+    assert me["game_tokens"] == before
+
+    r = await client.post("/api/admin/partner", headers=admin_headers, json={"user": "@tester", "percent": 12})
+    assert r.status == 200 and (await r.json())["partner_percent"] == 12
+    ref = await (await client.get("/api/referral", headers=auth_headers)).json()
+    assert ref["tier"] == {"name": "Партнёр", "commission_percent": 12}
+
+
+async def test_promo_case_credits_open_case_for_free(client, auth_headers, admin_headers) -> None:
+    await client.get("/api/me", headers=auth_headers)
+    r = await client.post("/api/admin/promos", headers=admin_headers,
+                          json={"kind": "case", "amount": 2, "case_code": "nonna_kitchen", "max_uses": 1, "code": "free-nonna"})
+    assert r.status == 200 and (await r.json())["code"] == "FREE-NONNA"
+
+    r = await client.post("/api/promo/redeem", headers=auth_headers, json={"code": "free-nonna"})
+    assert r.status == 200
+    assert (await r.json())["me"]["case_credits"] == {"nonna_kitchen": 2}
+    # повторно — нельзя
+    r = await client.post("/api/promo/redeem", headers=auth_headers, json={"code": "FREE-NONNA"})
+    assert r.status == 400 and (await r.json())["error"] in ("already_used", "exhausted")
+
+    cases = (await (await client.get("/api/cases?category=starter", headers=auth_headers)).json())["cases"]
+    nonna = next(c for c in cases if c["code"] == "nonna_kitchen")
+    tokens_before = (await (await client.get("/api/me", headers=auth_headers)).json())["game_tokens"]
+    r = await client.post(f"/api/cases/{nonna['id']}/open", headers=auth_headers, json={"qty": 1, "use_credits": True})
+    body = await r.json()
+    assert body["free"] is True and body["cost"] == 0 and body["credits_left"] == 1
+    assert body["game_tokens"] == tokens_before
+
+
+async def test_promo_tokens_and_unknown_code(client, auth_headers, admin_headers) -> None:
+    await client.get("/api/me", headers=auth_headers)
+    promo = await (await client.post("/api/admin/promos", headers=admin_headers,
+                                     json={"kind": "tokens", "amount": 300, "max_uses": 5})).json()
+    assert len(promo["code"]) == 8
+    before = (await (await client.get("/api/me", headers=auth_headers)).json())["game_tokens"]
+    r = await client.post("/api/promo/redeem", headers=auth_headers, json={"code": promo["code"].lower()})
+    assert (await r.json())["me"]["game_tokens"] == before + 300
+    r = await client.post("/api/promo/redeem", headers=auth_headers, json={"code": "NOPE1234"})
+    assert r.status == 400 and (await r.json())["error"] == "not_found"

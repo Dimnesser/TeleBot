@@ -8,11 +8,10 @@ bot.data.brainrot_roster (со скриншотов пользователя, с
 Логика кейса (вся выводится из данных, руками не проставлено ничего):
   * ценность предмета 🎫 — его ценность в B со скриншотов пользователя
     (brainrot_roster.ROSTER);
-  * шанс предмета ∝ 1 / ценность — каждый предмет вносит в средний дроп
-    одинаковый вклад, поэтому дорогие персонажи редкие ровно настолько,
-    насколько они дорогие (bot.services.cases_service.item_weight);
+  * шанс предмета ∝ 1 / ценность^1.5 — дорогие брейнроты заметно реже,
+    чем пропорционально цене (bot.services.cases_service.item_weight);
   * цена кейса = средний дроп / TARGET_RTP, округлённая вверх — кейс
-    возвращает в среднем 90% своей цены, как и продажа предмета (SELL_RATE).
+    возвращает в среднем 60% своей цены, окупить его тяжело.
 """
 from __future__ import annotations
 
@@ -21,10 +20,11 @@ from dataclasses import dataclass, field
 
 from bot.data.brainrot_roster import ROSTER_BY_NAME
 from bot.database.models import CaseCategory
+from bot.services.cases_service import CASE_WEIGHT_EXPONENT
 
-CASES_CONTENT_VERSION = "9-chest-models"
+CASES_CONTENT_VERSION = "10-harder-odds"
 
-TARGET_RTP = 0.9
+TARGET_RTP = 0.6
 
 
 @dataclass(frozen=True)
@@ -62,8 +62,9 @@ class SeedCase:
 
 
 def expected_value(values: list[int]) -> float:
-    """Средний дроп при весах 1/value: n / Σ(1/v) (гармоническое среднее)."""
-    return len(values) / sum(1 / v for v in values)
+    """Средний дроп при весах 1/value^k (см. cases_service.CASE_WEIGHT_EXPONENT)."""
+    weights = [v ** -CASE_WEIGHT_EXPONENT for v in values]
+    return sum(v * w for v, w in zip(values, weights)) / sum(weights)
 
 
 def price_for(values: list[int]) -> int:

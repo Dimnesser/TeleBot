@@ -892,3 +892,41 @@ a.link { color: var(--accent); word-break: break-all; text-decoration: none; fon
 .ladder-step { flex: 0 0 64px; display: flex; flex-direction: column; align-items: center; gap: 4px; }
 .ladder-step .p-tile { width: 64px; height: 64px; }
 .ladder-step span { font-family: var(--font-display); font-size: 11px; color: var(--rc); font-weight: 700; }
+
+/* =====================================================================
+   ПАНЕЛИ: промокод, админка, тестовое пополнение
+   ===================================================================== */
+.panel { margin-top: 16px; padding: 14px; border-radius: 20px; background: var(--bg-card); border: 1px solid var(--border); }
+.panel-title { display: flex; align-items: center; gap: 8px; font-family: var(--font-display); font-weight: 800; font-size: 15px; margin-bottom: 10px; }
+.inline-form { display: flex; gap: 8px; align-items: stretch; margin-bottom: 8px; }
+.field {
+  flex: 1; min-width: 0; min-height: 44px; padding: 0 12px; border-radius: 12px; border: 1px solid var(--border);
+  background: var(--bg-elevated); color: var(--text); font: 600 14px var(--font-body); outline: none;
+}
+.field:focus { border-color: var(--accent); }
+.field.narrow { flex: 0 0 64px; }
+select.field { appearance: none; -webkit-appearance: none; }
+#promo-input { text-transform: uppercase; letter-spacing: 1.5px; font-family: var(--font-display); }
+.admin-panel { border-color: rgba(198,255,61,.35); background: linear-gradient(180deg, rgba(198,255,61,.06), transparent 60%), var(--bg-card); }
+.admin-badge { font-size: 9px; letter-spacing: 1.5px; padding: 3px 7px; border-radius: 6px; background: var(--accent); color: var(--accent-ink); }
+.admin-sub { font-size: 11px; font-weight: 800; letter-spacing: 1.2px; text-transform: uppercase; color: var(--text-dim); margin: 14px 0 8px; }
+.admin-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 8px; }
+.admin-grid .field { width: 100%; }
+.admin-grid .btn-chip { grid-column: 1 / -1; }
+.admin-user { margin: 4px 0 6px; padding: 12px; border-radius: 16px; background: var(--bg-elevated); border: 1px solid var(--border); }
+.admin-user-head { display: flex; justify-content: space-between; align-items: baseline; gap: 8px; }
+.admin-stats { display: flex; flex-wrap: wrap; gap: 6px; margin-top: 8px; }
+.admin-stats span { font-size: 12px; font-weight: 700; padding: 4px 8px; border-radius: 8px; background: rgba(255,255,255,.05); }
+.admin-stats span.hl { color: var(--accent-ink); background: var(--accent); }
+.admin-actions { margin-top: 10px; }
+.admin-actions .btn-chip { flex: 0 0 auto; }
+.promo-list { display: flex; flex-direction: column; gap: 6px; }
+.promo-row { display: grid; grid-template-columns: auto 1fr auto; gap: 10px; align-items: center; font-size: 12px; padding: 8px 10px; border-radius: 10px; background: var(--bg-elevated); }
+.promo-row code, .promo-created code { font-family: var(--font-display); letter-spacing: 1px; color: var(--accent); }
+.promo-created { width: 100%; display: flex; justify-content: space-between; align-items: center; margin-top: 8px; padding: 12px 14px; border-radius: 14px; border: 1px dashed var(--accent); background: rgba(198,255,61,.08); color: var(--text); font-weight: 700; }
+.promo-created code { font-size: 17px; }
+.topup-card { position: relative; text-align: center; padding: 26px 16px 16px; margin-bottom: 14px; border-radius: 24px; border: 1px solid rgba(198,255,61,.3);
+  background: radial-gradient(420px 200px at 50% 0%, rgba(198,255,61,.16), transparent 70%), var(--bg-card); }
+.topup-badge { position: absolute; top: 12px; left: 12px; font-size: 9px; letter-spacing: 1.5px; font-weight: 800; padding: 3px 7px; border-radius: 6px; background: rgba(255,255,255,.08); color: var(--text-dim); }
+.topup-amount { font-family: var(--font-display); font-size: 34px; font-weight: 800; margin-bottom: 16px; }
+.open-btn.is-free { --c1: #ff4fd8; --c2: #ffd84d; }

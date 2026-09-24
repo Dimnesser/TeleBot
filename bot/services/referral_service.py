@@ -23,9 +23,11 @@ async def credit_referral_commission(session: AsyncSession, referred_user: User,
     if referrer is None:
         return 0
 
-    referral_count = await count_referrals(session, referrer)
-    tier = tier_for_count(referral_count)
-    commission = round(deposit_total_b * tier.commission_percent / 100)
+    if referrer.partner_percent is not None:
+        percent = referrer.partner_percent  # партнёрка от админа перекрывает тир
+    else:
+        percent = tier_for_count(await count_referrals(session, referrer)).commission_percent
+    commission = round(deposit_total_b * percent / 100)
     if commission <= 0:
         return 0
 

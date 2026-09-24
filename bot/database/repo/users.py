@@ -70,3 +70,15 @@ async def get_user_by_id(session: AsyncSession, user_id: int) -> User | None:
 async def count_referrals(session: AsyncSession, user: User) -> int:
     result = await session.execute(select(func.count()).select_from(User).where(User.referred_by_id == user.id))
     return result.scalar_one()
+
+
+async def find_user(session: AsyncSession, query: str) -> User | None:
+    """Поиск для админки: Telegram id или @username (без учёта регистра)."""
+    q = query.strip()
+    if q.lstrip("-").isdigit():
+        return await get_user_by_tg_id(session, int(q))
+    q = q.lstrip("@").lower()
+    if not q:
+        return None
+    result = await session.execute(select(User).where(func.lower(User.username) == q))
+    return result.scalar_one_or_none()

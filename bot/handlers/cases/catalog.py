@@ -22,7 +22,7 @@ from bot.keyboards.callbacks import (
 from bot.keyboards.cases import case_detail_keyboard, cases_list_keyboard
 from bot.services import quest_service
 from bot.data.brainrot_roster import RARITY_LABEL, rarity_for
-from bot.services.cases_service import draw_items, item_weight, total_cost
+from bot.services.cases_service import draw_items, total_cost
 from bot.utils.texts import (
     CASE_DETAIL_BALANCE_LINE,
     CASE_DETAIL_DROP_POOL_HEADER,
@@ -103,11 +103,9 @@ async def _render_case_detail(callback: CallbackQuery, state: FSMContext, case_i
     lines.append("")
     if items:
         lines.append(CASE_DETAIL_DROP_POOL_HEADER)
-        total_weight = sum(item_weight(i) for i in items)
         for item in items:
             rarity = RARITY_LABEL[rarity_for(item.name, item.value)]
-            chance = item_weight(item) / total_weight * 100
-            lines.append(f"• {item.name} · {rarity} · {chance:.2f}% · {item.value} 🎫")
+            lines.append(f"• {item.name} · {rarity} · {item.value} 🎫")
     else:
         lines.append(CASE_DETAIL_NOT_OPENABLE)
 

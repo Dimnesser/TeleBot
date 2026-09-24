@@ -11,7 +11,7 @@ from pathlib import Path
 
 from aiohttp import web
 
-from bot.config import config
+from bot.config import config, is_admin
 from bot.data.brainrot_roster import (
     RARITY_COLOR,
     RARITY_LABEL,
@@ -22,7 +22,7 @@ from bot.data.brainrot_roster import (
     rarity_for,
     slugify,
 )
-from bot.data.seed_cases import CASE_THEMES, TARGET_RTP
+from bot.data.seed_cases import CASE_THEMES
 from bot.data.referral_tiers import next_tier_for_count, tier_for_count
 from bot.database.models import (
     Case,
@@ -36,15 +36,17 @@ from bot.database.models import (
     StakeStatus,
 )
 from bot.database.repo import cases as cases_repo
+from bot.database.repo import rewards as rewards_repo
+from bot.database.models import PromoKind
 from bot.database.repo import giveaways as giveaways_repo
 from bot.database.repo import inventory as inventory_repo
 from bot.database.repo import quests as quests_repo
 from bot.database.repo import staking as staking_repo
 from bot.database.repo.known_items import list_known_items
-from bot.database.repo.users import add_game_tokens, count_referrals
+from bot.database.repo.users import add_balance, add_game_tokens, count_referrals, find_user
 from bot.services import quest_service
 from bot.services.battle_service import run_battle
-from bot.services.cases_service import REEL_REVEAL_INDEX, build_reel, draw_items, item_weight, total_cost
+from bot.services.cases_service import REEL_REVEAL_INDEX, build_reel, draw_items, total_cost
 from bot.services.dice_service import COLORS, MATCH_PAYOUT_TABLE, resolve_roll
 from bot.services.giveaway_service import resolve_all_expired
 from bot.services.staking_service import MIN_STAKE_AMOUNT, STAKE_TIERS, is_matured, payout_amount, tier_by_term
@@ -189,6 +191,9 @@ async def _user_json(request: web.Request) -> dict:
     session = request["session"]
     referral_count = await count_referrals(session, user)
     return {
+        "is_admin": is_admin(user.tg_id),
+        "case_credits": await rewards_repo.case_credits(session, user),
+        "partner_percent": user.partner_percent,
         "tg_id": user.tg_id,
         "username": user.username,
         "first_name": user.first_name,
@@ -285,19 +290,9 @@ async def get_case_detail(request: web.Request) -> web.Response:
     if case is None:
         return web.json_response({"error": "not_found"}, status=404)
     items = await cases_repo.list_case_items(session, case.id)
-    weights = [item_weight(i) for i in items]
-    total_weight = sum(weights) or 1.0
-
+    # Шансы наружу не отдаются — только состав кейса.
     payload = _case_json(case)
-    item_payloads = []
-    for item, weight in zip(items, weights):
-        entry = _case_item_json(item)
-        entry["chance_percent"] = round(weight / total_weight * 100, 3)
-        item_payloads.append(entry)
-    payload["items"] = item_payloads
-    payload["expected_value"] = round(sum(i.value * w for i, w in zip(items, weights)) / total_weight, 1) if items else None
-    payload["target_rtp_percent"] = round(TARGET_RTP * 100)
-    payload["sell_rate_percent"] = round(SELL_RATE * 100)
+    payload["items"] = [_case_item_json(i) for i in items]
     return web.json_response(payload)
 
 
@@ -318,7 +313,11 @@ async def post_case_open(request: web.Request) -> web.Response:
     cost = total_cost(case, qty)
     if cost is None:
         return web.json_response({"error": "no_price"}, status=400)
-    if user.game_tokens < cost:
+    # Бесплатные открытия (от админа/промокода) тратятся первыми, целиком на qty.
+    free = bool(body.get("use_credits")) and await rewards_repo.use_case_credits(session, user, case.code, qty)
+    if free:
+        cost = 0
+    elif user.game_tokens < cost:
         return web.json_response({"error": "not_enough_tokens", "cost": cost, "balance": user.game_tokens}, status=400)
 
     items = await cases_repo.list_case_items(session, case.id)
@@ -346,6 +345,8 @@ async def post_case_open(request: web.Request) -> web.Response:
     response = {
         "won": won_payload,
         "cost": cost,
+        "free": free,
+        "credits_left": (await rewards_repo.case_credits(session, user)).get(case.code, 0),
         "game_tokens": user.game_tokens,
         "reels": reels,
         "reveal_index": REEL_REVEAL_INDEX,
@@ -665,7 +666,11 @@ async def get_referral(request: web.Request) -> web.Response:
         {
             "code": user.referral_code,
             "link": f"https://t.me/{me.username}?start=ref_{user.referral_code}",
-            "tier": {"name": tier.name, "commission_percent": tier.commission_percent},
+            "tier": (
+                {"name": "Партнёр", "commission_percent": user.partner_percent}
+                if user.partner_percent is not None
+                else {"name": tier.name, "commission_percent": tier.commission_percent}
+            ),
             "next_tier": (
                 {"name": next_tier.name, "remaining": next_tier.min_referrals - referral_count}
                 if next_tier
@@ -778,3 +783,172 @@ async def post_giveaway_join(request: web.Request) -> web.Response:
 @routes.get("/api/faq")
 async def get_faq(_request: web.Request) -> web.Response:
     return web.json_response([{"question": q, "answer": a} for q, a in FAQ_ENTRIES])
+
+
+# -------------------------------------------------------------- промокоды
+
+
+PROMO_ERRORS = {
+    "not_found": "Такого промокода нет",
+    "exhausted": "Промокод закончился",
+    "already_used": "Ты уже активировал этот промокод",
+}
+
+
+def _promo_json(promo) -> dict:
+    return {
+        "code": promo.code,
+        "kind": promo.kind.value,
+        "amount": promo.amount,
+        "case_code": promo.case_code,
+        "max_uses": promo.max_uses,
+        "uses": promo.uses,
+    }
+
+
+@routes.post("/api/promo/redeem")
+async def post_promo_redeem(request: web.Request) -> web.Response:
+    session, user = request["session"], request["user"]
+    code = str((await request.json()).get("code", "")).strip()
+    if not code:
+        return web.json_response({"error": "empty", "message": "Введи промокод"}, status=400)
+    try:
+        promo = await rewards_repo.redeem_promo(session, user, code)
+    except rewards_repo.PromoError as err:
+        return web.json_response({"error": err.code, "message": PROMO_ERRORS[err.code]}, status=400)
+    await session.refresh(user)
+    return web.json_response({"promo": _promo_json(promo), "me": await _user_json(request)})
+
+
+# ------------------------------------------------------------ админ-панель
+# Доступ — только Telegram id из ADMIN_IDS; проверяется на каждом запросе.
+
+
+def _require_admin(request: web.Request) -> web.Response | None:
+    if not is_admin(request["user"].tg_id):
+        return web.json_response({"error": "forbidden"}, status=403)
+    return None
+
+
+async def _admin_target(request: web.Request, query: str):
+    target = await find_user(request["session"], query or "")
+    if target is None:
+        return None, web.json_response({"error": "user_not_found", "message": "Пользователь не найден (он должен хотя бы раз открыть бота)"}, status=404)
+    return target, None
+
+
+async def _admin_user_json(session, target) -> dict:
+    return {
+        "tg_id": target.tg_id,
+        "username": target.username,
+        "first_name": target.first_name,
+        "game_tokens": target.game_tokens,
+        "balance": target.balance,
+        "partner_percent": target.partner_percent,
+        "referral_count": await count_referrals(session, target),
+        "case_credits": await rewards_repo.case_credits(session, target),
+    }
+
+
+@routes.get("/api/admin/user")
+async def get_admin_user(request: web.Request) -> web.Response:
+    if (denied := _require_admin(request)) is not None:
+        return denied
+    target, err = await _admin_target(request, request.query.get("q", ""))
+    if err is not None:
+        return err
+    return web.json_response(await _admin_user_json(request["session"], target))
+
+
+@routes.post("/api/admin/grant")
+async def post_admin_grant(request: web.Request) -> web.Response:
+    if (denied := _require_admin(request)) is not None:
+        return denied
+    session = request["session"]
+    body = await request.json()
+    target, err = await _admin_target(request, str(body.get("user", "")))
+    if err is not None:
+        return err
+    kind = body.get("kind")
+    try:
+        amount = int(body.get("amount", 0))
+    except (TypeError, ValueError):
+        amount = 0
+    if amount <= 0 or amount > 10_000_000:
+        return web.json_response({"error": "bad_amount", "message": "Неверное количество"}, status=400)
+
+    if kind == "tokens":
+        await add_game_tokens(session, target, amount)
+    elif kind == "balance":
+        await add_balance(session, target, amount)
+    elif kind == "case":
+        code = body.get("case_code")
+        if code not in CASE_THEMES:
+            return web.json_response({"error": "bad_case", "message": "Неизвестный кейс"}, status=400)
+        await rewards_repo.add_case_credits(session, target, code, amount)
+    else:
+        return web.json_response({"error": "bad_kind"}, status=400)
+    await session.refresh(target)
+    return web.json_response(await _admin_user_json(session, target))
+
+
+@routes.post("/api/admin/partner")
+async def post_admin_partner(request: web.Request) -> web.Response:
+    if (denied := _require_admin(request)) is not None:
+        return denied
+    session = request["session"]
+    body = await request.json()
+    target, err = await _admin_target(request, str(body.get("user", "")))
+    if err is not None:
+        return err
+    percent = body.get("percent")
+    if percent in (None, ""):
+        target.partner_percent = None  # снять партнёрку
+    else:
+        try:
+            value = float(percent)
+        except (TypeError, ValueError):
+            value = -1
+        if not 0 < value <= 50:
+            return web.json_response({"error": "bad_percent", "message": "Процент — от 0 до 50"}, status=400)
+        target.partner_percent = value
+    await session.commit()
+    await session.refresh(target)
+    return web.json_response(await _admin_user_json(session, target))
+
+
+@routes.get("/api/admin/promos")
+async def get_admin_promos(request: web.Request) -> web.Response:
+    if (denied := _require_admin(request)) is not None:
+        return denied
+    promos = await rewards_repo.list_promos(request["session"])
+    return web.json_response([_promo_json(p) for p in promos])
+
+
+@routes.post("/api/admin/promos")
+async def post_admin_promo(request: web.Request) -> web.Response:
+    if (denied := _require_admin(request)) is not None:
+        return denied
+    session = request["session"]
+    body = await request.json()
+    try:
+        kind = PromoKind(body.get("kind"))
+        amount = int(body.get("amount", 0))
+        max_uses = int(body.get("max_uses", 1))
+    except (TypeError, ValueError):
+        return web.json_response({"error": "bad_request", "message": "Проверь поля"}, status=400)
+    if amount <= 0 or not 1 <= max_uses <= 100_000:
+        return web.json_response({"error": "bad_request", "message": "Количество и лимит должны быть > 0"}, status=400)
+    case_code = body.get("case_code") if kind == PromoKind.CASE else None
+    if kind == PromoKind.CASE and case_code not in CASE_THEMES:
+        return web.json_response({"error": "bad_case", "message": "Выбери кейс"}, status=400)
+    custom = str(body.get("code") or "").strip().upper() or None
+    if custom and (len(custom) > 32 or not custom.replace("_", "").replace("-", "").isalnum()):
+        return web.json_response({"error": "bad_code", "message": "Код: буквы/цифры, до 32 символов"}, status=400)
+    if custom and await rewards_repo.get_promo(session, custom):
+        return web.json_response({"error": "code_taken", "message": "Такой код уже есть"}, status=400)
+    promo = await rewards_repo.create_promo(
+        session, kind=kind, amount=amount, max_uses=max_uses, case_code=case_code,
+        code=custom, created_by_tg_id=request["user"].tg_id,
+    )
+    return web.json_response(_promo_json(promo))

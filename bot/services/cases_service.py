@@ -6,16 +6,14 @@ import random
 from bot.database.models import Case, CaseItem
 
 
-def item_weight(item: CaseItem) -> float:
-    """Вес предмета ∝ 1/ценность.
+# Вес предмета ∝ 1/ценность^k. При k > 1 дорогие брейнроты выпадают заметно
+# реже, чем «пропорционально цене» — кейс тяжело окупить. Та же степень
+# используется при расчёте цены кейса (bot.data.seed_cases.price_for).
+CASE_WEIGHT_EXPONENT = 1.5
 
-    Ценность выведена из реальной внутриигровой цены персонажа, поэтому
-    дорогой в игре персонаж настолько же редок в кейсе. Побочный эффект
-    такого веса — каждый предмет вносит в средний дроп одинаковый вклад,
-    и цену кейса можно честно посчитать из содержимого
-    (bot.data.seed_cases.price_for).
-    """
-    return 1.0 / max(item.value, 1)
+
+def item_weight(item: CaseItem) -> float:
+    return 1.0 / max(item.value, 1) ** CASE_WEIGHT_EXPONENT
 
 
 def total_cost(case: Case, quantity: int) -> int | None:
