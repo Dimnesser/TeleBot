@@ -12,12 +12,24 @@ from bot.data.coins import COIN_RARITY
 from bot.data.seed_cases import CASES_CONTENT_VERSION, SEED_CASES, SEED_CASES_BY_CODE
 from bot.data.seed_items import SEED_ITEMS
 from bot.data.seed_quests import SEED_QUESTS
-from bot.database.models import AppMeta, Base, Case, CaseItem, DepositItem, Quest
+from bot.database.models import AppMeta, Base, Case, CaseCredit, CaseItem, DepositItem, PartnerCode, PromoCode, Quest
 
 engine = create_async_engine(config.database_url)
 async_session: async_sessionmaker[AsyncSession] = async_sessionmaker(engine, expire_on_commit=False)
 
 CASES_VERSION_KEY = "cases_content_version"
+
+# Коды кейсов из прошлых версий каталога → ближайший кейс текущего. Нужны,
+# чтобы уже выданные открытия, промокоды и партнёрские коды не «повисли» на
+# исчезнувшем кейсе после пересева.
+LEGACY_CASE_CODES = {
+    "referral_gift": "referral", "free_handout": "free",
+    "nonna_kitchen": "fastfood", "ghost_lantern": "boo", "hybrid_lab": "techno", "combo_vault": "safe",
+    "dragon_forge": "dragon", "abyss_dive": "capitano", "party_popper": "party", "og_throne": "strawberry",
+    "market_hype": "legend", "market_blue_chips": "crystal", "market_runners": "party", "market_illiquid": "phantom",
+    "eco_cardboard": "sandbox", "eco_bin": "sandbox", "eco_lunchbox": "sandbox", "eco_toolbox": "crocodilo",
+    "eco_piggy": "sahur", "eco_sahur": "sahur", "eco_mystery": "sixseven", "eco_first_secret": "secret",
+}
 
 
 def _ensure_sqlite_dir(database_url: str) -> None:
@@ -133,6 +145,8 @@ async def _seed_cases_reconcile() -> None:
                 for i, item in enumerate(seed_case.items)
             )
 
+        await _remap_legacy_case_codes(session)
+
         if current_version is None:
             session.add(AppMeta(key=CASES_VERSION_KEY, value=CASES_CONTENT_VERSION))
         else:
@@ -140,6 +154,30 @@ async def _seed_cases_reconcile() -> None:
                 AppMeta.__table__.update().where(AppMeta.key == CASES_VERSION_KEY).values(value=CASES_CONTENT_VERSION)
             )
         await session.commit()
+
+
+async def _remap_legacy_case_codes(session: AsyncSession) -> None:
+    """Переносит открытия/промокоды/партнёрские коды со старых кодов кейсов."""
+    for pc in (await session.execute(select(PartnerCode))).scalars():
+        if pc.case_code in LEGACY_CASE_CODES:
+            pc.case_code = LEGACY_CASE_CODES[pc.case_code]
+    for promo in (await session.execute(select(PromoCode))).scalars():
+        if promo.case_code in LEGACY_CASE_CODES:
+            promo.case_code = LEGACY_CASE_CODES[promo.case_code]
+    credits = (await session.execute(select(CaseCredit))).scalars().all()
+    kept = {(c.user_id, c.case_code): c for c in credits if c.case_code not in LEGACY_CASE_CODES}
+    for credit in credits:
+        new_code = LEGACY_CASE_CODES.get(credit.case_code)
+        if new_code is None:
+            continue
+        target = kept.get((credit.user_id, new_code))
+        if target is None:
+            credit.case_code = new_code
+            kept[(credit.user_id, new_code)] = credit
+        else:  # у игрока уже есть открытия нового кейса — складываем
+            target.count += credit.count
+            await session.delete(credit)
+    await session.flush()
 
 
 async def _seed_quests_if_empty() -> None:

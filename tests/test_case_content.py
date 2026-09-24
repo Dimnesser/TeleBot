@@ -75,3 +75,9 @@ def test_every_case_has_theme_and_unique_code():
     codes = [c.code for c in SEED_CASES]
     assert len(codes) == len(set(codes))
     assert set(codes) == set(CASE_THEMES)
+
+
+def test_legacy_case_codes_point_to_existing_cases():
+    from bot.database.engine import LEGACY_CASE_CODES
+
+    assert set(LEGACY_CASE_CODES.values()) <= set(SEED_CASES_BY_CODE)
