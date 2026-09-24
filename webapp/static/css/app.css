@@ -1000,3 +1000,11 @@ select.field { appearance: none; -webkit-appearance: none; }
 .result-mult { margin-top: 12px; text-align: center; font: 700 14px var(--font-mono); }
 .result-mult.up { color: #3ee08a; }
 .result-mult.down { color: #65718c; }
+
+/* обязательная подписка для бесплатного кейса */
+.subscribe-sheet { display: flex; flex-direction: column; align-items: center; gap: 12px; padding: 18px 4px 6px; text-align: center; }
+.subscribe-icon { font-size: 44px; }
+.subscribe-title { font-size: 20px; font-weight: 900; text-transform: uppercase; letter-spacing: .6px; }
+.subscribe-sheet .muted { margin: 0 0 6px; }
+.subscribe-sheet .ghost-btn { width: 100%; }
+.admin-hint { font-size: 12px; margin: 10px 0 16px; }

@@ -24,7 +24,7 @@ from bot.data.coins import COIN_RARITY, coin_name
 from bot.database.models import CaseCategory
 from bot.services.cases_service import CASE_WEIGHT_EXPONENT
 
-CASES_CONTENT_VERSION = "16-better-drops"
+CASES_CONTENT_VERSION = "17-free-12h"
 
 TARGET_RTP = 0.85
 
@@ -115,7 +115,8 @@ SEED_CASES: list[SeedCase] = [
     _case(
         CaseCategory.FREE, "free", "Бесплатный", 1,
         CaseTheme("junk", "none", ("#a87a4c", "#5a3b1c"), "#e0b98a"),
-        [1, 2, 3, 5, "67", "La Grande Combinasion", "Money Money Puggy", "Nuclearo Dinossauro"],
+        [5, 10, "67", "La Grande Combinasion", "Money Money Puggy", "Nuclearo Dinossauro", "Tang Tang Keletang",
+         "Ventoliero Pavonero", "Cash or Card", "Ketchuru and Musturu", "Los Secret Combinasionas"],
         price=0,
     ),
     # Не продаётся: открывается только бесплатными открытиями, которые

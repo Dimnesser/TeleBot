@@ -4,6 +4,7 @@ from __future__ import annotations
 import secrets
 
 from sqlalchemy import func, select
+from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from bot.config import config
@@ -39,7 +40,15 @@ async def get_or_create_user(
         referred_by_id=referred_by_id,
     )
     session.add(user)
-    await session.commit()
+    try:
+        await session.commit()
+    except IntegrityError:
+        # Параллельный запрос того же нового игрока (Mini App при первом
+        # открытии шлёт несколько запросов разом) успел создать его первым —
+        # берём уже созданную запись вместо 500.
+        await session.rollback()
+        result = await session.execute(select(User).where(User.tg_id == tg_id))
+        return result.scalar_one()
     await session.refresh(user)
     return user
 

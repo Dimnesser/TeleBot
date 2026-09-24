@@ -103,7 +103,7 @@ class CaseCategory(str, enum.Enum):
     APEX = "apex"
     # Не продаётся: открывается только бесплатными открытиями (партнёрский код).
     REFERRAL = "referral"
-    FREE = "free"  # открывается бесплатно раз в FREE_CASE_COOLDOWN_MINUTES
+    FREE = "free"  # бесплатно раз в N часов, после подписки на канал (settings_service)
     ECONOMY = "economy"  # дешёвые кейсы с «нищими» брейнротами и монетами
 
 

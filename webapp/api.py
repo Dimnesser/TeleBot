@@ -54,7 +54,7 @@ from bot.database.repo import quests as quests_repo
 from bot.database.repo import staking as staking_repo
 from bot.database.repo.known_items import list_known_items
 from bot.database.repo.users import add_balance, add_game_tokens, count_referrals, find_user
-from bot.services import partner_service, quest_service
+from bot.services import partner_service, quest_service, settings_service
 from bot.services.battle_service import run_battle
 from bot.services.cases_service import REEL_REVEAL_INDEX, build_reel, draw_items, total_cost
 from bot.services.dice_service import COLORS, MATCH_PAYOUT_TABLE, resolve_roll
@@ -85,12 +85,25 @@ COLLECTIONS = [
 ]
 
 
-def free_case_wait_seconds(user) -> int:
+def free_case_wait_seconds(user, cooldown_hours: float) -> int:
     """Сколько ждать до следующего бесплатного открытия (0 — можно сейчас)."""
     if user.free_case_at is None:
         return 0
-    ready = user.free_case_at + timedelta(minutes=config.free_case_cooldown_minutes)
+    ready = user.free_case_at + timedelta(hours=cooldown_hours)
     return max(0, int((ready - datetime.utcnow()).total_seconds()))
+
+
+async def _free_case_state(request: web.Request) -> dict:
+    """Кулдаун и обязательный канал бесплатного кейса (настраиваются админом)."""
+    session = request["session"]
+    hours = await settings_service.free_case_cooldown_hours(session)
+    channel = await settings_service.required_channel(session)
+    return {
+        "free_wait_seconds": free_case_wait_seconds(request["user"], hours),
+        "free_cooldown_hours": hours,
+        "required_channel": channel,
+        "required_channel_url": f"https://t.me/{channel.lstrip('@')}" if channel else None,
+    }
 
 
 def _brainrot_image_url(name: str) -> str | None:
@@ -335,11 +348,7 @@ async def get_cases(request: web.Request) -> web.Response:
         for category in meta["categories"]:
             cases.extend(await cases_repo.list_cases(session, category))
         collections.append({"key": meta["key"], "title": meta["title"], "cases": [_case_json(c) for c in cases]})
-    return web.json_response({
-        "collections": collections,
-        "free_wait_seconds": free_case_wait_seconds(request["user"]),
-        "free_cooldown_minutes": config.free_case_cooldown_minutes,
-    })
+    return web.json_response({"collections": collections, **await _free_case_state(request)})
 
 
 @routes.get("/api/cases/by-code/{code}")
@@ -383,9 +392,16 @@ async def post_case_open(request: web.Request) -> web.Response:
     # Бесплатные открытия (от админа/промокода) тратятся первыми, целиком на qty.
     free = bool(body.get("use_credits")) and await rewards_repo.use_case_credits(session, user, case.code, qty)
     if case.category == CaseCategory.FREE and not free:
-        wait = free_case_wait_seconds(user)
+        state = await _free_case_state(request)
+        wait = state["free_wait_seconds"]
         if qty != 1:
             return web.json_response({"error": "free_single", "message": "Бесплатный — по одному"}, status=400)
+        channel = state["required_channel"]
+        if channel and not await settings_service.is_subscribed(request.app["bot"], channel, user.tg_id):
+            return web.json_response({
+                "error": "subscribe_required", "message": f"Подпишись на {channel}",
+                "channel": channel, "channel_url": state["required_channel_url"],
+            }, status=400)
         if wait > 0:
             return web.json_response({"error": "free_cooldown", "wait_seconds": wait, "message": "Ещё рано"}, status=400)
         user.free_case_at = datetime.utcnow()
@@ -434,7 +450,7 @@ async def post_case_open(request: web.Request) -> web.Response:
         "cost": cost,
         "free": free,
         "credits_left": (await rewards_repo.case_credits(session, user)).get(case.code, 0),
-        "free_wait_seconds": free_case_wait_seconds(user),
+        "free_wait_seconds": (await _free_case_state(request))["free_wait_seconds"],
         "game_tokens": user.game_tokens,
         "reels": reels,
         "reveal_index": REEL_REVEAL_INDEX,
@@ -935,6 +951,48 @@ def _require_admin(request: web.Request) -> web.Response | None:
     if not is_admin(request["user"].tg_id):
         return web.json_response({"error": "forbidden"}, status=403)
     return None
+
+
+@routes.get("/api/admin/settings")
+async def get_admin_settings(request: web.Request) -> web.Response:
+    if (denied := _require_admin(request)) is not None:
+        return denied
+    session = request["session"]
+    return web.json_response({
+        "required_channel": await settings_service.required_channel(session),
+        "free_case_cooldown_hours": await settings_service.free_case_cooldown_hours(session),
+    })
+
+
+@routes.post("/api/admin/settings")
+async def post_admin_settings(request: web.Request) -> web.Response:
+    """Канал обязательной подписки (пусто — отключить) и кулдаун бесплатного кейса."""
+    if (denied := _require_admin(request)) is not None:
+        return denied
+    session = request["session"]
+    body = await request.json()
+    if "required_channel" in body:
+        try:
+            channel = settings_service.normalize_channel(body.get("required_channel") or "")
+        except ValueError:
+            return web.json_response({"error": "bad_channel", "message": "Канал: @username или ссылка t.me/…"}, status=400)
+        if channel:
+            # Бот должен видеть участников канала, иначе проверка подписки
+            # всегда будет «нет» — сразу говорим об этом админу.
+            try:
+                await request.app["bot"].get_chat_member(channel, request["user"].tg_id)
+            except Exception:  # noqa: BLE001
+                return web.json_response({
+                    "error": "bot_not_in_channel",
+                    "message": f"Добавь бота админом в {channel}, иначе подписку не проверить",
+                }, status=400)
+        await settings_service.set_setting(session, settings_service.REQUIRED_CHANNEL, channel)
+    if "free_case_cooldown_hours" in body:
+        hours = _num(body.get("free_case_cooldown_hours"))
+        if hours is None or not 0 < hours <= 24 * 7:
+            return web.json_response({"error": "bad_cooldown", "message": "Кулдаун: от 0 до 168 часов"}, status=400)
+        await settings_service.set_setting(session, settings_service.FREE_CASE_COOLDOWN_HOURS, f"{hours:g}")
+    return await get_admin_settings(request)
 
 
 async def _admin_target(request: web.Request, query: str):

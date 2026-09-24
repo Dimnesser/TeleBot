@@ -22,11 +22,27 @@ from webapp.server import create_app
 
 
 class FakeBot:
+    """Бот-заглушка: канал @braincore_news существует, подписчики — в subscribers."""
+
+    channels = {"@braincore_news"}
+
+    def __init__(self):
+        self.subscribers: set[int] = set()
+
     async def get_me(self):
         class Me:
             username = "BrainCorre_bot"
 
         return Me()
+
+    async def get_chat_member(self, chat_id, user_id):
+        if chat_id not in self.channels:
+            raise RuntimeError("chat not found")
+
+        class Member:
+            status = "member" if user_id in self.subscribers else "left"
+
+        return Member()
 
 
 def _init_data(tg_id: int, *, username: str = "tester", first_name: str = "Test") -> str:
@@ -518,3 +534,33 @@ async def test_market_pulse(client, auth_headers) -> None:
     assert body["hot"][0]["name"] == "Strawberry Elephant"
     assert all(b["market"]["demand"] == "Very Low" for b in body["cold"])
     assert body["sources"]
+
+
+async def test_free_case_requires_channel_subscription(client, auth_headers, admin_headers) -> None:
+    # бот не в канале — админу сразу говорят об этом
+    r = await client.post("/api/admin/settings", headers=admin_headers, json={"required_channel": "@unknown_chan"})
+    assert r.status == 400 and (await r.json())["error"] == "bot_not_in_channel"
+    r = await client.post("/api/admin/settings", headers=admin_headers,
+                          json={"required_channel": "https://t.me/braincore_news", "free_case_cooldown_hours": 12})
+    assert (await r.json()) == {"required_channel": "@braincore_news", "free_case_cooldown_hours": 12}
+    # обычному игроку настройки недоступны
+    assert (await client.get("/api/admin/settings", headers=auth_headers)).status == 403
+
+    catalog = await (await client.get("/api/cases", headers=auth_headers)).json()
+    assert catalog["required_channel"] == "@braincore_news" and catalog["free_cooldown_hours"] == 12
+    free = next(c for col in catalog["collections"] for c in col["cases"] if c["category"] == "free")
+
+    r = await client.post(f"/api/cases/{free['id']}/open", headers=auth_headers, json={"qty": 1})
+    body = await r.json()
+    assert r.status == 400 and body["error"] == "subscribe_required"
+    assert body["channel_url"] == "https://t.me/braincore_news"
+
+    client.server.app["bot"].subscribers.add(999111)
+    r = await client.post(f"/api/cases/{free['id']}/open", headers=auth_headers, json={"qty": 1})
+    body = await r.json()
+    assert r.status == 200 and 11 * 3600 < body["free_wait_seconds"] <= 12 * 3600
+
+    # отписка канала отключает проверку
+    r = await client.post("/api/admin/settings", headers=admin_headers, json={"required_channel": ""})
+    assert (await r.json())["required_channel"] is None
+

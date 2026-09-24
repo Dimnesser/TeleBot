@@ -49,7 +49,11 @@ async function api(path, opts = {}) {
   const res = await fetch(url, { ...opts, headers });
   let body = null;
   try { body = await res.json(); } catch (e) { /* no body */ }
-  if (!res.ok) throw new Error((body && (body.message || body.error)) || 'request_failed');
+  if (!res.ok) {
+    const err = new Error((body && (body.message || body.error)) || 'request_failed');
+    err.body = body; // код ошибки и данные (например, канал для подписки)
+    throw err;
+  }
   return body;
 }
 
@@ -347,7 +351,7 @@ async function renderCasesScreen(root) {
         <div class="free-banner-text">
           <div class="free-banner-eyebrow">БЕСПЛАТНО</div>
           <div class="free-banner-title">${escapeHtml(freeCase.name)}</div>
-          <div class="free-banner-every">каждые ${data.free_cooldown_minutes} мин</div>
+          <div class="free-banner-every">каждые ${fmt(data.free_cooldown_hours)} ч${data.required_channel ? ` · для подписчиков ${escapeHtml(data.required_channel)}` : ''}</div>
         </div>
       </div>
       <div class="free-banner-sub" id="free-banner-sub"></div>
@@ -584,8 +588,10 @@ async function runOpening(stage, c, qty, fast = false) {
   try {
     res = await api(`/api/cases/${c.id}/open`, { method: 'POST', body: JSON.stringify({ qty, use_credits: caseCreditsLeft(c) >= qty }) });
   } catch (err) {
-    toast('Ошибка: ' + err.message, 'error');
     paintStageControls(stage, c, qty);
+    if (err.body && err.body.error === 'subscribe_required') { showSubscribeSheet(err.body, () => runOpening(stage, c, qty, fast)); return; }
+    if (err.body && err.body.error === 'free_cooldown') { freeReadyAt = Date.now() + err.body.wait_seconds * 1000; paintStageControls(stage, c, qty); }
+    toast('Ошибка: ' + err.message, 'error');
     return;
   }
   ME.game_tokens = res.game_tokens;
@@ -726,6 +732,23 @@ function showReveal(stage, c, qty, won) {
     }
     runOpening(stage, c, qty);
   });
+}
+
+/** Бесплатный кейс только для подписчиков канала: подписаться → проверить. */
+function showSubscribeSheet(info, retry) {
+  const overlay = openModal(`
+    <button class="modal-close" onclick="closeModal()">✕</button>
+    <div class="subscribe-sheet">
+      <div class="subscribe-icon">📣</div>
+      <div class="subscribe-title">Подпишись на канал</div>
+      <p class="muted">Бесплатный кейс открывается только подписчикам ${escapeHtml(info.channel)}.</p>
+      <button class="open-btn" id="btn-sub-go">Подписаться</button>
+      <button class="ghost-btn" id="btn-sub-check">Я подписался — открыть</button>
+    </div>`);
+  overlay.querySelector('#btn-sub-go').addEventListener('click', () => {
+    if (tg && tg.openTelegramLink) tg.openTelegramLink(info.channel_url); else window.open(info.channel_url, '_blank');
+  });
+  overlay.querySelector('#btn-sub-check').addEventListener('click', () => { closeModal(); retry(); });
 }
 
 /** Цифры результата «набегают» от 0 — момент выигрыша читается лучше. */
@@ -975,6 +998,14 @@ function adminPanelHtml() {
     <div class="panel admin-panel">
       <div class="panel-title">Админ-панель <span class="admin-badge">ADMIN</span></div>
 
+      <div class="admin-sub">Бесплатный кейс</div>
+      <form class="admin-grid" id="admin-settings" autocomplete="off">
+        <input class="field full" id="s-channel" placeholder="Канал подписки: @username или t.me/… (пусто — без подписки)" />
+        <input class="field" id="s-hours" type="number" min="0.5" max="168" step="0.5" placeholder="Раз в N часов" />
+        <button class="btn-chip" type="submit">Сохранить</button>
+      </form>
+      <div class="muted admin-hint" id="s-status"></div>
+
       <form class="inline-form" id="admin-find" autocomplete="off">
         <input class="field" id="admin-q" placeholder="@username или Telegram ID" />
         <button class="btn-chip" type="submit">Найти</button>
@@ -1045,12 +1076,34 @@ async function bindAdminPanel(root) {
   const panel = root.querySelector('.admin-panel');
   if (!panel) return;
   if (!adminCases) {
-    const [catalog, referral] = await Promise.all([api('/api/cases'), api('/api/cases/by-code/referral_gift').catch(() => null)]);
-    adminCases = [...(referral ? [referral] : []), ...catalog.collections.flatMap((col) => col.cases)];
+    const catalog = await api('/api/cases');
+    const all = catalog.collections.flatMap((col) => col.cases);
+    adminCases = [...all.filter((c) => c.category === 'referral'), ...all.filter((c) => c.category !== 'referral')];
   }
   panel.querySelector('#promo-case').innerHTML = caseOptions();
   panel.querySelector('#p-case').innerHTML = caseOptions();
   const botLink = await api('/api/referral').then((r) => r.link.split('?')[0]).catch(() => 'https://t.me/BrainCorre_bot');
+
+  const settingsForm = panel.querySelector('#admin-settings');
+  const paintSettings = (st) => {
+    settingsForm.querySelector('#s-channel').value = st.required_channel || '';
+    settingsForm.querySelector('#s-hours').value = st.free_case_cooldown_hours;
+    panel.querySelector('#s-status').textContent = st.required_channel
+      ? `Подписка на ${st.required_channel} обязательна · кейс раз в ${st.free_case_cooldown_hours} ч`
+      : `Без обязательной подписки · кейс раз в ${st.free_case_cooldown_hours} ч`;
+  };
+  api('/api/admin/settings').then(paintSettings).catch(() => {});
+  settingsForm.addEventListener('submit', async (e) => {
+    e.preventDefault();
+    try {
+      const st = await api('/api/admin/settings', { method: 'POST', body: JSON.stringify({
+        required_channel: settingsForm.querySelector('#s-channel').value.trim(),
+        free_case_cooldown_hours: Number(settingsForm.querySelector('#s-hours').value),
+      }) });
+      paintSettings(st);
+      toast('Сохранено', 'success');
+    } catch (err) { toast(err.message, 'error'); }
+  });
 
   async function loadPartners() {
     const list = await api('/api/admin/partners');
