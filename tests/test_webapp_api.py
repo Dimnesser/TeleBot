@@ -315,13 +315,12 @@ async def test_cases_catalog_grouped_by_collections(client, auth_headers) -> Non
     r = await client.get("/api/cases", headers=auth_headers)
     assert r.status == 200
     collections = (await r.json())["collections"]
-    assert [c["key"] for c in collections] == ["free", "economy", "starter", "signature", "apex"]
+    assert [c["key"] for c in collections] == ["starter", "free", "apex"]
     for collection in collections:
         for case in collection["cases"]:
-            assert case["theme"]["shape"]
+            assert case["theme"]["filling"] and case["theme"]["aura"]
             assert case["top_item_image_url"].endswith(".webp")
-    market = next(c for c in collections if c["key"] == "starter")["cases"]
-    assert {c["theme"]["badge"] for c in market} == {"ХАЙП", "T0", "T1–T2", "НЕЛИКВИД"}
+            assert case["heroes"] and case["heroes"][0]["name"] == case["top_item_name"]
 
 
 async def test_free_case_gives_coins_or_brainrot_then_cooldown(client, auth_headers) -> None:
@@ -339,10 +338,10 @@ async def test_free_case_gives_coins_or_brainrot_then_cooldown(client, auth_head
 
 
 async def test_case_items_carry_market_snapshot(client, auth_headers) -> None:
-    cases = (await (await client.get("/api/cases?category=starter", headers=auth_headers)).json())["cases"]
-    hype = next(c for c in cases if c["code"] == "market_hype")
-    items = (await (await client.get(f"/api/cases/{hype['id']}", headers=auth_headers)).json())["items"]
-    assert all(i["market"]["demand"] in ("Very High", "High") for i in items)
+    cases = (await (await client.get("/api/cases?category=apex", headers=auth_headers)).json())["cases"]
+    top = next(c for c in cases if c["code"] == "strawberry")
+    items = (await (await client.get(f"/api/cases/{top['id']}", headers=auth_headers)).json())["items"]
+    assert items[0]["name"] == "Strawberry Elephant" and items[0]["market"]["tier"] == "T0"
 
 
 async def test_unknown_category_is_400(client, auth_headers) -> None:
@@ -352,7 +351,7 @@ async def test_unknown_category_is_400(client, auth_headers) -> None:
 
 async def test_multi_open_returns_reel_per_win_and_real_game_info(client, auth_headers) -> None:
     r = await client.get("/api/cases?category=starter", headers=auth_headers)
-    case = min((await r.json())["cases"], key=lambda c: c["price_tokens"])
+    case = next(c for c in (await r.json())["cases"] if c["code"] == "crystal")  # только Secret
     r = await client.post(f"/api/cases/{case['id']}/open", headers=auth_headers, json={"qty": 3})
     assert r.status == 200
     body = await r.json()
@@ -429,18 +428,18 @@ async def test_admin_grant_tokens_and_partner(client, auth_headers, admin_header
 async def test_promo_case_credits_open_case_for_free(client, auth_headers, admin_headers) -> None:
     await client.get("/api/me", headers=auth_headers)
     r = await client.post("/api/admin/promos", headers=admin_headers,
-                          json={"kind": "case", "amount": 2, "case_code": "nonna_kitchen", "max_uses": 1, "code": "free-nonna"})
+                          json={"kind": "case", "amount": 2, "case_code": "fastfood", "max_uses": 1, "code": "free-nonna"})
     assert r.status == 200 and (await r.json())["code"] == "FREE-NONNA"
 
     r = await client.post("/api/promo/redeem", headers=auth_headers, json={"code": "free-nonna"})
     assert r.status == 200
-    assert (await r.json())["me"]["case_credits"] == {"nonna_kitchen": 2}
+    assert (await r.json())["me"]["case_credits"] == {"fastfood": 2}
     # повторно — нельзя
     r = await client.post("/api/promo/redeem", headers=auth_headers, json={"code": "FREE-NONNA"})
     assert r.status == 400 and (await r.json())["error"] in ("already_used", "exhausted")
 
-    cases = (await (await client.get("/api/cases?category=signature", headers=auth_headers)).json())["cases"]
-    nonna = next(c for c in cases if c["code"] == "nonna_kitchen")
+    cases = (await (await client.get("/api/cases?category=starter", headers=auth_headers)).json())["cases"]
+    nonna = next(c for c in cases if c["code"] == "fastfood")
     tokens_before = (await (await client.get("/api/me", headers=auth_headers)).json())["game_tokens"]
     r = await client.post(f"/api/cases/{nonna['id']}/open", headers=auth_headers, json={"qty": 1, "use_credits": True})
     body = await r.json()
@@ -473,7 +472,7 @@ async def test_partner_code_gives_referral_case_bonus_and_commission(client, aut
 
     r = await client.post("/api/admin/partners", headers=admin_headers, json={
         "user": "777000", "code": "boss10", "commission_percent": 10,
-        "deposit_bonus_percent": 20, "case_code": "referral_gift", "case_amount": 2,
+        "deposit_bonus_percent": 20, "case_code": "referral", "case_amount": 2,
     })
     assert r.status == 200 and (await r.json())["code"] == "BOSS10"
     listing = await (await client.get("/api/admin/partners", headers=admin_headers)).json()
@@ -486,13 +485,13 @@ async def test_partner_code_gives_referral_case_bonus_and_commission(client, aut
     r = await client.post("/api/promo/redeem", headers=auth_headers, json={"code": "Boss10"})
     assert r.status == 200
     me = (await r.json())["me"]
-    assert me["case_credits"] == {"referral_gift": 2}
+    assert me["case_credits"] == {"referral": 2}
     assert me["deposit_bonus_percent"] == 20
     r = await client.post("/api/promo/redeem", headers=auth_headers, json={"code": "boss10"})
     assert (await r.json())["error"] == "already_partner_ref"
 
     # реферальный кейс: купить нельзя, открыть бесплатно — можно
-    case = await (await client.get("/api/cases/by-code/referral_gift", headers=auth_headers)).json()
+    case = await (await client.get("/api/cases/by-code/referral", headers=auth_headers)).json()
     r = await client.post(f"/api/cases/{case['id']}/open", headers=auth_headers, json={"qty": 1})
     assert r.status == 400 and (await r.json())["error"] == "referral_only"
     r = await client.post(f"/api/cases/{case['id']}/open", headers=auth_headers, json={"qty": 1, "use_credits": True})

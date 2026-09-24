@@ -26,11 +26,11 @@ class SeedQuest:
 
 SEED_QUESTS: list[SeedQuest] = [
     SeedQuest(
-        code="daily_open_nonna_kitchen",
+        code="daily_open_fastfood",
         scope=QuestScope.DAILY,
-        title="Загляни на Кухню Нонны",
-        description="Открой кейс «Кухня Нонны» один раз.",
-        target_type="open_case:nonna_kitchen",
+        title="Перекус",
+        description="Открой кейс «Фастфуд» один раз.",
+        target_type="open_case:fastfood",
         target_count=1,
         reward_tokens=23,
         sort_order=1,
@@ -46,11 +46,11 @@ SEED_QUESTS: list[SeedQuest] = [
         sort_order=2,
     ),
     SeedQuest(
-        code="weekly_open_dragon_forge_3",
+        code="weekly_open_dragon_3",
         scope=QuestScope.WEEKLY,
-        title="Три удара молота",
-        description="Открой кейс «Драконья Кузня» три раза.",
-        target_type="open_case:dragon_forge",
+        title="Укротитель драконов",
+        description="Открой кейс «Драгон» три раза.",
+        target_type="open_case:dragon",
         target_count=3,
         reward_tokens=240,
         sort_order=1,

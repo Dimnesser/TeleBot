@@ -32,7 +32,7 @@ from bot.data.market import (
     market_info,
     names_with_demand,
 )
-from bot.data.seed_cases import CASE_THEMES
+from bot.data.seed_cases import CASE_THEMES, SEED_CASES_BY_CODE
 from bot.data.referral_tiers import next_tier_for_count, tier_for_count
 from bot.database.models import (
     Case,
@@ -76,10 +76,8 @@ BRAINROT_ASSETS_DIR = Path(__file__).parent / "static" / "assets" / "brainrots"
 AVAILABLE_BRAINROT_IMAGES = {p.stem for p in BRAINROT_ASSETS_DIR.glob("*.webp")}
 
 COLLECTIONS = [
+    {"key": CaseCategory.STARTER.value, "title": "Кейсы", "categories": [CaseCategory.STARTER]},
     {"key": "free", "title": "Бесплатные кейсы", "categories": [CaseCategory.FREE, CaseCategory.REFERRAL]},
-    {"key": CaseCategory.ECONOMY.value, "title": "Эконом", "categories": [CaseCategory.ECONOMY]},
-    {"key": CaseCategory.STARTER.value, "title": "Рынок", "categories": [CaseCategory.STARTER]},
-    {"key": CaseCategory.SIGNATURE.value, "title": "Кейсы", "categories": [CaseCategory.SIGNATURE]},
     {"key": CaseCategory.APEX.value, "title": "All-in", "categories": [CaseCategory.APEX]},
 ]
 
@@ -115,13 +113,18 @@ def _case_json(case: Case) -> dict:
         "best_rarity_label": RARITY_LABEL[best],
         "best_rarity_color": RARITY_COLOR[best][0],
         "best_rarity_color_accent": RARITY_COLOR[best][1],
+        # Герои кейса — два самых дорогих брейнрота, они сидят в модели кейса.
+        "heroes": [
+            {"name": i.name, "image_url": _brainrot_image_url(i.name)}
+            for i in (SEED_CASES_BY_CODE[case.code].items if case.code in SEED_CASES_BY_CODE else ())
+            if i.rarity != COIN_RARITY
+        ][:2],
         "theme": {
-            "tagline": theme.tagline,
-            "lore": theme.lore,
-            "shape": theme.shape,
-            "particles": theme.particles,
-            "colors": list(theme.colors),
-            "badge": theme.badge,
+            "filling": theme.filling,
+            "aura": theme.aura,
+            "shell": list(theme.shell),
+            "accent": theme.accent,
+            "colors": [theme.accent, theme.shell[0], theme.shell[1]],
         } if theme else None,
     }
 
@@ -642,7 +645,7 @@ async def post_dice_roll(request: web.Request) -> web.Response:
 async def get_battle_cases(request: web.Request) -> web.Response:
     session = request["session"]
     openable = []
-    for category in (CaseCategory.ECONOMY, CaseCategory.STARTER, CaseCategory.SIGNATURE, CaseCategory.APEX):
+    for category in (CaseCategory.STARTER, CaseCategory.APEX):
         cases = await cases_repo.list_cases(session, category)
         openable.extend(c for c in cases if c.is_openable and c.price_tokens is not None)
     return web.json_response([_case_json(c) for c in openable])

@@ -1,6 +1,6 @@
 """Инварианты контента кейсов: только реальные брейнроты ростера (плюс
-монеты в бесплатных/эконом-кейсах), у каждого есть официальный рендер, цена
-выведена из пула, рыночные кейсы собраны строго по рыночному срезу."""
+монеты в бесплатных кейсах), у каждого есть официальный рендер, цена
+выведена из пула, кейсы идут лестницей цен."""
 from __future__ import annotations
 
 from pathlib import Path
@@ -24,11 +24,19 @@ def test_market_snapshot_only_for_roster():
     assert set(TIER) <= set(ROSTER_BY_NAME) and set(DEMAND) <= set(ROSTER_BY_NAME)
 
 
-def test_market_cases_follow_snapshot():
-    assert all(DEMAND[i.name] in ("Very High", "High") for i in SEED_CASES_BY_CODE["market_hype"].items)
-    assert all(DEMAND[i.name] == "Very Low" for i in SEED_CASES_BY_CODE["market_illiquid"].items)
-    assert all(TIER[i.name] == "T0" for i in SEED_CASES_BY_CODE["market_blue_chips"].items)
-    assert all(TIER[i.name] in ("T1", "T2") for i in SEED_CASES_BY_CODE["market_runners"].items)
+def test_paid_cases_form_a_price_ladder_and_all_in_is_top():
+    main = [c for c in SEED_CASES if c.category == CaseCategory.STARTER]
+    all_in = [c for c in SEED_CASES if c.category == CaseCategory.APEX]
+    assert [c.price_tokens for c in main] == sorted(c.price_tokens for c in main)
+    assert min(c.price_tokens for c in all_in) > max(c.price_tokens for c in main)
+    assert min(c.price_tokens for c in main) < 10  # с бесплатного можно раскрутиться
+
+
+def test_coins_only_in_free_cases():
+    for case in SEED_CASES:
+        if any(i.rarity == COIN_RARITY for i in case.items):
+            assert case.category in (CaseCategory.FREE, CaseCategory.REFERRAL)
+    assert SEED_CASES_BY_CODE["free"].price_tokens == 0
 
 
 def test_every_roster_brainrot_has_official_render():
@@ -47,7 +55,6 @@ def test_cases_contain_only_roster_brainrots_with_roster_values():
         for item in case.items:
             if item.rarity == COIN_RARITY:
                 assert coin_amount(item.name) == item.value
-                assert case.category in (CaseCategory.FREE, CaseCategory.REFERRAL, CaseCategory.ECONOMY)
                 continue
             entry = ROSTER_BY_NAME[item.name]
             assert item.value == entry.value
