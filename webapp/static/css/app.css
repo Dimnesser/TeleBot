@@ -1251,3 +1251,4 @@ button.dep-item:active { transform: scale(.97); }
   .case-grid { grid-template-columns: repeat(5, minmax(0, 1fr)); }
   .inventory-grid { grid-template-columns: repeat(7, minmax(0, 1fr)); }
 }
+#g-zero { width: 100%; min-height: 40px; }

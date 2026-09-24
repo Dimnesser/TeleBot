@@ -797,6 +797,18 @@ async def test_admin_luck_set_and_cancel(client, auth_headers, admin_headers) ->
     assert (await r.json())["luck"] is None
 
 
+async def test_admin_take_and_zero_balance(client, auth_headers, admin_headers) -> None:
+    await client.get("/api/me", headers=auth_headers)
+    await client.post("/api/admin/grant", headers=admin_headers, json={"user": "999111", "kind": "balance", "amount": 500})
+    assert (await client.post("/api/admin/balance", headers=auth_headers, json={"user": "999111", "mode": "zero"})).status == 403
+    r = await client.post("/api/admin/balance", headers=admin_headers, json={"user": "999111", "amount": 200})
+    left = (await r.json())["balance"]
+    r = await client.post("/api/admin/balance", headers=admin_headers, json={"user": "999111", "amount": -5})
+    assert r.status == 400
+    r = await client.post("/api/admin/balance", headers=admin_headers, json={"user": "999111", "mode": "zero"})
+    assert left >= 300 and (await r.json())["balance"] == 0
+
+
 async def test_stars_no_upper_limit(client, auth_headers) -> None:
     r = await client.post("/api/deposit/stars/quote", headers=auth_headers, json={"amount": 5_000_000})
     assert r.status == 200 and (await r.json())["credited"] == 8_750_000

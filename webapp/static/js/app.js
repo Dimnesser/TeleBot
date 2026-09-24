@@ -1430,7 +1430,8 @@ function adminUserHtml(u) {
       </div>
       ${credits ? `<div class="muted" style="font-size:12px;margin-top:4px">Кейсы: ${credits}</div>` : ''}
       <div class="admin-actions">
-        <div class="inline-form"><input class="field" id="g-balance" type="number" min="1" placeholder="Сколько B" /><button class="btn-chip" data-grant="balance">Выдать B</button></div>
+        <div class="inline-form"><input class="field" id="g-balance" type="number" min="1" placeholder="Сколько B" /><button class="btn-chip" data-grant="balance">Выдать B</button><button class="btn-chip ghost" id="g-take">Списать</button></div>
+        <button class="btn-chip danger" id="g-zero">🗑 Обнулить баланс (${fmt(u.balance)} B)</button>
         <div class="inline-form luck-form">
           <input class="field" id="g-luck" type="number" min="0.1" max="20" step="0.1" placeholder="Подкрутка ×" value="${u.luck || ''}" />
           <button class="btn-chip" id="g-luck-set">Подкрутить</button>
@@ -1628,6 +1629,21 @@ async function bindAdminPanel(root) {
       } catch (err) { toast(err.message, 'error'); }
     };
     userBox.querySelector('#g-luck-set').addEventListener('click', () => setLuck(Number(userBox.querySelector('#g-luck').value) || null));
+    const setBalance = async (body, done) => {
+      try {
+        showUser(await api('/api/admin/balance', { method: 'POST', body: JSON.stringify({ user: String(current.tg_id), ...body }) }));
+        toast(done, 'success'); haptic.success();
+      } catch (err) { toast('Ошибка: ' + err.message, 'error'); }
+    };
+    userBox.querySelector('#g-take').addEventListener('click', () => {
+      const amount = Number(userBox.querySelector('#g-balance').value);
+      if (!amount || amount <= 0) { toast('Введи, сколько B списать', 'error'); return; }
+      setBalance({ amount }, `Списано ${fmt(amount)} B`);
+    });
+    userBox.querySelector('#g-zero').addEventListener('click', () => {
+      if (!confirm(`Обнулить баланс игрока ID ${current.tg_id} (${fmt(current.balance)} B)?`)) return;
+      setBalance({ mode: 'zero' }, 'Баланс обнулён');
+    });
     const off = userBox.querySelector('#g-luck-off');
     if (off) off.addEventListener('click', () => setLuck(null));
   }

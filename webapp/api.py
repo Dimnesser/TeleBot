@@ -1491,6 +1491,27 @@ async def post_admin_grant(request: web.Request) -> web.Response:
     return web.json_response(await _admin_user_json(session, target))
 
 
+@routes.post("/api/admin/balance")
+async def post_admin_balance(request: web.Request) -> web.Response:
+    """Списать у игрока amount B или обнулить баланс (mode=zero)."""
+    if (denied := _require_admin(request)) is not None:
+        return denied
+    session = request["session"]
+    body = await request.json()
+    target, err = await _admin_target(request, str(body.get("user", "")))
+    if err is not None:
+        return err
+    if body.get("mode") == "zero":
+        target.balance = 0
+    else:
+        amount = _num(body.get("amount"))
+        if amount is None or amount <= 0:
+            return web.json_response({"error": "bad_amount", "message": "Неверное количество"}, status=400)
+        target.balance = max(0, target.balance - int(amount))
+    await session.commit()
+    return web.json_response(await _admin_user_json(session, target))
+
+
 @routes.post("/api/admin/partner")
 async def post_admin_partner(request: web.Request) -> web.Response:
     if (denied := _require_admin(request)) is not None:
