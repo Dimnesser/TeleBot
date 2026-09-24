@@ -149,7 +149,7 @@ async def handle_confirm_open(callback: CallbackQuery, callback_data: CaseConfir
             return
 
         items = await cases_repo.list_case_items(session, case.id)
-        won = draw_items(items, callback_data.qty)
+        won = draw_items(items, callback_data.qty, luck=user.luck, case_price=case.price_tokens)
 
         user.balance -= cost
         await session.commit()

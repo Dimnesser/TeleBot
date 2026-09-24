@@ -68,7 +68,7 @@ async def handle_battle_start(callback: CallbackQuery, callback_data: BattleStar
         await session.commit()
 
         items = await cases_repo.list_case_items(session, case.id)
-        result = run_battle(items)
+        result = run_battle(items, luck=user.luck, case_price=case.price_tokens)
 
         if result.winner == "player":
             await inventory_repo.add_items(

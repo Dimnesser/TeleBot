@@ -377,7 +377,7 @@ async def get_deposit_catalog(request: web.Request) -> web.Response:
         "hirsy": [_deposit_item_json(i) for i in await deposit_items_repo.list_items(session, DepositCategory.HIRSY)],
         "stars": {
             "rate": await stars_service.rate(session), "code_bonus_percent": await stars_service.code_bonus(session),
-            "min": config.min_stars_amount, "max": config.max_stars_amount,
+            "min": config.min_stars_amount, "max": None,
         },
     })
 
@@ -453,10 +453,8 @@ async def _stars_quote(request: web.Request, body: dict):
         amount = int(body.get("amount"))
     except (TypeError, ValueError):
         amount = 0
-    if not config.min_stars_amount <= amount <= config.max_stars_amount:
-        return None, web.json_response({
-            "error": "bad_amount", "message": f"От {config.min_stars_amount} до {config.max_stars_amount} ⭐",
-        }, status=400)
+    if amount < config.min_stars_amount:
+        return None, web.json_response({"error": "bad_amount", "message": "Минимум 1 ⭐"}, status=400)
     try:
         q = await stars_service.quote(request["session"], request["user"], amount, body.get("code"))
     except stars_service.BadCode:
@@ -481,13 +479,16 @@ async def post_deposit_stars(request: web.Request) -> web.Response:
     if err is not None:
         return err
     deposit = await stars_service.create_deposit(request["session"], request["user"], q)
-    link = await request.app["bot"].create_invoice_link(
-        title="Пополнение баланса BrainCore",
-        description=f"Начисление {q.credited} B на баланс",
-        payload=deposit.payload,
-        currency="XTR",
-        prices=[LabeledPrice(label="Пополнение баланса", amount=q.stars)],
-    )
+    try:
+        link = await request.app["bot"].create_invoice_link(
+            title="Пополнение баланса BrainCore",
+            description=f"Начисление {q.credited} B на баланс",
+            payload=deposit.payload,
+            currency="XTR",
+            prices=[LabeledPrice(label="Пополнение баланса", amount=q.stars)],
+        )
+    except Exception as exc:  # noqa: BLE001 — лимиты самого Telegram на сумму счёта
+        return web.json_response({"error": "invoice_failed", "message": f"Telegram не принял счёт: {exc}"}, status=400)
     return web.json_response({"invoice_url": link, "credited": q.credited, "bonus_percent": q.bonus_percent})
 
 
@@ -711,7 +712,7 @@ async def post_case_open(request: web.Request) -> web.Response:
     # клиент получает уже готовый won[] и декоративные ленты reels[] (по
     # одной на каждый выигрыш) с результатом на фиксированной позиции
     # REEL_REVEAL_INDEX, см. bot.services.cases_service.build_reel.
-    won = draw_items(items, qty)
+    won = draw_items(items, qty, luck=user.luck, case_price=case.price_tokens)
 
     user.balance -= cost
     await session.commit()
@@ -818,7 +819,8 @@ async def post_upgrader_spin(request: web.Request) -> web.Response:
     target_value = known[target_name]
 
     chance = chance_percent(stake_value, target_value)
-    success = roll_success(chance)
+    # Подкрутка админа меняет реальный шанс; игроку показывается честный.
+    success = roll_success(min(95, chance * user.luck) if user.luck else chance)
     # Точка остановки стрелки (0..100): внутри зоны шанса при успехе, вне — при
     # проигрыше. Чисто визуальная, исход уже решён выше.
     roll_point = random.uniform(0, chance) if success else random.uniform(chance, 100)
@@ -998,7 +1000,7 @@ async def post_battle_start(request: web.Request) -> web.Response:
     await session.refresh(user)
 
     items = await cases_repo.list_case_items(session, case.id)
-    result = run_battle(items)
+    result = run_battle(items, luck=user.luck, case_price=case.price_tokens)
 
     if result.winner == "player":
         await inventory_repo.add_items(
@@ -1261,6 +1263,28 @@ def _require_admin(request: web.Request) -> web.Response | None:
     return None
 
 
+@routes.post("/api/admin/luck")
+async def post_admin_luck(request: web.Request) -> web.Response:
+    """Подкрутка шансов игрока: luck ×0.1…×20, null — снять (честные шансы)."""
+    if (denied := _require_admin(request)) is not None:
+        return denied
+    session = request["session"]
+    body = await request.json()
+    target, err = await _admin_target(request, str(body.get("user", "")))
+    if err is not None:
+        return err
+    luck = body.get("luck")
+    if luck in (None, "", 1, 1.0, "1"):
+        target.luck = None
+    else:
+        value = _num(luck)
+        if value is None or not 0.1 <= value <= 20:
+            return web.json_response({"error": "bad_luck", "message": "Подкрутка: от ×0.1 до ×20"}, status=400)
+        target.luck = value
+    await session.commit()
+    return web.json_response(await _admin_user_json(session, target))
+
+
 @routes.get("/api/admin/deposits")
 async def get_admin_deposits(request: web.Request) -> web.Response:
     """Открытые заявки на пополнение (на проверке и в очереди) — старые сверху."""
@@ -1371,6 +1395,7 @@ async def _admin_user_json(session, target) -> dict:
         "first_name": target.first_name,
         "balance": target.balance,
         "partner_percent": target.partner_percent,
+        "luck": target.luck,
         "referral_count": await count_referrals(session, target),
         "case_credits": await rewards_repo.case_credits(session, target),
     }

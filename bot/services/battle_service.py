@@ -23,8 +23,8 @@ class BattleResult:
     winner: str  # "player" | "bot" | "tie"
 
 
-def run_battle(items: list[CaseItem]) -> BattleResult:
-    player_item = draw_items(items, 1)[0]
+def run_battle(items: list[CaseItem], *, luck: float | None = None, case_price: int | None = None) -> BattleResult:
+    player_item = draw_items(items, 1, luck=luck, case_price=case_price)[0]  # подкрутка — только игроку
     bot_item = draw_items(items, 1)[0]
 
     if player_item.value > bot_item.value:

@@ -17,7 +17,6 @@ class Config:
     database_url: str = os.getenv("DATABASE_URL", "sqlite+aiosqlite:///./data/brainrot_battle.db")
     # Пополнение Stars — от 1 ⭐ (минимума нет); MIN_STARS_AMOUNT в .env больше не читается.
     min_stars_amount: int = 1
-    max_stars_amount: int = int(os.getenv("MAX_STARS_AMOUNT", "100000"))
     # Апгрейдер: шанс всегда режется в этот диапазон, чтобы не было 0%/100% исходов.
     upgrader_min_chance_percent: int = int(os.getenv("UPGRADER_MIN_CHANCE_PERCENT", "1"))
     # Mini App: в список целей апгрейдера попадают только брейнроты, для

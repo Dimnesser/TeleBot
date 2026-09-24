@@ -582,12 +582,12 @@ function confirmDeposit(root, items, cart, unit) {
 }
 
 function paintStars(body) {
-  const { rate, code_bonus_percent: bonus, min, max } = depositCatalog.stars;
+  const { rate, code_bonus_percent: bonus, min } = depositCatalog.stars;
   body.innerHTML = `
     <p class="dep-hint">Оплата Telegram Stars — ${coinIcon()} зачисляются сразу после оплаты. Курс: 1 ⭐ = ${rate} B. Любой код — промокод, партнёрский или реферальный — даёт +${bonus}%.</p>
     <div class="dep-label">Количество Stars</div>
-    <div class="stars-chips">${[50, 100, 250, 500, 1000, 2500].filter((n) => n >= min && n <= max).map((n) => `<button data-n="${n}">⭐ ${fmt(n)}</button>`).join('')}</div>
-    <input class="field stars-input" id="stars-amount" type="number" inputmode="numeric" min="${min}" max="${max}" placeholder="Например: 625">
+    <div class="stars-chips">${[50, 100, 250, 500, 1000, 2500].map((n) => `<button data-n="${n}">⭐ ${fmt(n)}</button>`).join('')}</div>
+    <input class="field stars-input" id="stars-amount" type="number" inputmode="numeric" min="${min}" placeholder="Например: 625">
     <div class="dep-label">Промокод <span>(бонус +${bonus}%)</span></div>
     <input class="field stars-code" id="stars-code" maxlength="32" placeholder="PROMO" autocomplete="off">
     <div class="stars-get" id="stars-get"></div>
@@ -602,10 +602,10 @@ function paintStars(body) {
     const code = codeInput.value.trim();
     const my = ++seq;
     quoted = null; pay.disabled = true;
-    pay.textContent = n >= min && n <= max ? `Оплатить ⭐ ${fmt(n)}` : 'Создать счёт в Stars';
-    if (n < min || n > max) {
+    pay.textContent = n >= min ? `Оплатить ⭐ ${fmt(n)}` : 'Создать счёт в Stars';
+    if (n < min) {
       body.querySelector('#stars-get').innerHTML = '';
-      body.querySelector('#stars-hint').textContent = input.value ? `От ${fmt(min)} до ${fmt(max)} ⭐` : 'Введи количество Stars выше.';
+      body.querySelector('#stars-hint').textContent = input.value ? 'Минимум 1 ⭐' : 'Введи количество Stars выше.';
       return;
     }
     try {
@@ -1361,6 +1361,12 @@ function adminUserHtml(u) {
       ${credits ? `<div class="muted" style="font-size:12px;margin-top:4px">Кейсы: ${credits}</div>` : ''}
       <div class="admin-actions">
         <div class="inline-form"><input class="field" id="g-balance" type="number" min="1" placeholder="Сколько B" /><button class="btn-chip" data-grant="balance">Выдать B</button></div>
+        <div class="inline-form luck-form">
+          <input class="field" id="g-luck" type="number" min="0.1" max="20" step="0.1" placeholder="Подкрутка ×" value="${u.luck || ''}" />
+          <button class="btn-chip" id="g-luck-set">Подкрутить</button>
+          ${u.luck ? '<button class="btn-chip ghost" id="g-luck-off">Снять</button>' : ''}
+        </div>
+        <div class="muted luck-note">${u.luck ? `Подкрутка ×${u.luck}: ${u.luck > 1 ? 'чаще' : 'реже'} окупающий дроп в кейсах и батле, шанс апгрейдера ×${u.luck}` : 'Шансы честные. ×2 — вдвое чаще окупающий дроп и шанс апгрейда, ×0.5 — наоборот.'}</div>
         <div class="inline-form"><select class="field" id="g-case">${caseOptions()}</select><input class="field narrow" id="g-case-n" type="number" min="1" value="1" /><button class="btn-chip" data-grant="case">Выдать кейс</button></div>
       </div>
     </div>`;
@@ -1545,6 +1551,15 @@ async function bindAdminPanel(root) {
         toast('Выдано', 'success'); haptic.success();
       } catch (err) { toast('Ошибка: ' + err.message, 'error'); }
     }));
+    const setLuck = async (luck) => {
+      try {
+        showUser(await api('/api/admin/luck', { method: 'POST', body: JSON.stringify({ user: String(current.tg_id), luck }) }));
+        toast(luck ? `Подкрутка ×${luck} включена` : 'Подкрутка снята — шансы честные', 'success');
+      } catch (err) { toast(err.message, 'error'); }
+    };
+    userBox.querySelector('#g-luck-set').addEventListener('click', () => setLuck(Number(userBox.querySelector('#g-luck').value) || null));
+    const off = userBox.querySelector('#g-luck-off');
+    if (off) off.addEventListener('click', () => setLuck(null));
   }
 
   panel.querySelector('#admin-find').addEventListener('submit', async (e) => {

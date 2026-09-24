@@ -9,10 +9,10 @@ bot.data.brainrot_roster; в бесплатных кейсах ещё и мон�
 Логика кейса (вся выводится из данных, руками не проставлено ничего):
   * ценность предмета — его ценность в B со скриншотов пользователя
     (brainrot_roster.ROSTER);
-  * шанс предмета ∝ 1 / ценность — дорогие брейнроты реже, но выпадают
+  * шанс предмета ∝ 1 / ценность^0.8 — дорогие реже, но выпадают заметно
     (bot.services.cases_service.item_weight);
   * цена кейса = средний дроп / TARGET_RTP, округлённая вверх — кейс
-    возвращает в среднем 85% своей цены, окупается в 8–34% открытий.
+    возвращает в среднем 92% своей цены, окупается в 13–40% открытий.
 """
 from __future__ import annotations
 
@@ -24,9 +24,9 @@ from bot.data.coins import COIN_RARITY, coin_name
 from bot.database.models import CaseCategory
 from bot.services.cases_service import CASE_WEIGHT_EXPONENT
 
-CASES_CONTENT_VERSION = "19-coin-prefix"
+CASES_CONTENT_VERSION = "20-better-odds"
 
-TARGET_RTP = 0.85
+TARGET_RTP = 0.92
 
 
 @dataclass(frozen=True)

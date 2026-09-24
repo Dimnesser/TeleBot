@@ -6,10 +6,10 @@ import random
 from bot.database.models import Case, CaseItem
 
 
-# Вес предмета ∝ 1/ценность^k. k = 1 — шанс обратно пропорционален цене:
-# дорогие брейнроты реже, но не «никогда» (при 1.5 топ кейса выпадал раз на
-# ~10 000 открытий). Та же степень — в расчёте цены (seed_cases.price_for).
-CASE_WEIGHT_EXPONENT = 1.0
+# Вес предмета ∝ 1/ценность^k. k = 0.8 — дорогие брейнроты реже дешёвых, но
+# топ кейса выпадает в 1–4% открытий (при k = 1 было 0.1–3%). Та же степень —
+# в расчёте цены (seed_cases.price_for).
+CASE_WEIGHT_EXPONENT = 0.8
 
 
 def item_weight(item: CaseItem) -> float:
@@ -22,10 +22,18 @@ def total_cost(case: Case, quantity: int) -> int | None:
     return case.price_tokens * quantity
 
 
-def draw_items(items: list[CaseItem], quantity: int) -> list[CaseItem]:
+def draw_items(
+    items: list[CaseItem], quantity: int, *, luck: float | None = None, case_price: int | None = None
+) -> list[CaseItem]:
+    """luck — подкрутка админа для игрока (User.luck): вес предметов, которые
+    окупают кейс (ценность ≥ цены; у бесплатного — дороже медианы), × luck.
+    >1 — чаще окупается, <1 — реже; None — честные веса."""
     if not items:
         return []
     weights = [item_weight(item) for item in items]
+    if luck and luck != 1:
+        threshold = case_price or sorted(i.value for i in items)[len(items) // 2]
+        weights = [w * luck if i.value >= threshold else w for w, i in zip(weights, items)]
     return random.choices(items, weights=weights, k=quantity)
 
 

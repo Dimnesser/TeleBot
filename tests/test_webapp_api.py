@@ -782,3 +782,19 @@ async def test_upgrader_stake_up_to_five(client, auth_headers, in_memory_db) -> 
     assert r.status == 200 and body["stake_value"] == 205 and len(body["contributions"]) == 5
     left = await (await client.get("/api/inventory", headers=auth_headers)).json()
     assert len([i for i in left if i["id"] in ids[:5]]) == 0
+
+
+async def test_admin_luck_set_and_cancel(client, auth_headers, admin_headers) -> None:
+    await client.get("/api/me", headers=auth_headers)
+    assert (await client.post("/api/admin/luck", headers=auth_headers, json={"user": "999111", "luck": 5})).status == 403
+    r = await client.post("/api/admin/luck", headers=admin_headers, json={"user": "999111", "luck": 5})
+    assert (await r.json())["luck"] == 5
+    r = await client.post("/api/admin/luck", headers=admin_headers, json={"user": "999111", "luck": 100})
+    assert r.status == 400
+    r = await client.post("/api/admin/luck", headers=admin_headers, json={"user": "999111", "luck": None})
+    assert (await r.json())["luck"] is None
+
+
+async def test_stars_no_upper_limit(client, auth_headers) -> None:
+    r = await client.post("/api/deposit/stars/quote", headers=auth_headers, json={"amount": 5_000_000})
+    assert r.status == 200 and (await r.json())["credited"] == 8_750_000

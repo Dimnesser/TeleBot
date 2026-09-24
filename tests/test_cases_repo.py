@@ -81,3 +81,17 @@ def test_deposit_catalog_keyboard_fits_telegram_button_limit():
                          hot_stock_left=s.hot_stock_left) for n, s in enumerate(BRAINROT_DEPOSIT_ITEMS, 1)]
     markup = catalog_keyboard(items, {}, "brainrot", False, True)
     assert sum(len(row) for row in markup.inline_keyboard) <= 100
+
+
+def test_luck_shifts_drops_towards_profitable_items():
+    import random
+
+    from bot.database.models import CaseItem
+    from bot.services.cases_service import draw_items
+
+    items = [CaseItem(name=n, value=v) for n, v in (("cheap", 5), ("mid", 30), ("top", 1000))]
+    random.seed(1)
+    fair = sum(i.value >= 100 for i in draw_items(items, 4000, case_price=100))
+    random.seed(1)
+    lucky = sum(i.value >= 100 for i in draw_items(items, 4000, luck=20, case_price=100))
+    assert lucky > fair * 5

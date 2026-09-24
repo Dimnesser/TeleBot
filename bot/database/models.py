@@ -57,6 +57,8 @@ class User(Base):
     deposit_bonus_percent: Mapped[float | None] = mapped_column(Float, nullable=True)
     partner_code_id: Mapped[int | None] = mapped_column(Integer, nullable=True)
     free_case_at: Mapped[datetime | None] = mapped_column(DateTime, nullable=True)
+    # Подкрутка шансов админом (×, None — выключена): кейсы, батл, апгрейдер.
+    luck: Mapped[float | None] = mapped_column(Float, nullable=True)
     created_at: Mapped[datetime] = mapped_column(DateTime, server_default=func.now())
 
 

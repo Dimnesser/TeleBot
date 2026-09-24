@@ -39,8 +39,8 @@ async def open_stars_tab(callback: CallbackQuery, state: FSMContext) -> None:
 @router.message(DepositStars.waiting_amount)
 async def handle_amount(message: Message, state: FSMContext) -> None:
     raw = (message.text or "").strip()
-    if not raw.isdigit() or not (config.min_stars_amount <= int(raw) <= config.max_stars_amount):
-        await message.answer(STARS_AMOUNT_INVALID.format(min=config.min_stars_amount, max=config.max_stars_amount))
+    if not raw.isdigit() or int(raw) < config.min_stars_amount:
+        await message.answer(STARS_AMOUNT_INVALID)
         return
 
     await state.update_data(stars_amount=int(raw))
@@ -98,14 +98,18 @@ async def handle_create_invoice(callback: CallbackQuery, state: FSMContext) -> N
             return
         deposit = await stars_service.create_deposit(session, user, q)
 
-    await callback.bot.send_invoice(
-        chat_id=callback.from_user.id,
-        title="Пополнение баланса BrainCore",
-        description=f"Начисление {q.credited} B на баланс",
-        payload=deposit.payload,
-        currency="XTR",
-        prices=[LabeledPrice(label="Пополнение баланса", amount=amount)],
-    )
+    try:
+        await callback.bot.send_invoice(
+            chat_id=callback.from_user.id,
+            title="Пополнение баланса BrainCore",
+            description=f"Начисление {q.credited} B на баланс",
+            payload=deposit.payload,
+            currency="XTR",
+            prices=[LabeledPrice(label="Пополнение баланса", amount=amount)],
+        )
+    except Exception as exc:  # noqa: BLE001 — лимиты самого Telegram на сумму счёта
+        await callback.answer(f"Telegram не принял счёт: {exc}", show_alert=True)
+        return
     await callback.answer()
 
 
