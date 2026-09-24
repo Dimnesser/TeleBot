@@ -38,3 +38,15 @@ def main_menu_keyboard() -> InlineKeyboardMarkup:
     for section, label in MENU_SECTIONS:
         builder.row(InlineKeyboardButton(text=label, callback_data=MainMenuCB(section=section).pack()))
     return builder.as_markup()
+
+
+def welcome_keyboard(news_url: str | None, support_url: str | None) -> InlineKeyboardMarkup:
+    """Кнопки под приветствием: «Играть!» (Mini App), «Новости», «Поддержка».
+    Ссылки задаёт админ в Mini App; незаданные кнопки не рисуются."""
+    builder = InlineKeyboardBuilder()
+    if config.webapp_url:
+        builder.row(InlineKeyboardButton(text="🚀 Играть!", web_app=WebAppInfo(url=config.webapp_url)))
+    links = [InlineKeyboardButton(text=t, url=u) for t, u in (("Новости", news_url), ("Поддержка", support_url)) if u]
+    if links:
+        builder.row(*links)
+    return builder.as_markup()

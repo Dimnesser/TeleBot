@@ -542,7 +542,7 @@ async def test_free_case_requires_channel_subscription(client, auth_headers, adm
     assert r.status == 400 and (await r.json())["error"] == "bot_not_in_channel"
     r = await client.post("/api/admin/settings", headers=admin_headers,
                           json={"required_channel": "https://t.me/braincore_news", "free_case_cooldown_hours": 12})
-    assert (await r.json()) == {"required_channel": "@braincore_news", "free_case_cooldown_hours": 12}
+    assert (await r.json()) == {"required_channel": "@braincore_news", "free_case_cooldown_hours": 12, "support_url": None}
     # обычному игроку настройки недоступны
     assert (await client.get("/api/admin/settings", headers=auth_headers)).status == 403
 

@@ -1,16 +1,21 @@
 """Обработка /start и регистрация пользователя."""
 from __future__ import annotations
 
+from pathlib import Path
+
 from aiogram import Router
 from aiogram.filters import CommandStart
 from aiogram.fsm.context import FSMContext
-from aiogram.types import Message
+from aiogram.types import FSInputFile, Message
 
 from bot.database.engine import async_session
 from bot.database.repo.users import get_or_create_user
-from bot.keyboards.main_menu import main_menu_keyboard
+from bot.keyboards.main_menu import welcome_keyboard
+from bot.services import settings_service
 from bot.services.partner_service import PartnerError, apply_partner_code
-from bot.utils.texts import PARTNER_CODE_APPLIED, WELCOME_TEXT
+from bot.utils.texts import PARTNER_CODE_APPLIED, START_CAPTION
+
+WELCOME_BANNER = Path(__file__).resolve().parents[1] / "assets" / "welcome.jpg"
 
 router = Router(name="start")
 
@@ -38,8 +43,11 @@ async def handle_start(message: Message, state: FSMContext) -> None:
                 partner_note = PARTNER_CODE_APPLIED.format(bonus=pc.deposit_bonus_percent, cases=pc.case_amount)
             except PartnerError:
                 pass
+        news_url = settings_service.channel_url(await settings_service.required_channel(session))
+        support_url = await settings_service.get_setting(session, settings_service.SUPPORT_URL)
 
-    await message.answer(
-        WELCOME_TEXT.format(name=message.from_user.first_name or "игрок", balance=user.balance) + partner_note,
-        reply_markup=main_menu_keyboard(),
+    await message.answer_photo(
+        FSInputFile(WELCOME_BANNER),
+        caption=START_CAPTION + partner_note,
+        reply_markup=welcome_keyboard(news_url, support_url),
     )

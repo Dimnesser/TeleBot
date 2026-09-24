@@ -1,0 +1,81 @@
+<!DOCTYPE html>
+<html>
+<head>
+<meta charset="utf-8">
+<style>
+@font-face { font-family: "OswaldB"; font-weight: 700; src: url(oswald-cyr.woff2) format("woff2"); unicode-range: U+0400-045F, U+0490-0491, U+04B0-04B1, U+2116; }
+@font-face { font-family: "OswaldB"; font-weight: 700; src: url(oswald-lat.woff2) format("woff2"); }
+* { box-sizing: border-box; margin: 0; padding: 0; }
+html, body { width: 1280px; height: 656px; overflow: hidden; background: #050b1f; }
+.scene {
+  position: relative; width: 1280px; height: 656px; overflow: hidden;
+  background:
+    radial-gradient(620px 480px at 78% 52%, rgba(40, 110, 255, .55), transparent 70%),
+    radial-gradient(900px 600px at 20% 40%, rgba(18, 52, 150, .55), transparent 70%),
+    linear-gradient(160deg, #0a1a4a 0%, #06102e 55%, #040a1f 100%);
+}
+/* диагональные «скоростные» полосы */
+.band { position: absolute; transform: rotate(-24deg); transform-origin: center; }
+.band.big { height: 120px; background: linear-gradient(90deg, rgba(60,130,255,0), rgba(70,150,255,.55), rgba(60,130,255,0)); filter: blur(1px); }
+.band.line { height: 5px; background: linear-gradient(90deg, rgba(140,200,255,0), rgba(190,230,255,.95), rgba(140,200,255,0)); box-shadow: 0 0 14px rgba(120,190,255,.9); }
+.band.thin { height: 2px; background: linear-gradient(90deg, rgba(140,200,255,0), rgba(170,215,255,.7), rgba(140,200,255,0)); }
+.shard { position: absolute; background: linear-gradient(135deg, #2e6cff, #103a9e); clip-path: polygon(0 0, 100% 0, 78% 100%, 0% 100%); opacity: .9; box-shadow: 0 0 30px rgba(60,130,255,.8); }
+.chev { position: absolute; font: 700 30px "OswaldB", sans-serif; color: rgba(190,220,255,.85); letter-spacing: -4px; text-shadow: 0 0 10px rgba(120,180,255,.9); }
+
+/* ДОБРО — серебро с объёмной синей «выдавкой» */
+.dobro {
+  position: absolute; left: 44px; top: 70px; font: 700 250px/1 "OswaldB", sans-serif; letter-spacing: -5px;
+  transform: skewX(-9deg); color: transparent;
+  background: linear-gradient(180deg, #ffffff 0%, #f1f4fb 38%, #b9c3d8 62%, #eef2fa 78%, #9aa6c2 100%);
+  -webkit-background-clip: text; background-clip: text;
+  -webkit-text-stroke: 3px #0b1640;
+  filter: drop-shadow(2px 2px 0 #13266a) drop-shadow(3px 3px 0 #13266a) drop-shadow(4px 4px 0 #0f1f58) drop-shadow(5px 5px 0 #0f1f58)
+          drop-shadow(6px 6px 0 #0c1947) drop-shadow(7px 7px 0 #0c1947) drop-shadow(0 18px 24px rgba(0,0,0,.6));
+}
+/* плашка ПОЖАЛОВАТЬ! */
+.plate {
+  position: absolute; left: 118px; top: 366px; padding: 2px 36px 8px 30px; transform: skewX(-14deg);
+  background: linear-gradient(180deg, #13307f, #0a1b52); border: 5px solid #5d8dff; border-radius: 6px;
+  box-shadow: 0 0 0 4px #0a1540, 0 0 40px rgba(80,140,255,.8), inset 0 0 30px rgba(90,150,255,.35);
+}
+.plate span {
+  display: block; font: 700 92px/1.05 "OswaldB", sans-serif; letter-spacing: -1px; color: #fff; transform: skewX(4deg);
+  -webkit-text-stroke: 2px #0a1540;
+  text-shadow: 3px 3px 0 #0a1540, 5px 5px 0 #0a1540, 0 0 26px rgba(120,180,255,.8);
+}
+/* герой */
+.halo { position: absolute; right: 10px; top: 50px; width: 560px; height: 560px; border-radius: 50%;
+  background: radial-gradient(circle, rgba(110,180,255,.75), rgba(40,110,255,.35) 45%, transparent 70%); filter: blur(6px); }
+.ring { position: absolute; right: 60px; top: 100px; width: 460px; height: 460px; border-radius: 50%; border: 3px solid rgba(150,205,255,.55);
+  box-shadow: 0 0 30px rgba(110,180,255,.8), inset 0 0 30px rgba(110,180,255,.5); }
+.hero { position: absolute; right: 20px; bottom: -10px; height: 610px; filter: drop-shadow(0 0 22px rgba(90,160,255,.95)) drop-shadow(0 24px 28px rgba(0,0,0,.6)); }
+.brand { position: absolute; right: 30px; bottom: 22px; font: 700 26px "OswaldB", sans-serif; letter-spacing: 1px; color: #fff; opacity: .92; text-shadow: 0 0 12px rgba(120,180,255,.9); }
+.brand b { color: #c6ff3d; }
+</style>
+</head>
+<body>
+<div class="scene">
+  <div class="band big" style="left:-160px; top:40px; width:900px; opacity:.55"></div>
+  <div class="band big" style="left:380px; top:520px; width:1100px; opacity:.5"></div>
+  <div class="band line" style="left:-100px; top:170px; width:760px"></div>
+  <div class="band line" style="left:560px; top:40px; width:640px; opacity:.8"></div>
+  <div class="band line" style="left:320px; top:600px; width:820px"></div>
+  <div class="band thin" style="left:-40px; top:300px; width:620px"></div>
+  <div class="band thin" style="left:700px; top:260px; width:560px"></div>
+  <div class="band thin" style="left:120px; top:560px; width:540px"></div>
+  <div class="band thin" style="left:880px; top:470px; width:420px"></div>
+  <div class="shard" style="left:-40px; top:-30px; width:300px; height:70px; transform: rotate(-24deg)"></div>
+  <div class="shard" style="left:980px; top:590px; width:360px; height:80px; transform: rotate(-24deg)"></div>
+  <div class="chev" style="left:60px; top:584px">›››››</div>
+  <div class="chev" style="left:1080px; top:24px; transform: rotate(-24deg)">‹‹‹‹</div>
+
+  <div class="halo"></div>
+  <div class="ring"></div>
+  <img class="hero" src="kraken_crop.png" alt="">
+
+  <div class="dobro">ДОБРО</div>
+  <div class="plate"><span>ПОЖАЛОВАТЬ!</span></div>
+  <div class="brand">BRAIN<b>CORE</b></div>
+</div>
+</body>
+</html>

@@ -169,6 +169,10 @@ CHEAP_SECRETS: list[RosterBrainrot] = [
     RosterBrainrot("Ventoliero Pavonero", S, 41, "15.5B", "65M"),
     RosterBrainrot("Ketchuru and Musturu", S, 51, "7.5B", "42.5M"),
     RosterBrainrot("Noodle Noodle Poodle", S, 54, "3B", "27.5M"),
+    # Из бесплатного кейса на референсе (второй скриншот пользователя).
+    RosterBrainrot("Los Combinasionas", S, 14, "2B", "15M"),
+    RosterBrainrot("Ketupat Kepat", S, 28, "5B", "35M"),
+    RosterBrainrot("La Secret Combinasion", S, 90, "50B", "125M"),
 ]
 ROSTER = ROSTER + CHEAP_SECRETS
 

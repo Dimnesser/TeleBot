@@ -8,7 +8,7 @@ from aiogram import Bot, Dispatcher
 from aiogram.client.default import DefaultBotProperties
 from aiogram.enums import ParseMode
 from aiogram.exceptions import TelegramBadRequest
-from aiogram.types import ErrorEvent
+from aiogram.types import ErrorEvent, MenuButtonWebApp, WebAppInfo
 
 from bot.config import config
 from bot.database.engine import init_db
@@ -68,6 +68,13 @@ async def main() -> None:
 
     me = await bot.get_me()
     logger.info("Бот @%s запущен", me.username)
+
+    if config.webapp_url:
+        # Кнопка слева от поля ввода открывает Mini App сразу — как на референсе.
+        try:
+            await bot.set_chat_menu_button(menu_button=MenuButtonWebApp(text="Играть", web_app=WebAppInfo(url=config.webapp_url)))
+        except Exception:  # noqa: BLE001 — без кнопки меню бот всё равно работает
+            logger.warning("Не удалось поставить кнопку меню Mini App", exc_info=True)
 
     await bot.delete_webhook(drop_pending_updates=True)
     await run_webapp(bot)

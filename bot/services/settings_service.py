@@ -2,7 +2,9 @@
 
   * required_channel — канал обязательной подписки для бесплатного кейса
     (@username или ссылка t.me/...; пусто — подписка не нужна);
-  * free_case_cooldown_hours — раз во сколько часов бесплатный кейс.
+  * free_case_cooldown_hours — раз во сколько часов бесплатный кейс;
+  * support_url — кнопка «Поддержка» в приветствии (@username или ссылка).
+Кнопка «Новости» в приветствии ведёт на канал обязательной подписки.
 """
 from __future__ import annotations
 
@@ -15,6 +17,7 @@ from bot.database.models import AppMeta
 
 REQUIRED_CHANNEL = "required_channel"
 FREE_CASE_COOLDOWN_HOURS = "free_case_cooldown_hours"
+SUPPORT_URL = "support_url"
 DEFAULT_FREE_CASE_COOLDOWN_HOURS = 12
 
 # Статусы getChatMember, при которых пользователь считается подписанным.
@@ -47,6 +50,20 @@ def normalize_channel(raw: str) -> str | None:
     if not re.fullmatch(r"[A-Za-z0-9_]{4,64}", name):
         raise ValueError("bad_channel")
     return "@" + name
+
+
+def normalize_link(raw: str) -> str | None:
+    """«@name» / «t.me/name» / https-ссылка → https-ссылка. Пусто → None."""
+    raw = (raw or "").strip()
+    if not raw:
+        return None
+    if re.fullmatch(r"https://\S+", raw):
+        return raw
+    return "https://t.me/" + normalize_channel(raw).lstrip("@")
+
+
+def channel_url(channel: str | None) -> str | None:
+    return f"https://t.me/{channel.lstrip('@')}" if channel else None
 
 
 async def required_channel(session: AsyncSession) -> str | None:

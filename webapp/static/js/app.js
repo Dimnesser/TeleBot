@@ -1002,7 +1002,8 @@ function adminPanelHtml() {
       <form class="admin-grid" id="admin-settings" autocomplete="off">
         <input class="field full" id="s-channel" placeholder="Канал подписки: @username или t.me/… (пусто — без подписки)" />
         <input class="field" id="s-hours" type="number" min="0.5" max="168" step="0.5" placeholder="Раз в N часов" />
-        <button class="btn-chip" type="submit">Сохранить</button>
+        <input class="field full" id="s-support" placeholder="Поддержка в /start: @username или ссылка" />
+        <button class="btn-chip full" type="submit">Сохранить</button>
       </form>
       <div class="muted admin-hint" id="s-status"></div>
 
@@ -1088,6 +1089,7 @@ async function bindAdminPanel(root) {
   const paintSettings = (st) => {
     settingsForm.querySelector('#s-channel').value = st.required_channel || '';
     settingsForm.querySelector('#s-hours').value = st.free_case_cooldown_hours;
+    settingsForm.querySelector('#s-support').value = st.support_url || '';
     panel.querySelector('#s-status').textContent = st.required_channel
       ? `Подписка на ${st.required_channel} обязательна · кейс раз в ${st.free_case_cooldown_hours} ч`
       : `Без обязательной подписки · кейс раз в ${st.free_case_cooldown_hours} ч`;
@@ -1099,6 +1101,7 @@ async function bindAdminPanel(root) {
       const st = await api('/api/admin/settings', { method: 'POST', body: JSON.stringify({
         required_channel: settingsForm.querySelector('#s-channel').value.trim(),
         free_case_cooldown_hours: Number(settingsForm.querySelector('#s-hours').value),
+        support_url: settingsForm.querySelector('#s-support').value.trim(),
       }) });
       paintSettings(st);
       toast('Сохранено', 'success');

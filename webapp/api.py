@@ -102,7 +102,7 @@ async def _free_case_state(request: web.Request) -> dict:
         "free_wait_seconds": free_case_wait_seconds(request["user"], hours),
         "free_cooldown_hours": hours,
         "required_channel": channel,
-        "required_channel_url": f"https://t.me/{channel.lstrip('@')}" if channel else None,
+        "required_channel_url": settings_service.channel_url(channel),
     }
 
 
@@ -961,6 +961,7 @@ async def get_admin_settings(request: web.Request) -> web.Response:
     return web.json_response({
         "required_channel": await settings_service.required_channel(session),
         "free_case_cooldown_hours": await settings_service.free_case_cooldown_hours(session),
+        "support_url": await settings_service.get_setting(session, settings_service.SUPPORT_URL),
     })
 
 
@@ -987,6 +988,12 @@ async def post_admin_settings(request: web.Request) -> web.Response:
                     "message": f"Добавь бота админом в {channel}, иначе подписку не проверить",
                 }, status=400)
         await settings_service.set_setting(session, settings_service.REQUIRED_CHANNEL, channel)
+    if "support_url" in body:
+        try:
+            support = settings_service.normalize_link(body.get("support_url") or "")
+        except ValueError:
+            return web.json_response({"error": "bad_link", "message": "Поддержка: @username или https-ссылка"}, status=400)
+        await settings_service.set_setting(session, settings_service.SUPPORT_URL, support)
     if "free_case_cooldown_hours" in body:
         hours = _num(body.get("free_case_cooldown_hours"))
         if hours is None or not 0 < hours <= 24 * 7:
