@@ -5,6 +5,7 @@ bot/handlers/*.py, просто с JSON вместо edit_text/inline-кнопо
 """
 from __future__ import annotations
 
+import random
 from pathlib import Path
 
 from aiohttp import web
@@ -375,16 +376,25 @@ async def post_upgrader_spin(request: web.Request) -> web.Response:
     body = await request.json()
     item_id = body.get("contribution_item_id")
     target_name = body.get("target_name")
-    target_value = body.get("target_value")
-    if not item_id or not target_name or not target_value:
+    if not item_id or not target_name:
         return web.json_response({"error": "missing_fields"}, status=400)
 
     item = await inventory_repo.get_by_id(session, int(item_id))
     if item is None or item.user_id != user.id:
         return web.json_response({"error": "item_gone"}, status=404)
 
-    chance = chance_percent(item.value, int(target_value))
+    # Ценность цели берётся из каталога, а не из запроса: иначе клиент мог
+    # бы сам назначить цели любую цену.
+    known = {i.name: i.value for i in await list_known_items(session)}
+    if target_name not in known or known[target_name] <= item.value:
+        return web.json_response({"error": "invalid_target"}, status=400)
+    target_value = known[target_name]
+
+    chance = chance_percent(item.value, target_value)
     success = roll_success(chance)
+    # Точка остановки стрелки (0..100): внутри зоны шанса при успехе, вне — при
+    # проигрыше. Чисто визуальная, исход уже решён выше.
+    roll_point = random.uniform(0, chance) if success else random.uniform(chance, 100)
 
     contribution_label = _brainrot_json(item.item_name, item.value, item.rarity)
     await inventory_repo.delete(session, item)
@@ -395,7 +405,13 @@ async def post_upgrader_spin(request: web.Request) -> web.Response:
     await quest_service.record_progress(session, user, "upgrader_spin")
 
     return web.json_response(
-        {"success": success, "chance": chance, "contribution": contribution_label, "won_item": won_item}
+        {
+            "success": success,
+            "chance": chance,
+            "roll_point": round(roll_point, 2),
+            "contribution": contribution_label,
+            "won_item": won_item,
+        }
     )
 
 

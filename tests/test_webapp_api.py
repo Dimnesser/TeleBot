@@ -331,3 +331,18 @@ async def test_multi_open_returns_reel_per_win_and_real_game_info(client, auth_h
         assert won["rarity"] in ("secret", "og")
         assert won["game"]["wiki_url"].startswith("https://stealabrainrot.fandom.com/wiki/")
         assert won["inventory_id"]
+
+
+async def test_upgrader_rejects_unknown_target(client, auth_headers) -> None:
+    r = await client.get("/api/cases?category=starter", headers=auth_headers)
+    case = min((await r.json())["cases"], key=lambda c: c["price_tokens"])
+    await client.post(f"/api/cases/{case['id']}/open", headers=auth_headers, json={"qty": 1})
+    item = (await (await client.get("/api/inventory", headers=auth_headers)).json())[0]
+    r = await client.post(
+        "/api/upgrader/spin",
+        headers=auth_headers,
+        json={"contribution_item_id": item["id"], "target_name": "Fake Brainrot", "target_value": 1},
+    )
+    assert r.status == 400
+    # вклад не списан
+    assert len(await (await client.get("/api/inventory", headers=auth_headers)).json()) == 1

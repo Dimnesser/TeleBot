@@ -12,6 +12,9 @@ if (tg) {
 // просто вешала экран молча ("не открывается") — теперь хотя бы видно, что
 // именно сломалось, вместо тишины.
 window.addEventListener('error', (e) => {
+  // «Script error.» без подробностей — ошибка из чужого скрипта (SDK Telegram,
+  // шрифты): браузер прячет её текст, и нашему коду она не мешает.
+  if (!e.filename || /^Script error\.?$/.test(e.message || '')) { console.warn('cross-origin error', e); return; }
   try { toast('Ошибка интерфейса: ' + (e.message || 'см. консоль'), 'error'); } catch (_) {}
 });
 window.addEventListener('unhandledrejection', (e) => {
@@ -130,6 +133,8 @@ async function refreshMe() {
   const prevTokens = ME ? ME.game_tokens : null;
   ME = await api('/api/me');
   document.getElementById('drawer-username').textContent = ME.username ? '@' + ME.username : (ME.first_name || 'игрок');
+  const drawerAvatar = document.getElementById('drawer-avatar');
+  if (drawerAvatar && !drawerAvatar.dataset.ready) { drawerAvatar.outerHTML = avatarHtml(ME).replace('class="avatar ', 'id="drawer-avatar" data-ready="1" class="avatar '); }
   document.getElementById('drawer-balance').textContent = ME.balance;
   const topBalance = document.getElementById('topbar-tokens');
   if (topBalance) {
@@ -179,6 +184,7 @@ function closeDrawer() {
 document.getElementById('btn-drawer').addEventListener('click', openDrawer);
 document.getElementById('drawer-overlay').addEventListener('click', closeDrawer);
 document.getElementById('btn-profile').addEventListener('click', () => navigate('profile'));
+document.getElementById('drawer-profile').addEventListener('click', () => { closeDrawer(); navigate('profile'); });
 
 // ------------------------------------------------------------------- router
 
@@ -222,6 +228,7 @@ function skeletonGrid() {
 
 async function renderScreen(screen, params = {}) {
   closeStage();
+  closeModal();
   renderDrawer(screen);
   const root = document.getElementById('screen');
   root.innerHTML = `<div class="section-title">&nbsp;</div>${skeletonGrid()}`;
@@ -516,9 +523,15 @@ async function runOpening(stage, c, qty) {
 function spinReel(reelEl, revealIndex, duration) {
   const track = reelEl.querySelector('.reel-track');
   const cards = track.children;
-  const cardW = cards[0].getBoundingClientRect().width + parseFloat(getComputedStyle(track).columnGap || '0');
+  // offsetLeft/offsetWidth — layout-координаты, на них НЕ влияет transform
+  // (у .reel есть анимация появления со scale(.96): getBoundingClientRect
+  // в этот момент занижал ширину карточки на 4%, и за 34 карточки лента
+  // «недоезжала» почти на целую карточку — победитель вставал правее маркера).
+  const winnerEl = cards[revealIndex];
+  const cardW = winnerEl.offsetWidth;
+  const step = cards[1].offsetLeft - cards[0].offsetLeft;
   const viewW = reelEl.clientWidth;
-  const center = revealIndex * cardW + cardW / 2 - viewW / 2;
+  const center = winnerEl.offsetLeft - cards[0].offsetLeft + cardW / 2 - viewW / 2;
   const jitter = (Math.random() - 0.5) * cardW * 0.7;
   const target = center + jitter;
   const marker = reelEl.querySelector('.reel-marker');
@@ -541,7 +554,7 @@ function spinReel(reelEl, revealIndex, duration) {
     const t = Math.min(1, (now - start) / duration);
     const x = target * ease(t);
     track.style.transform = `translate3d(${-x}px,0,0)`;
-    const idx = Math.floor((x + viewW / 2) / cardW);
+    const idx = Math.floor((x + viewW / 2) / step);
     if (idx !== lastIdx) {
       lastIdx = idx;
       marker.classList.remove('tick'); void marker.offsetWidth; marker.classList.add('tick');
@@ -754,117 +767,205 @@ function paintInventory(root, items) {
 
 // =================================================================== ПРОФИЛЬ
 
+function tgUser() {
+  return (tg && tg.initDataUnsafe && tg.initDataUnsafe.user) || null;
+}
+
+function avatarHtml(me, cls = '') {
+  const u = tgUser();
+  const name = me.username ? me.username : (me.first_name || '?');
+  const letter = escapeHtml(name.replace('@', '').charAt(0).toUpperCase() || '?');
+  const photo = u && u.photo_url ? `<img src="${u.photo_url}" alt="" onerror="this.remove()">` : '';
+  return `<div class="avatar ${cls}"><span>${letter}</span>${photo}</div>`;
+}
+
 async function renderProfileScreen(root) {
-  const [me, inventory] = await Promise.all([refreshMe(), api('/api/inventory?limit=50')]);
-  const bestDrop = inventory.slice().sort((a, b) => b.value - a.value)[0];
-  const rarityCounts = {};
-  inventory.forEach((i) => { rarityCounts[i.rarity] = (rarityCounts[i.rarity] || 0) + 1; });
+  const [me, inventory] = await Promise.all([refreshMe(), api('/api/inventory?limit=500')]);
+  const byValue = inventory.slice().sort((a, b) => b.value - a.value);
+  const recent = inventory.slice().sort((a, b) => new Date(b.obtained_at) - new Date(a.obtained_at)).slice(0, 8);
+  const total = inventory.reduce((s, i) => s + i.value, 0);
+  const ogCount = inventory.filter((i) => i.rarity === 'og').length;
+  const displayName = me.username ? '@' + me.username : (me.first_name || 'игрок');
 
   root.innerHTML = `
-    <div class="section-title">ПРОФИЛЬ</div>
-    <div class="card">
-      <div style="display:flex;align-items:center;gap:12px">
-        <div class="avatar" style="width:54px;height:54px;font-size:26px">🧑‍💻</div>
-        <div>
-          <div style="font-weight:800">${me.username ? '@' + escapeHtml(me.username) : escapeHtml(me.first_name || 'игрок')}</div>
-          <div class="muted">Telegram id: ${me.tg_id}</div>
-        </div>
+    <div class="profile-hero">
+      <div class="profile-hero-bg"></div>
+      ${avatarHtml(me, 'avatar-lg')}
+      <div class="profile-name">${escapeHtml(displayName)}</div>
+      <div class="profile-id">ID ${me.tg_id}</div>
+      <div class="profile-wallets">
+        <div><span>Демо</span><b>${fmt(me.game_tokens)} 🎫</b></div>
+        <div><span>Баланс</span><b>${fmt(me.balance)} 🪙</b></div>
       </div>
     </div>
-    <div class="stat-grid">
-      <div class="stat-box"><div class="stat-label">Реальный баланс</div><div class="stat-value">${me.balance} 🪙</div></div>
-      <div class="stat-box"><div class="stat-label">Демо-фишки</div><div class="stat-value">${me.game_tokens} 🎫</div></div>
-      <div class="stat-box"><div class="stat-label">Предметов в инвентаре</div><div class="stat-value">${inventory.length}</div></div>
-      <div class="stat-box"><div class="stat-label">Рефералов</div><div class="stat-value">${me.referral_count}</div></div>
+    <div class="profile-stats">
+      <div><b>${inventory.length}</b><span>брейнротов</span></div>
+      <div><b>${fmt(total)}</b><span>ценность 🎫</span></div>
+      <div><b>${ogCount}</b><span>OG</span></div>
+      <div><b>${me.referral_count}</b><span>рефералов</span></div>
     </div>
-    ${bestDrop ? `
-      <h4 style="margin:18px 0 8px">Лучший дроп</h4>
-      <div class="reveal-card" style="--rc:${bestDrop.rarity_color};padding:16px">
-        ${brainrotArt(bestDrop)}
-        <style>#app .reveal-card .p-tile{width:64px;height:64px;font-size:24px;margin:0 auto 8px}</style>
-        ${rarityBadge(bestDrop)}
-        <div class="reveal-name" style="font-size:15px;margin-top:6px">${escapeHtml(bestDrop.name)}</div>
-        <div class="reveal-value" style="font-size:16px;--rc:${bestDrop.rarity_color}">${fmt(bestDrop.value)} 🎫</div>
-      </div>` : ''}
-    <button class="btn btn-ghost" style="margin-top:8px" onclick="navigate('inventory')">🎒 Весь инвентарь</button>
+    ${byValue.length ? `
+      <h3 class="profile-h">Витрина</h3>
+      <div class="showcase">
+        ${byValue.slice(0, 3).map((b, i) => `
+          <div class="showcase-card ${i === 0 ? 'top' : ''}" style="${glowVars(b)}">
+            ${i === 0 ? '<div class="reveal-rays"></div>' : ''}
+            ${brainrotArt(b)}
+            ${rarityBadge(b)}
+            <div class="showcase-name">${escapeHtml(b.name)}</div>
+            <div class="showcase-value">${fmt(b.value)} 🎫</div>
+          </div>`).join('')}
+      </div>
+      <h3 class="profile-h">Последние дропы</h3>
+      <div class="recent-row">
+        ${recent.map((b) => `<div class="recent-card" style="${glowVars(b)}">${brainrotArt(b)}<div class="recent-src">${escapeHtml(b.case_name)}</div></div>`).join('')}
+      </div>` : '<div class="empty-state">Пока пусто — открой первый кейс на главной.</div>'}
+    <div class="btn-row" style="margin-top:14px">
+      <button class="btn btn-ghost" onclick="navigate('inventory')">🎒 Инвентарь</button>
+      <button class="btn btn-primary" onclick="navigate('home')">Открыть кейс</button>
+    </div>
   `;
 }
 
 // =================================================================== АПГРЕЙДЕР
 
 let upgraderState = { contribution: null, target: null };
+let upgraderSpinning = false;
+
+function ringArc(pct) {
+  // SVG-дуга зоны успеха: от 12 часов по часовой стрелке на pct% окружности.
+  const r = 88, c = 2 * Math.PI * r;
+  return `<circle class="upg-zone" cx="100" cy="100" r="${r}" stroke-dasharray="${(c * pct) / 100} ${c}" />`;
+}
 
 async function renderUpgraderScreen(root) {
   const { contribution, target } = upgraderState;
-  const chance = contribution && target ? computeChance(contribution.value, target.value) : null;
+  const chance = contribution && target ? computeChance(contribution.value, target.value) : 0;
+  const mult = contribution && target ? (target.value / contribution.value).toFixed(2) : null;
+
+  const slot = (b, label, id) => `
+    <button class="upg-slot ${b ? 'filled' : ''}" id="${id}" style="${b ? glowVars(b) : ''}">
+      ${b ? `${brainrotArt(b)}<div class="upg-slot-name">${escapeHtml(b.name)}</div><div class="upg-slot-value">${fmt(b.value)} 🎫</div>`
+          : `<div class="upg-slot-plus">+</div><div class="upg-slot-label">${label}</div>`}
+    </button>`;
 
   root.innerHTML = `
     <div class="section-title">АПГРЕЙДЕР</div>
-    <div class="dial-wrap">
-      <div class="dial" style="background:conic-gradient(var(--r-mythic) ${chance ?? 0}%, #1a1c22 0)">
-        <div class="dial" style="width:150px;height:150px;background:var(--bg);display:flex;flex-direction:column;align-items:center;justify-content:center">
-          <div class="dial-chance">${chance !== null ? chance + '%' : '—'}</div>
-          <div class="dial-label">ШАНС</div>
+    <div class="upg-stage" id="upg-stage">
+      <div class="upg-ring-wrap">
+        <svg class="upg-ring" viewBox="0 0 200 200">
+          <circle class="upg-track" cx="100" cy="100" r="88"/>
+          ${ringArc(chance)}
+          ${Array.from({ length: 60 }, (_, i) => `<line class="upg-tick ${i % 5 ? '' : 'major'}" x1="100" y1="${i % 5 ? 6 : 4}" x2="100" y2="${i % 5 ? 11 : 13}" transform="rotate(${i * 6} 100 100)"/>`).join('')}
+        </svg>
+        <div class="upg-needle" id="upg-needle"><span></span></div>
+        <div class="upg-center">
+          <div class="upg-chance" id="upg-chance">${contribution && target ? chance + '%' : '—'}</div>
+          <div class="upg-label">${mult ? '×' + mult : 'ШАНС'}</div>
         </div>
       </div>
+      <div class="upg-slots">
+        ${slot(contribution, 'Твой брейнрот', 'slot-contribution')}
+        <div class="upg-arrow">➜</div>
+        ${slot(target, 'Цель', 'slot-target')}
+      </div>
     </div>
-    <div class="slot-row">
-      <button class="slot ${contribution ? 'filled' : ''}" id="slot-contribution">
-        ${contribution ? `${brainrotArt(contribution)}${escapeHtml(contribution.name)}<br><span class="item-value">${fmt(contribution.value)} 🎫</span>` : 'ТВОЙ ВКЛАД<br>выбрать из инвентаря'}
-      </button>
-      <div class="slot-arrow">→</div>
-      <button class="slot ${target ? 'filled' : ''}" id="slot-target">
-        ${target ? `${brainrotArt(target)}${escapeHtml(target.name)}<br><span class="item-value">${fmt(target.value)} 🎫</span>` : 'ЖЕЛАЕМЫЙ ПРЕДМЕТ<br>выбрать цель'}
-      </button>
-    </div>
-    <button class="btn btn-primary" id="btn-spin" ${contribution && target ? '' : 'disabled'}>ПРОКАЧАТЬ</button>
+    <button class="open-btn upg-btn" id="btn-spin" ${contribution && target ? '' : 'disabled'} style="--c1:#c6ff3d;--c2:#5dffb0">
+      <span class="open-btn-shine"></span>
+      <span class="open-btn-label">Прокачать</span>
+      <span class="open-btn-price">${contribution && target ? chance + '%' : '—'}</span>
+    </button>
     <button class="btn btn-ghost" style="margin-top:8px" id="btn-reset">Сбросить</button>
+    <p class="fine-print">Зелёная зона — твой шанс. Стрелка остановится в ней — получаешь цель, мимо — вклад сгорает. Исход решает сервер до начала анимации.</p>
   `;
 
   root.querySelector('#slot-contribution').addEventListener('click', async () => {
-    const items = await api('/api/inventory?limit=100');
+    if (upgraderSpinning) return;
+    const items = await api('/api/inventory?limit=200');
     openItemPicker(items, (item) => {
-      upgraderState.contribution = item;
-      upgraderState.target = null;
+      upgraderState = { contribution: item, target: null };
       renderUpgraderScreen(root);
     });
   });
-
   root.querySelector('#slot-target').addEventListener('click', async () => {
-    if (!contribution) { toast('Сначала выбери вклад', 'error'); return; }
-    const targets = await api(`/api/upgrader/targets?min_value=${contribution.value}&exclude_name=${encodeURIComponent(contribution.name)}`);
-    openTargetPicker(targets, (t) => {
-      upgraderState.target = t;
-      renderUpgraderScreen(root);
-    });
+    if (upgraderSpinning) return;
+    if (!upgraderState.contribution) { toast('Сначала выбери своего брейнрота', 'error'); return; }
+    const c = upgraderState.contribution;
+    const targets = await api(`/api/upgrader/targets?min_value=${c.value}&exclude_name=${encodeURIComponent(c.name)}`);
+    openTargetPicker(targets, (t) => { upgraderState.target = t; renderUpgraderScreen(root); });
   });
-
   root.querySelector('#btn-reset').addEventListener('click', () => {
+    if (upgraderSpinning) return;
     upgraderState = { contribution: null, target: null };
     renderUpgraderScreen(root);
   });
 
   const spinBtn = root.querySelector('#btn-spin');
-  if (spinBtn) spinBtn.addEventListener('click', async () => {
+  spinBtn.addEventListener('click', async () => {
+    if (upgraderSpinning || !contribution || !target) return;
+    upgraderSpinning = true;
     spinBtn.disabled = true;
+    haptic.impact('heavy');
+    let res;
     try {
-      const res = await api('/api/upgrader/spin', {
+      res = await api('/api/upgrader/spin', {
         method: 'POST',
-        body: JSON.stringify({
-          contribution_item_id: contribution.id,
-          target_name: target.name,
-          target_value: target.value,
-        }),
+        body: JSON.stringify({ contribution_item_id: contribution.id, target_name: target.name }),
       });
-      upgraderState = { contribution: null, target: null };
-      if (res.success) toast(`✅ Успех! Получен: ${res.won_item.name} (${fmt(res.won_item.value)} 🎫)`, 'success');
-      else toast('❌ Не повезло, предмет потерян.', 'error');
-      renderUpgraderScreen(root);
     } catch (err) {
-      toast('Ошибка: ' + err.message, 'error');
+      upgraderSpinning = false;
       spinBtn.disabled = false;
+      toast('Ошибка: ' + err.message, 'error');
+      return;
     }
+
+    // Стрелка: 5 полных оборотов + точка остановки из ответа сервера.
+    const needle = root.querySelector('#upg-needle');
+    const stage = root.querySelector('#upg-stage');
+    const finalDeg = 360 * 5 + (res.roll_point / 100) * 360;
+    const duration = CaseArt.REDUCED ? 300 : 4200;
+    const start = performance.now();
+    const ease = (t) => 1 - Math.pow(1 - t, 4);
+    let lastTick = 0;
+    await new Promise((resolve) => {
+      function frame(now) {
+        const t = Math.min(1, (now - start) / duration);
+        const deg = finalDeg * ease(t);
+        needle.style.transform = `rotate(${deg}deg)`;
+        if (Math.floor(deg / 12) !== lastTick) { lastTick = Math.floor(deg / 12); if (t < 0.95) haptic.tick(); }
+        if (t < 1) requestAnimationFrame(frame); else resolve();
+      }
+      requestAnimationFrame(frame);
+    });
+
+    stage.classList.add(res.success ? 'upg-win' : 'upg-lose');
+    if (res.success) haptic.success(); else haptic.impact('rigid');
+    await sleep(CaseArt.REDUCED ? 50 : 700);
+    upgraderSpinning = false;
+    upgraderState = { contribution: null, target: null };
+    refreshMe().catch(() => {});
+    showUpgradeResult(root, res, contribution, target);
   });
+}
+
+function showUpgradeResult(root, res, contribution, target) {
+  const b = res.success ? res.won_item : contribution;
+  const overlay = openModal(`
+    <button class="modal-close" onclick="closeModal()">✕</button>
+    <div class="reveal ${res.success ? '' : 'upg-lost'}" style="${glowVars(b)}">
+      <div class="reveal-rays"></div>
+      <div class="upg-result-title">${res.success ? 'Прокачано!' : 'Не повезло'}</div>
+      <div class="reveal-art">${brainrotArt(b)}</div>
+      ${rarityBadge(b)}
+      <div class="reveal-name">${escapeHtml(b.name)}</div>
+      <div class="reveal-value">${res.success ? '+' : '−'}${fmt(b.value)} 🎫</div>
+      <div class="muted" style="position:relative">Шанс был ${res.chance}%</div>
+    </div>
+    <button class="btn btn-primary" style="margin-top:14px" id="upg-again">Ещё апгрейд</button>
+  `);
+  overlay.querySelector('#upg-again').addEventListener('click', () => { closeModal(); renderUpgraderScreen(root); });
+  overlay.addEventListener('click', (e) => { if (e.target === overlay) renderUpgraderScreen(root); });
+  overlay.querySelector('.modal-close').addEventListener('click', () => renderUpgraderScreen(root));
 }
 
 function computeChance(contributionValue, targetValue) {
@@ -873,44 +974,34 @@ function computeChance(contributionValue, targetValue) {
   return Math.max(1, Math.min(95, raw));
 }
 
-function openItemPicker(items, onPick) {
-  const rows = items.map((i) => `
-    <button class="item-row" style="width:100%;background:none;border:none;color:inherit;cursor:pointer;--rc:${i.rarity_color}" data-id="${i.id}">
-      ${brainrotArt(i)}<span style="flex:1;margin:0 8px;text-align:left">${escapeHtml(i.name)}</span><span class="item-value" style="color:${i.rarity_color}">${fmt(i.value)} 🎫</span>
-    </button>`).join('') || '<div class="empty-state">Инвентарь пуст — сначала открой кейс.</div>';
+function openBrainrotPicker(title, list, emptyText, onPick) {
+  const tiles = list.map((b, idx) => `
+    <button class="pick-tile" style="${glowVars(b)}" data-idx="${idx}">
+      ${brainrotArt(b)}
+      <div class="pick-name">${escapeHtml(b.name)}</div>
+      <div class="pick-value">${fmt(b.value)} 🎫</div>
+    </button>`).join('') || `<div class="empty-state" style="grid-column:1/-1">${emptyText}</div>`;
   const overlay = openModal(`
     <button class="modal-close" onclick="closeModal()">✕</button>
-    <h3>Выбери предмет</h3>
-    <style>#active-modal .item-row .p-tile{width:36px;height:36px;font-size:14px;flex-shrink:0}</style>
-    <div class="card" style="padding:0;max-height:400px;overflow-y:auto">${rows}</div>
+    <h3 class="picker-title">${title}</h3>
+    <div class="pick-grid">${tiles}</div>
   `);
-  overlay.querySelectorAll('[data-id]').forEach((el) =>
+  overlay.querySelectorAll('[data-idx]').forEach((el) =>
     el.addEventListener('click', () => {
-      const item = items.find((i) => i.id === Number(el.dataset.id));
+      haptic.tick();
+      const item = list[Number(el.dataset.idx)];
       closeModal();
       onPick(item);
     })
   );
 }
 
+function openItemPicker(items, onPick) {
+  openBrainrotPicker('Выбери брейнрота', items.slice().sort((a, b) => b.value - a.value), 'Инвентарь пуст — сначала открой кейс.', onPick);
+}
+
 function openTargetPicker(targets, onPick) {
-  const rows = targets.map((t, idx) => `
-    <button class="item-row" style="width:100%;background:none;border:none;color:inherit;cursor:pointer;--rc:${t.rarity_color}" data-idx="${idx}">
-      ${brainrotArt(t)}<span style="flex:1;margin:0 8px;text-align:left">${escapeHtml(t.name)}</span><span class="item-value" style="color:${t.rarity_color}">${fmt(t.value)} 🎫</span>
-    </button>`).join('') || '<div class="empty-state">Нет подходящих целей дороже вклада.</div>';
-  const overlay = openModal(`
-    <button class="modal-close" onclick="closeModal()">✕</button>
-    <h3>Желаемый предмет</h3>
-    <style>#active-modal .item-row .p-tile{width:36px;height:36px;font-size:14px;flex-shrink:0}</style>
-    <div class="card" style="padding:0;max-height:400px;overflow-y:auto">${rows}</div>
-  `);
-  overlay.querySelectorAll('[data-idx]').forEach((el) =>
-    el.addEventListener('click', () => {
-      const t = targets[Number(el.dataset.idx)];
-      closeModal();
-      onPick(t);
-    })
-  );
+  openBrainrotPicker('Во что прокачать', targets, 'Нет целей дороже вклада.', onPick);
 }
 
 // =================================================================== КРАШ
