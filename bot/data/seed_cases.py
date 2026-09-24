@@ -23,7 +23,7 @@ from bot.data.coins import COIN_RARITY, coin_name
 from bot.database.models import CaseCategory
 from bot.services.cases_service import CASE_WEIGHT_EXPONENT
 
-CASES_CONTENT_VERSION = "14-hero-cases"
+CASES_CONTENT_VERSION = "14.1-hero-cases"
 
 TARGET_RTP = 0.6
 
