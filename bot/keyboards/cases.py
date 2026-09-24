@@ -16,11 +16,9 @@ from bot.keyboards.callbacks import (
 )
 
 CATEGORY_LABELS = {
-    CaseCategory.CASES: "📦 Кейсы",
-    CaseCategory.THEMATIC: "🎭 Тематические",
-    CaseCategory.ALLIN: "🎰 ALL-IN",
-    CaseCategory.PARTNERS: "🤝 Партнёры",
-    CaseCategory.FREE: "🎁 Бесплатные",
+    CaseCategory.STARTER: "🔥 Старт",
+    CaseCategory.SIGNATURE: "⚡ Легенды",
+    CaseCategory.APEX: "👑 Вершина",
 }
 
 PAGE_SIZE = 6

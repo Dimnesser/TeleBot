@@ -8,7 +8,7 @@ from bot.services.cases_service import draw_items, item_weight, total_cost
 
 
 def make_case(price: int | None) -> Case:
-    return Case(id=1, category=CaseCategory.CASES, code="test", name="Test Case", price_tokens=price)
+    return Case(id=1, category=CaseCategory.STARTER, code="test", name="Test Case", price_tokens=price)
 
 
 def make_item(item_id: int, value: int) -> CaseItem:

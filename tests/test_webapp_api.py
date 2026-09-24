@@ -84,7 +84,7 @@ async def test_me_auto_creates_user(client, auth_headers) -> None:
 
 
 async def test_cases_feed_and_open(client, auth_headers) -> None:
-    r = await client.get("/api/cases?category=cases", headers=auth_headers)
+    r = await client.get("/api/cases?category=starter", headers=auth_headers)
     assert r.status == 200
     cases = (await r.json())["cases"]
     openable = next(c for c in cases if c["is_openable"] and c["price_tokens"])
@@ -101,7 +101,7 @@ async def test_cases_feed_and_open(client, auth_headers) -> None:
 
 
 async def test_inventory_sell(client, auth_headers) -> None:
-    r = await client.get("/api/cases?category=cases", headers=auth_headers)
+    r = await client.get("/api/cases?category=starter", headers=auth_headers)
     case = next(c for c in (await r.json())["cases"] if c["is_openable"] and c["price_tokens"])
     r = await client.post(f"/api/cases/{case['id']}/open", headers=auth_headers, json={"qty": 1})
     won = (await r.json())["won"][0]
@@ -132,7 +132,7 @@ async def test_case_open_reel_lands_on_server_decided_winner(client, auth_header
     рулетки — лента только декорация вокруг уже готового исхода, клиент
     не может повлиять на won[]. Прогоняем несколько раз, т.к. и выбор
     результата, и наполнение ленты — рандом."""
-    r = await client.get("/api/cases?category=cases", headers=auth_headers)
+    r = await client.get("/api/cases?category=starter", headers=auth_headers)
     case = next(c for c in (await r.json())["cases"] if c["is_openable"] and c["price_tokens"])
 
     for _ in range(8):
@@ -152,7 +152,7 @@ async def test_case_open_reel_lands_on_server_decided_winner(client, auth_header
 
 
 async def test_case_detail_drop_chances_sum_to_100(client, auth_headers) -> None:
-    r = await client.get("/api/cases?category=cases", headers=auth_headers)
+    r = await client.get("/api/cases?category=starter", headers=auth_headers)
     for case in (await r.json())["cases"]:
         if not case["is_openable"]:
             continue
@@ -163,7 +163,7 @@ async def test_case_detail_drop_chances_sum_to_100(client, auth_headers) -> None
 
 
 async def test_case_open_rejects_insufficient_tokens(client, auth_headers) -> None:
-    r = await client.get("/api/cases?category=cases", headers=auth_headers)
+    r = await client.get("/api/cases?category=starter", headers=auth_headers)
     cases = (await r.json())["cases"]
     openable = [c for c in cases if c["is_openable"] and c["price_tokens"]]
     assert openable, "seed data must contain at least one openable priced case"
@@ -181,7 +181,7 @@ async def test_case_open_rejects_insufficient_tokens(client, auth_headers) -> No
 
 
 async def test_upgrader_spin_consumes_contribution(client, auth_headers) -> None:
-    r = await client.get("/api/cases?category=cases", headers=auth_headers)
+    r = await client.get("/api/cases?category=starter", headers=auth_headers)
     case = next(c for c in (await r.json())["cases"] if c["is_openable"] and c["price_tokens"])
     r = await client.post(f"/api/cases/{case['id']}/open", headers=auth_headers, json={"qty": 1})
     won = (await r.json())["won"][0]
@@ -223,7 +223,7 @@ async def test_upgrader_spin_consumes_contribution(client, auth_headers) -> None
 
 
 async def test_crash_start_state_cashout(client, auth_headers) -> None:
-    r = await client.get("/api/cases?category=cases", headers=auth_headers)
+    r = await client.get("/api/cases?category=starter", headers=auth_headers)
     case = next(c for c in (await r.json())["cases"] if c["is_openable"] and c["price_tokens"])
     await client.post(f"/api/cases/{case['id']}/open", headers=auth_headers, json={"qty": 1})
 
@@ -246,7 +246,7 @@ async def test_crash_start_state_cashout(client, auth_headers) -> None:
 
 
 async def test_dice_roll(client, auth_headers) -> None:
-    r = await client.get("/api/cases?category=cases", headers=auth_headers)
+    r = await client.get("/api/cases?category=starter", headers=auth_headers)
     case = next(c for c in (await r.json())["cases"] if c["is_openable"] and c["price_tokens"])
     await client.post(f"/api/cases/{case['id']}/open", headers=auth_headers, json={"qty": 1})
 
@@ -301,3 +301,33 @@ async def test_static_pages_served(client) -> None:
     for path in ["/", "/webapp", "/static/js/app.js", "/static/css/app.css"]:
         r = await client.get(path)
         assert r.status == 200, path
+
+
+async def test_cases_catalog_grouped_by_collections(client, auth_headers) -> None:
+    r = await client.get("/api/cases", headers=auth_headers)
+    assert r.status == 200
+    collections = (await r.json())["collections"]
+    assert [c["key"] for c in collections] == ["starter", "signature", "apex"]
+    for collection in collections:
+        for case in collection["cases"]:
+            assert case["theme"]["shape"]
+            assert case["top_item_image_url"].endswith(".webp")
+
+
+async def test_unknown_category_is_400(client, auth_headers) -> None:
+    r = await client.get("/api/cases?category=nope", headers=auth_headers)
+    assert r.status == 400
+
+
+async def test_multi_open_returns_reel_per_win_and_real_game_info(client, auth_headers) -> None:
+    r = await client.get("/api/cases?category=starter", headers=auth_headers)
+    case = min((await r.json())["cases"], key=lambda c: c["price_tokens"])
+    r = await client.post(f"/api/cases/{case['id']}/open", headers=auth_headers, json={"qty": 3})
+    assert r.status == 200
+    body = await r.json()
+    assert len(body["won"]) == len(body["reels"]) == 3
+    for won, reel in zip(body["won"], body["reels"]):
+        assert reel[body["reveal_index"]]["name"] == won["name"]
+        assert won["rarity"] in ("secret", "og")
+        assert won["game"]["wiki_url"].startswith("https://stealabrainrot.fandom.com/wiki/")
+        assert won["inventory_id"]

@@ -8,7 +8,7 @@ from bot.database.repo import inventory as inventory_repo
 from bot.database.repo import users as users_repo
 
 
-async def _seed_case_with_items(session, category=CaseCategory.CASES) -> Case:
+async def _seed_case_with_items(session, category=CaseCategory.STARTER) -> Case:
     case = Case(category=category, code="seed_case", name="Seed Case", price_tokens=50, item_count_label=2, is_openable=True)
     session.add(case)
     await session.flush()
@@ -41,14 +41,14 @@ async def test_list_cases_filters_by_category_and_orders_by_sort_order():
     async with engine_module.async_session() as session:
         session.add_all(
             [
-                Case(category=CaseCategory.CASES, code="c1", name="First", sort_order=2),
-                Case(category=CaseCategory.CASES, code="c2", name="Second", sort_order=1),
-                Case(category=CaseCategory.THEMATIC, code="c3", name="Other category", sort_order=0),
+                Case(category=CaseCategory.STARTER, code="c1", name="First", sort_order=2),
+                Case(category=CaseCategory.STARTER, code="c2", name="Second", sort_order=1),
+                Case(category=CaseCategory.SIGNATURE, code="c3", name="Other category", sort_order=0),
             ]
         )
         await session.commit()
 
-        cases_list = await cases_repo.list_cases(session, CaseCategory.CASES)
+        cases_list = await cases_repo.list_cases(session, CaseCategory.STARTER)
         assert [c.name for c in cases_list] == ["Second", "First"]
 
 

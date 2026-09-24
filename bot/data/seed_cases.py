@@ -1,33 +1,30 @@
-"""Каталог кейсов и пулы дропа.
+"""Каталог кейсов Brainrot Battle.
 
-Форма каталога (category/code/name/price_tokens/item_count_label/note) —
-[ПОДТВЕРЖДЕНО СКРИНШОТОМ] из разделов «КЕЙСЫ», «ТЕМАТИЧЕСКИЕ КЕЙСЫ»,
-«ALL-IN», «ПАРТНЕРЫ», «БЕСПЛАТНЫЕ КЕЙСЫ». Где число на скриншоте было
-обрезано — здесь стоит None, а не придуманное.
+Кейсы — собственный продукт этого бота: названия, темы и оформление
+придуманы здесь и ничего не копируют у других сайтов. Содержимое кейсов —
+только реальные персонажи Steal a Brainrot тиров Secret и OG из
+bot.data.brainrot_roster (со скриншотов пользователя, сверены с вики).
 
-Содержимое кейсов (какие персонажи может выдать кейс) — два случая:
-  1. «Драгон» и «Тако» — [ПОДТВЕРЖДЕНО СКРИНШОТОМ] «Что может выпасть»,
-     имена и значения взяты буквально с экрана кейса, не тронуты.
-  2. Все остальные кейсы — на скриншотах их дроп-пул не показан (кейс был
-     виден только в каталоге как карточка). Раньше они были помечены
-     is_openable=False. Теперь заполнены реальными персонажами из
-     bot.data.brainrot_roster (настоящий ростер Steal a Brainrot,
-     см. докстринг того модуля про источники) — детерминированно по seed
-     кейса, смещено по редкости в сторону цены кейса (дорогой кейс — более
-     редкие персонажи). Это не выдумка «Test Brainrot», а реальный контент
-     игры, просто распределённый по кейсам самим ботом, а не скриншотом
-     (интерфейс которого этого не показывал).
+Логика кейса (вся выводится из данных, руками не проставлено ничего):
+  * ценность предмета 🎫 — его ценность в B со скриншотов пользователя
+    (brainrot_roster.ROSTER);
+  * шанс предмета ∝ 1 / ценность — каждый предмет вносит в средний дроп
+    одинаковый вклад, поэтому дорогие персонажи редкие ровно настолько,
+    насколько они дорогие (bot.services.cases_service.item_weight);
+  * цена кейса = средний дроп / TARGET_RTP, округлённая вверх — кейс
+    возвращает в среднем 90% своей цены, как и продажа предмета (SELL_RATE).
 """
 from __future__ import annotations
 
 import math
-import random as _random
 from dataclasses import dataclass, field
 
-from bot.data.brainrot_roster import RARITY_DROP_WEIGHT, RARITY_ORDER, ROSTER, ROSTER_BY_RARITY, infer_rarity
+from bot.data.brainrot_roster import ROSTER_BY_NAME
 from bot.database.models import CaseCategory
 
-CASES_CONTENT_VERSION = "5-top-item-name"
+CASES_CONTENT_VERSION = "7-secret-og-from-screenshots"
+
+TARGET_RTP = 0.9
 
 
 @dataclass(frozen=True)
@@ -35,6 +32,17 @@ class SeedCaseItem:
     name: str
     value: int
     rarity: str | None = None
+
+
+@dataclass(frozen=True)
+class CaseTheme:
+    """Визуальная идентичность кейса — рисуется фронтендом (webapp/static/js/case-themes.js)."""
+
+    tagline: str
+    lore: str
+    shape: str  # силуэт артефакта кейса: plate | flask | drum | lantern | bolt | vault | anvil | crown
+    particles: str  # эффект сцены: steam | bubbles | beats | wisps | sparks | dust | embers | prism
+    colors: tuple[str, str, str]  # основной, акцент, глубина фона
 
 
 @dataclass(frozen=True)
@@ -53,121 +61,124 @@ class SeedCase:
         return len(self.items) > 0
 
 
-def _center_index_for_price(price: int | None) -> float:
-    """Дорогой кейс -> центр распределения смещён к редким тирам (индекс 0..6)."""
-    if not price:
-        return 0.5
-    lo, hi = math.log(9), math.log(35000)
-    t = (math.log(min(max(price, 9), 35000)) - lo) / (hi - lo)
-    return t * (len(RARITY_ORDER) - 1)
+def expected_value(values: list[int]) -> float:
+    """Средний дроп при весах 1/value: n / Σ(1/v) (гармоническое среднее)."""
+    return len(values) / sum(1 / v for v in values)
 
 
-def _generate_pool(case_code: str, price: int | None, count: int | None) -> tuple[SeedCaseItem, ...]:
-    """Дешёвый кейс физически не может выдать топ-тир: тиры не просто менее
-    вероятны, а вообще исключены из пула за пределами окна ±1 от центра
-    (иначе 19-токенный кейс мог бы содержать OG-предмет на 50 000 —
-    абсурдная экономика). Внутри окна веса всё равно берутся из
-    RARITY_DROP_WEIGHT, так что нижний тир окна всё равно доминирует.
-    """
-    n = count or 8
-    rng = _random.Random(f"sab::{case_code}")  # детерминированный seed — стабильно между переразвёртываниями
-    center_i = round(_center_index_for_price(price))
-    lo = max(0, center_i - 1)
-    hi = min(len(RARITY_ORDER) - 1, center_i + 1)
-    window = RARITY_ORDER[lo : hi + 1]
-    window_weights = [RARITY_DROP_WEIGHT[r] for r in window]
-
-    chosen: list = []
-    seen_names: set[str] = set()
-    attempts = 0
-    max_attempts = n * 30
-    while len(chosen) < min(n, sum(len(ROSTER_BY_RARITY[r]) for r in window)) and attempts < max_attempts:
-        attempts += 1
-        rarity = rng.choices(window, weights=window_weights, k=1)[0]
-        candidates = [b for b in ROSTER_BY_RARITY[rarity] if b.name not in seen_names]
-        if not candidates:
-            continue
-        pick = rng.choice(candidates)
-        chosen.append(pick)
-        seen_names.add(pick.name)
-
-    chosen.sort(key=lambda b: b.demo_value, reverse=True)
-    return tuple(SeedCaseItem(name=b.name, value=b.demo_value, rarity=b.rarity.value) for b in chosen)
+def price_for(values: list[int]) -> int:
+    return math.ceil(expected_value(values) / TARGET_RTP)
 
 
-# --- «Драгон» и «Тако»: буквально со скриншота «Что может выпасть» ---
-_DRAGON_ITEMS = (
-    SeedCaseItem("La Supreme Combinasion", 2704),
-    SeedCaseItem("Moby Bros", 1604),
-    SeedCaseItem("Dragon Cannelloni", 973),
-    SeedCaseItem("La Casa Boo", 621),
-    SeedCaseItem("Rosey and Teddy", 525),
-    SeedCaseItem("Foxini Lanternini", 445),
-    SeedCaseItem("Guest 666", 336),
-)
-_TAKO_ITEMS = (
-    SeedCaseItem("Hydra Dragon Cannelloni", 1220),
-    SeedCaseItem("La Casa Boo", 621),
-    SeedCaseItem("Rosey and Teddy", 525),
-    SeedCaseItem("Foxini Lanternini", 445),
-    SeedCaseItem("Fortunu and Cashuru", 230),
-    SeedCaseItem("Sammuni Fattini", 140),
-)
-_DRAGON_ITEMS = tuple(SeedCaseItem(i.name, i.value, infer_rarity(i.value).value) for i in _DRAGON_ITEMS)
-_TAKO_ITEMS = tuple(SeedCaseItem(i.name, i.value, infer_rarity(i.value).value) for i in _TAKO_ITEMS)
+def _pool(names: list[str]) -> tuple[SeedCaseItem, ...]:
+    entries = sorted((ROSTER_BY_NAME[n] for n in names), key=lambda b: b.value, reverse=True)
+    return tuple(SeedCaseItem(b.name, b.value, b.rarity.value) for b in entries)
 
 
-def _case(category: CaseCategory, code: str, name: str, price: int | None, count: int | None, sort_order: int, note: str | None = None) -> SeedCase:
+CASE_THEMES: dict[str, CaseTheme] = {}
+
+
+def _case(
+    category: CaseCategory, code: str, name: str, sort_order: int, theme: CaseTheme, names: list[str]
+) -> SeedCase:
+    items = _pool(names)
+    CASE_THEMES[code] = theme
     return SeedCase(
-        category, code, name, price, count, note=note, sort_order=sort_order,
-        items=_generate_pool(code, price, count),
+        category=category,
+        code=code,
+        name=name,
+        price_tokens=price_for([i.value for i in items]),
+        item_count_label=len(items),
+        items=items,
+        sort_order=sort_order,
     )
 
 
 SEED_CASES: list[SeedCase] = [
-    # --- КЕЙСЫ ---
-    SeedCase(CaseCategory.CASES, "cases_dragon", "Драгон", 500, 7, sort_order=1, items=_DRAGON_ITEMS),
-    SeedCase(CaseCategory.CASES, "cases_tako", "Тако", 189, 11, sort_order=2, items=_TAKO_ITEMS),
-    _case(CaseCategory.CASES, "cases_nubini", "Нубини", 19, 14, 3),
-    _case(CaseCategory.CASES, "cases_lucky_block", "Лаки-Блок", 209, 14, 4),
-    _case(CaseCategory.CASES, "cases_cerber", "Цербер", 117, 12, 5),
-    _case(CaseCategory.CASES, "cases_strawberry", "Клубничный", 1679, 8, 6),
-    _case(CaseCategory.CASES, "cases_six_seven", "Сикс Севен", 67, 10, 7),
-    _case(CaseCategory.CASES, "cases_hirsy", "Гирсы", 17, 14, 8),
-
-    # --- ТЕМАТИЧЕСКИЕ КЕЙСЫ ---
-    _case(CaseCategory.THEMATIC, "thematic_newyear", "Новогодний", 169, 9, 1),
-    _case(CaseCategory.THEMATIC, "thematic_seabros", "Морская братва", 119, 8, 2),
-    _case(CaseCategory.THEMATIC, "thematic_summer", "Летний", 769, 8, 3),
-    _case(CaseCategory.THEMATIC, "thematic_easter", "Пасхальный", 219, 9, 4),
-    _case(CaseCategory.THEMATIC, "thematic_fuse", "Фьюз", 2390, 7, 5),
-    _case(CaseCategory.THEMATIC, "thematic_traders", "Лос Трейдеры", 89, 12, 6),
-    _case(CaseCategory.THEMATIC, "thematic_anniversary", "Юбилейный", None, 9, 7, note="Цена на скриншоте обрезана."),
-    _case(CaseCategory.THEMATIC, "thematic_honey", "Медовый", None, 9, 8, note="Цена на скриншоте обрезана."),
-    _case(CaseCategory.THEMATIC, "thematic_six_seven", "Сикс Севен", 67, 10, 9),
-    _case(CaseCategory.THEMATIC, "thematic_hirsy", "Гирсы", 17, 14, 10),
-    _case(CaseCategory.THEMATIC, "thematic_losy", "Лосы", 139, 14, 11),
-    _case(CaseCategory.THEMATIC, "thematic_dlc", "ДЛС", 229, 9, 12),
-    _case(CaseCategory.THEMATIC, "thematic_basic", "Базовый", 9, 9, 13),
-    _case(CaseCategory.THEMATIC, "thematic_og", "ОГ", 10000, 10, 14),
-    _case(CaseCategory.THEMATIC, "thematic_garama", "Гарама", 39, 10, 15),
-    _case(CaseCategory.THEMATIC, "thematic_imperial", "Императорский", 34900, 11, 16),
-
-    # --- ALL-IN ---
-    _case(CaseCategory.ALLIN, "allin_skibidi", "Скибиди Алл-ин", 29, 4, 1),
-    _case(CaseCategory.ALLIN, "allin_meowl", "Меовл Алл-ин", 39, 4, 2),
-    _case(CaseCategory.ALLIN, "allin_pork", "Порк Алл-ин", 39, 4, 3),
-    _case(CaseCategory.ALLIN, "allin_elephant", "Слон Алл-ин", 49, 4, 4),
-
-    # --- ПАРТНЕРЫ ---
-    _case(CaseCategory.PARTNERS, "partners_nikil", "Никил", 49, 9, 1),
-    _case(CaseCategory.PARTNERS, "partners_lisharty", "Лишарти", None, 9, 2, note="Цена на скриншоте обрезана."),
-
-    # --- БЕСПЛАТНЫЕ КЕЙСЫ --- (у большинства — особые условия открытия, не просто цена)
-    _case(CaseCategory.FREE, "free_daily", "Бесплатный", None, 11, 1, note="Открывается бесплатно раз в сутки по таймеру (на скриншоте «через 5ч 08м»)."),
-    _case(CaseCategory.FREE, "free_deposit", "За депозит", None, 12, 2, note="Условие открытия — сумма депозитов (на скриншоте «Осталось 194 B» до цели)."),
-    _case(CaseCategory.FREE, "free_referral", "Реферальный", None, 9, 3, note="Разовый кейс за реферальную активность (на скриншоте уже был отмечен как «Уже забрано»)."),
-    _case(CaseCategory.FREE, "free_crystal", "Кристальный", 109, 8, 4, note="Цена в 🎫."),
-    _case(CaseCategory.FREE, "free_phantom", "Фантомный", 240, 9, 5, note="Цена в 🎫."),
-    _case(CaseCategory.FREE, "free_staking", "За стейкинг", None, 18, 6, note="Условие открытия — активный стейк от 500 B (раздел «Бонусы»)."),
+    # ------------------------------------------------------------ СТАРТ
+    _case(
+        CaseCategory.STARTER, "nonna_kitchen", "Кухня Нонны", 1,
+        CaseTheme(
+            tagline="Фастфуд, десерты и Ginger Gerat на дне кастрюли",
+            lore="Вся еда Secret-тира: бургеры, пицца, попкорн, панкейки и торт Sammyni Cakini.",
+            shape="plate", particles="steam", colors=("#ff5a3c", "#ffd36b", "#2a0d08"),
+        ),
+        ["Burguro And Fryuro", "Pizza and Ranch", "Popcuru and Fizzuru", "La Food Combinasion",
+         "Fragrama and Chocrama", "Cooki and Milki", "Quackini Snackini", "La Breakfast Combinasion",
+         "Pancake and Syrup", "Sammyni Cakini", "Ginger Gerat"],
+    ),
+    _case(
+        CaseCategory.STARTER, "ghost_lantern", "Фонарь Призраков", 2,
+        CaseTheme(
+            tagline="Что-то светится в темноте. И это Kraken.",
+            lore="Хэллоуинская ночь: La Casa Boo, Spooky and Pumpky, Foxini Lanternini и Cerberus у ворот.",
+            shape="lantern", particles="wisps", colors=("#b86bff", "#ff7ad9", "#12061f"),
+        ),
+        ["Garama and Madundung", "Spooky and Pumpky", "Cerberus", "Duggy Bros", "Dug dug dug",
+         "Foxini Lanternini", "Venuspino", "La Casa Boo", "Kraken"],
+    ),
+    _case(
+        CaseCategory.STARTER, "hybrid_lab", "Гибрид-Лаб", 3,
+        CaseTheme(
+            tagline="Скрещено. Не проверено. Elefanto Frigo сбежал.",
+            lore="Техника, растения и роботы: Bumbatron, Digi Narwhal, Venuspino и холодильник-слон.",
+            shape="flask", particles="bubbles", colors=("#7dff4a", "#18e0c8", "#06170c"),
+        ),
+        ["Cash or Card", "Globa Steppa", "Quackini Snackini", "Venuspino", "Bumbatron",
+         "Tirilikalika Tirilikalako", "Digi Narwhal", "Elefanto Frigo"],
+    ),
+    # ------------------------------------------------------------ ЛЕГЕНДЫ
+    _case(
+        CaseCategory.SIGNATURE, "combo_vault", "Сейф Комбинасьон", 1,
+        CaseTheme(
+            tagline="Код от сейфа — удача",
+            lore="Деньги и банды: Rico Dinero, Fortunu and Cashuru, Los Secret Combinasionas. За последней дверью — Antonio.",
+            shape="vault", particles="dust", colors=("#ffc94a", "#fff1b8", "#150f02"),
+        ),
+        ["Cash or Card", "Globa Steppa", "Los Amigos", "Fortunu and Cashuru", "Los Sekolahs",
+         "Los Secret Combinasionas", "Rico Dinero", "Ketupat Bros", "Tirilikalika Tirilikalako",
+         "La Supreme Combinasion", "Antonio"],
+    ),
+    _case(
+        CaseCategory.SIGNATURE, "dragon_forge", "Драконья Кузня", 2,
+        CaseTheme(
+            tagline="Куётся в огне. Выпадает в пламени.",
+            lore="Крылатые и огнедышащие: все драконы-каннеллони, Griffin и Arcadragon на наковальне.",
+            shape="anvil", particles="embers", colors=("#ff3d1f", "#ffb02e", "#1a0400"),
+        ),
+        ["Celestial Pegasus", "Cerberus", "Dragon Cannelloni", "Hydra Dragon Cannelloni",
+         "Dragon Aquanini", "Dragon Gingerini", "Griffin", "Arcadragon"],
+    ),
+    _case(
+        CaseCategory.SIGNATURE, "abyss_dive", "Бездна", 3,
+        CaseTheme(
+            tagline="Шесть морских секретов. Kraken не спит.",
+            lore="Спуск на дно: Capitano Moby, Jelly Moby, Moby Bros, Digi Narwhal и Fishino Clownino.",
+            shape="porthole", particles="bubbles", colors=("#1fb6ff", "#5dfff0", "#020c1f"),
+        ),
+        ["Capitano Moby", "Jelly Moby", "Moby Bros", "Digi Narwhal", "Fishino Clownino", "Kraken"],
+    ),
+    _case(
+        CaseCategory.SIGNATURE, "party_popper", "Хлопушка", 4,
+        CaseTheme(
+            tagline="Праздник каждый день. Love Love Bear — в конфетти.",
+            lore="Все праздники Steal a Brainrot: день рождения, Рождество, Пасха и День святого Валентина.",
+            shape="popper", particles="confetti", colors=("#ff4f8b", "#4fe3ff", "#1a0612"),
+        ),
+        ["Sammyni Fattini", "Reinito Sleighito", "Rosey and Teddy", "Bunny and Eggy",
+         "Sammyni Cakini", "Hydra Bunny", "Kalika Bros", "Love Love Bear"],
+    ),
+    # ------------------------------------------------------------ ВЕРШИНА
+    _case(
+        CaseCategory.APEX, "og_throne", "Трон OG", 1,
+        CaseTheme(
+            tagline="Четыре короны. Один трон.",
+            lore="Единственный кейс с OG-тиром: Skibidi Toilet, John Pork, Meowl и Strawberry Elephant.",
+            shape="crown", particles="prism", colors=("#ff4fd8", "#ffd84d", "#10061a"),
+        ),
+        ["Antonio", "Griffin", "Love Love Bear", "Arcadragon", "Elefanto Frigo", "Skibidi Toilet",
+         "John Pork", "Meowl", "Signore Carapace", "Strawberry Elephant"],
+    ),
 ]
+
+SEED_CASES_BY_CODE: dict[str, SeedCase] = {c.code: c for c in SEED_CASES}

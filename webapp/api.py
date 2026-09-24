@@ -5,10 +5,22 @@ bot/handlers/*.py, просто с JSON вместо edit_text/inline-кнопо
 """
 from __future__ import annotations
 
+from pathlib import Path
+
 from aiohttp import web
 
 from bot.config import config
-from bot.data.brainrot_roster import RARITY_COLOR, RARITY_LABEL_RU, ROSTER_BY_NAME, Rarity, slugify
+from bot.data.brainrot_roster import (
+    RARITY_COLOR,
+    RARITY_LABEL,
+    RARITY_ORDER,
+    ROSTER_BY_NAME,
+    WIKI_SNAPSHOT_DATE,
+    Rarity,
+    rarity_for,
+    slugify,
+)
+from bot.data.seed_cases import CASE_THEMES, TARGET_RTP
 from bot.data.referral_tiers import next_tier_for_count, tier_for_count
 from bot.database.models import (
     Case,
@@ -47,10 +59,29 @@ routes = web.RouteTableDef()
 # ---------------------------------------------------------------- сериализация
 
 
+BRAINROT_ASSETS_DIR = Path(__file__).parent / "static" / "assets" / "brainrots"
+# Какие официальные рендеры реально лежат в ассетах — для остальных фронтенд
+# рисует явный плейсхолдер «нет ассета», а не случайную картинку.
+AVAILABLE_BRAINROT_IMAGES = {p.stem for p in BRAINROT_ASSETS_DIR.glob("*.webp")}
+
+COLLECTIONS = [
+    {"key": CaseCategory.STARTER.value, "title": "Старт", "subtitle": "Secret-тир по цене пары сотен 🎫"},
+    {"key": CaseCategory.SIGNATURE.value, "title": "Легенды", "subtitle": "Драконы, морские и праздничные секреты"},
+    {"key": CaseCategory.APEX.value, "title": "Вершина", "subtitle": "Единственный путь к OG"},
+]
+
+
+def _brainrot_image_url(name: str) -> str | None:
+    slug = slugify(name)
+    return f"/static/assets/brainrots/{slug}.webp" if slug in AVAILABLE_BRAINROT_IMAGES else None
+
+
 def _case_json(case: Case) -> dict:
-    color = RARITY_COLOR.get(Rarity(case.best_rarity), RARITY_COLOR[Rarity.COMMON]) if case.best_rarity else RARITY_COLOR[Rarity.COMMON]
+    best = Rarity(case.best_rarity) if case.best_rarity else Rarity.COMMON
+    theme = CASE_THEMES.get(case.code)
     return {
         "id": case.id,
+        "code": case.code,
         "category": case.category.value,
         "name": case.name,
         "price_tokens": case.price_tokens,
@@ -58,28 +89,43 @@ def _case_json(case: Case) -> dict:
         "note": case.note,
         "is_openable": case.is_openable,
         "top_item_name": case.top_item_name,
-        "top_item_slug": slugify(case.top_item_name) if case.top_item_name else None,
-        "case_image_url": f"/static/assets/cases/{case.code}.png",
-        "best_rarity": case.best_rarity,
-        "best_rarity_label": RARITY_LABEL_RU.get(Rarity(case.best_rarity), "?") if case.best_rarity else None,
-        "best_rarity_color": color[0],
-        "best_rarity_color_accent": color[1],
+        "top_item_image_url": _brainrot_image_url(case.top_item_name) if case.top_item_name else None,
+        "best_rarity": best.value,
+        "best_rarity_label": RARITY_LABEL[best],
+        "best_rarity_color": RARITY_COLOR[best][0],
+        "best_rarity_color_accent": RARITY_COLOR[best][1],
+        "theme": {
+            "tagline": theme.tagline,
+            "lore": theme.lore,
+            "shape": theme.shape,
+            "particles": theme.particles,
+            "colors": list(theme.colors),
+        } if theme else None,
     }
 
 
-def _brainrot_json(name: str, value: int, rarity: str | None) -> dict:
+def _brainrot_json(name: str, value: int, rarity: str | None = None) -> dict:
     roster_entry = ROSTER_BY_NAME.get(name)
-    color = RARITY_COLOR.get(Rarity(rarity), RARITY_COLOR[Rarity.COMMON]) if rarity else RARITY_COLOR[Rarity.COMMON]
+    # Реальный тир из ростера важнее сохранённого: старые записи инвентаря
+    # получали rarity угадыванием по ценности.
+    tier = rarity_for(name, value) if roster_entry or not rarity else Rarity(rarity)
+    color = RARITY_COLOR[tier]
     return {
         "name": name,
         "value": value,
-        "rarity": rarity,
-        "rarity_label": RARITY_LABEL_RU.get(Rarity(rarity), "?") if rarity else "?",
+        "rarity": tier.value,
+        "rarity_rank": RARITY_ORDER.index(tier),
+        "rarity_label": RARITY_LABEL[tier],
         "rarity_color": color[0],
         "rarity_color_accent": color[1],
         "slug": slugify(name),
-        "real_value_label": roster_entry.real_value_usd_label if roster_entry else None,
-        "image_url": f"/static/assets/brainrots/{slugify(name)}.png",
+        "image_url": _brainrot_image_url(name),
+        "game": {
+            "cost": roster_entry.cost,
+            "income": roster_entry.income,
+            "wiki_url": roster_entry.wiki_url,
+            "as_of": WIKI_SNAPSHOT_DATE,
+        } if roster_entry else None,
     }
 
 
@@ -216,10 +262,21 @@ async def get_recent_wins(request: web.Request) -> web.Response:
 
 @routes.get("/api/cases")
 async def get_cases(request: web.Request) -> web.Response:
+    """Без ?category — весь каталог по коллекциям (главная Mini App)."""
     session = request["session"]
-    category = CaseCategory(request.query.get("category", CaseCategory.CASES.value))
-    cases = await cases_repo.list_cases(session, category)
-    return web.json_response({"category": category.value, "cases": [_case_json(c) for c in cases]})
+    if "category" in request.query:
+        try:
+            category = CaseCategory(request.query["category"])
+        except ValueError:
+            return web.json_response({"error": "unknown_category"}, status=400)
+        cases = await cases_repo.list_cases(session, category)
+        return web.json_response({"category": category.value, "cases": [_case_json(c) for c in cases]})
+
+    collections = []
+    for meta in COLLECTIONS:
+        cases = await cases_repo.list_cases(session, CaseCategory(meta["key"]))
+        collections.append({**meta, "cases": [_case_json(c) for c in cases]})
+    return web.json_response({"collections": collections})
 
 
 @routes.get("/api/cases/{case_id}")
@@ -236,9 +293,12 @@ async def get_case_detail(request: web.Request) -> web.Response:
     item_payloads = []
     for item, weight in zip(items, weights):
         entry = _case_item_json(item)
-        entry["chance_percent"] = round(weight / total_weight * 100, 2)
+        entry["chance_percent"] = round(weight / total_weight * 100, 3)
         item_payloads.append(entry)
     payload["items"] = item_payloads
+    payload["expected_value"] = round(sum(i.value * w for i, w in zip(items, weights)) / total_weight, 1) if items else None
+    payload["target_rtp_percent"] = round(TARGET_RTP * 100)
+    payload["sell_rate_percent"] = round(SELL_RATE * 100)
     return web.json_response(payload)
 
 
@@ -264,24 +324,35 @@ async def post_case_open(request: web.Request) -> web.Response:
 
     items = await cases_repo.list_case_items(session, case.id)
     # Результат определяется ЗДЕСЬ, на сервере, до какой-либо анимации —
-    # клиент получает уже готовый won[] и (для qty=1) декоративную reel[]
-    # с тем же результатом на фиксированной позиции REEL_REVEAL_INDEX,
-    # см. bot.services.cases_service.build_reel.
+    # клиент получает уже готовый won[] и декоративные ленты reels[] (по
+    # одной на каждый выигрыш) с результатом на фиксированной позиции
+    # REEL_REVEAL_INDEX, см. bot.services.cases_service.build_reel.
     won = draw_items(items, qty)
 
     user.game_tokens -= cost
     await session.commit()
     await session.refresh(user)
 
-    await inventory_repo.add_items(session, user, case.name, [(i.name, i.value) for i in won], case_id=case.id)
+    entries = await inventory_repo.add_items(session, user, case.name, [(i.name, i.value) for i in won], case_id=case.id)
     await quest_service.record_progress(session, user, f"open_case:{case.code}")
 
-    response = {"won": [_case_item_json(i) for i in won], "cost": cost, "game_tokens": user.game_tokens}
-    if qty == 1:
-        reel = build_reel(items, won[0])
-        response["reel"] = [_case_item_json(i) for i in reel]
-        response["reveal_index"] = REEL_REVEAL_INDEX
+    won_payload = []
+    for item, entry in zip(won, entries):
+        data = _case_item_json(item)
+        data["inventory_id"] = entry.id
+        data["sell_payout"] = round(item.value * SELL_RATE)
+        won_payload.append(data)
 
+    reels = [[_case_item_json(i) for i in build_reel(items, w)] for w in won]
+    response = {
+        "won": won_payload,
+        "cost": cost,
+        "game_tokens": user.game_tokens,
+        "reels": reels,
+        "reveal_index": REEL_REVEAL_INDEX,
+    }
+    if qty == 1:
+        response["reel"] = reels[0]  # старое поле, на него ещё смотрят тесты/старые клиенты
     return web.json_response(response)
 
 
@@ -295,7 +366,7 @@ async def get_upgrader_targets(request: web.Request) -> web.Response:
     exclude_name = request.query.get("exclude_name")
     items = await list_known_items(session)
     eligible = [i for i in items if i.value > min_value and i.name != exclude_name]
-    return web.json_response([{"name": i.name, "value": i.value} for i in eligible])
+    return web.json_response([_brainrot_json(i.name, i.value) for i in eligible])
 
 
 @routes.post("/api/upgrader/spin")
@@ -315,11 +386,11 @@ async def post_upgrader_spin(request: web.Request) -> web.Response:
     chance = chance_percent(item.value, int(target_value))
     success = roll_success(chance)
 
-    contribution_label = {"name": item.item_name, "value": item.value}
+    contribution_label = _brainrot_json(item.item_name, item.value, item.rarity)
     await inventory_repo.delete(session, item)
     won_item = None
     if success:
-        won_item = {"name": target_name, "value": int(target_value)}
+        won_item = _brainrot_json(target_name, int(target_value))
         await inventory_repo.add_items(session, user, "Апгрейдер", [(target_name, int(target_value))])
     await quest_service.record_progress(session, user, "upgrader_spin")
 
@@ -344,7 +415,7 @@ async def get_crash_state(request: web.Request) -> web.Response:
             "active": not crashed,
             "crashed": crashed,
             "multiplier": mult,
-            "stake": {"name": round_.item_name, "value": round_.item_value},
+            "stake": _brainrot_json(round_.item_name, round_.item_value),
             "history": crash_history_label(),
         }
     )
@@ -369,7 +440,7 @@ async def post_crash_start(request: web.Request) -> web.Response:
     await inventory_repo.delete(session, item)
     crash_start_round(user.tg_id, item_name, item_value)
 
-    return web.json_response({"active": True, "multiplier": 1.0, "stake": {"name": item_name, "value": item_value}})
+    return web.json_response({"active": True, "multiplier": 1.0, "stake": _brainrot_json(item_name, item_value)})
 
 
 @routes.post("/api/crash/cashout")
@@ -383,7 +454,7 @@ async def post_crash_cashout(request: web.Request) -> web.Response:
     winnings = round(round_.item_value * mult)
     await inventory_repo.add_items(session, user, "Краш", [(round_.item_name, winnings)])
 
-    return web.json_response({"multiplier": mult, "won_item": {"name": round_.item_name, "value": winnings}})
+    return web.json_response({"multiplier": mult, "won_item": _brainrot_json(round_.item_name, winnings)})
 
 
 # ----------------------------------------------------------------------- дайсы
@@ -421,7 +492,7 @@ async def post_dice_roll(request: web.Request) -> web.Response:
     won_item = None
     if result.is_win:
         winnings = round(item_value * result.multiplier)
-        won_item = {"name": item_name, "value": winnings}
+        won_item = _brainrot_json(item_name, winnings)
         await inventory_repo.add_items(session, user, "Дайсы", [(item_name, winnings)])
 
     return web.json_response(
@@ -431,7 +502,7 @@ async def post_dice_roll(request: web.Request) -> web.Response:
             "bonus": result.bonus,
             "win": result.is_win,
             "multiplier": result.multiplier,
-            "stake": {"name": item_name, "value": item_value},
+            "stake": _brainrot_json(item_name, item_value),
             "won_item": won_item,
         }
     )

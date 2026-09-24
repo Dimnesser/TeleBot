@@ -20,21 +20,13 @@ window.addEventListener('unhandledrejection', (e) => {
 
 const DEV_ID_KEY = 'bb_dev_tg_id';
 
-const CATEGORY_LABELS = {
-  cases: '📦 Кейсы',
-  thematic: '🎭 Тематические',
-  allin: '🎰 ALL-IN',
-  partners: '🤝 Партнёры',
-  free: '🎁 Бесплатные',
+const RARITY_ORDER = ['common', 'rare', 'epic', 'legendary', 'mythic', 'brainrot_god', 'secret', 'og'];
+const haptic = {
+  tick() { try { tg && tg.HapticFeedback && tg.HapticFeedback.selectionChanged(); } catch (e) {} },
+  impact(style = 'medium') { try { tg && tg.HapticFeedback && tg.HapticFeedback.impactOccurred(style); } catch (e) {} },
+  success() { try { tg && tg.HapticFeedback && tg.HapticFeedback.notificationOccurred('success'); } catch (e) {} },
 };
-const CATEGORY_TITLES = {
-  cases: 'КЕЙСЫ',
-  thematic: 'ТЕМАТИЧЕСКИЕ КЕЙСЫ',
-  allin: 'ALL-IN',
-  partners: 'ПАРТНЁРЫ',
-  free: 'БЕСПЛАТНЫЕ КЕЙСЫ',
-};
-const RARITY_ORDER = ['common', 'rare', 'epic', 'legendary', 'mythic', 'secret', 'og'];
+const fmt = (n) => Number(n).toLocaleString('ru-RU');
 
 // ------------------------------------------------------------------- API
 
@@ -64,82 +56,35 @@ function escapeHtml(str) {
   return String(str).replace(/[&<>"']/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
 }
 
-// Итало-brainrot-мемы — абсурдные животные/предметы-гибриды: без реальных
-// рендеров (см. докстринг ниже) эмодзи-пул хотя бы намекает на характер
-// персонажа вместо голых инициалов. Хэш от имени -> всегда один и тот же
-// эмодзи для одного и того же персонажа.
-const GLYPH_POOL = ['🐊','🦈','🐸','🦶','🐍','🦵','🐘','🦉','🐢','🦫','🐫','🦒','🦩','🦚','🦜','🐙',
-  '🍕','🍔','🧀','🍦','🥐','🍩','🌵','🎪','🎩','👑','⚓','🚀','🛞','🔫','💣','🎺','🥁','🛹','🧦',
-  '👟','🦷','👁️','🫀','🧠','🎭','🐲','🦖','🦣','🐆'];
-
-function glyphFor(name) {
-  let hash = 0;
-  for (const ch of name || '?') hash = (hash * 31 + ch.charCodeAt(0)) >>> 0;
-  return GLYPH_POOL[hash % GLYPH_POOL.length];
+/* Ценностная подсветка: все брейнроты в кейсах — Secret/OG (реальный тир
+ * показывается текстом), а цвет свечения зависит от их ценности — чтобы
+ * лента и сетки читались с одного взгляда. Тир НЕ выдумывается. */
+const VALUE_BANDS = [
+  [10000, '#ffd84d', '#ff4fd8'],
+  [2500, '#ff5d7a', '#b3124a'],
+  [800, '#b17aff', '#5b2bb5'],
+  [250, '#43c6ff', '#1c5fae'],
+  [0, '#c9d1e4', '#5d667a'],
+];
+function valueBand(value) {
+  return VALUE_BANDS.find(([min]) => value >= min);
+}
+function glowVars(b) {
+  const [, c1, c2] = valueBand(b.value || 0);
+  return `--rc:${c1};--rca:${c2}`;
 }
 
-function monogramFor(name) {
-  const words = (name || '?').split(/\s+/).filter(Boolean);
-  if (words.length >= 2) return (words[0][0] + words[1][0]).toUpperCase();
-  return (name || '?').slice(0, 2).toUpperCase();
+/** Официальный рендер брейнрота (из вики, см. webapp/static/assets/brainrots).
+ * Если ассета нет — честный плейсхолдер, никакой подменной картинки. */
+function brainrotArt(b, sizeClass = '') {
+  const img = b.image_url
+    ? `<img src="${b.image_url}" alt="${escapeHtml(b.name)}" loading="lazy" draggable="false">`
+    : '<span class="p-tile-missing">нет ассета</span>';
+  return `<div class="p-tile ${b.rarity === 'og' ? 'is-og' : ''} ${sizeClass}" style="${glowVars(b)}">${img}</div>`;
 }
 
-/** Prestige-tile: заменяет реальное фото персонажа, которого нет (сеть в
- * этой песочнице режет любые image-CDN, см. bot/data/brainrot_roster.py).
- * Многослойная процедурная карточка (не голые буквы): диагональные грани +
- * радиальный блик + крупный тематический эмодзи + мелкая монограмма-бейдж.
- * <img> всё равно указывает на /static/assets/brainrots/<slug>.png — если
- * туда положить настоящий файл, он подхватится сам, тайл спрячется onload. */
-function prestigeTile(brainrot, sizeClass = '') {
-  const rarity = brainrot.rarity || 'common';
-  const rc = brainrot.rarity_color || '#8a93a8';
-  const rca = brainrot.rarity_color_accent || '#5c6478';
-  const mono = monogramFor(brainrot.name);
-  const imgUrl = brainrot.image_url || `/static/assets/brainrots/${brainrot.slug || ''}.png`;
-  // Ручные SVG-иллюстрации для персонажей из подтверждённых скриншотом
-  // дроп-пулов «Драгон»/«Тако» (см. webapp/static/js/character-art.js) —
-  // единственный источник реальной уникальной графики, доступный без сети
-  // и без Figma (оба варианта скачивания настоящих рендеров недоступны в
-  // этом окружении, см. README в webapp/static/assets/).
-  const customArt = window.CHARACTER_ART && window.CHARACTER_ART[brainrot.name];
-  const artOrGlyph = customArt
-    ? `<div class="p-tile-art">${customArt}</div>`
-    : `<span class="p-tile-glyph">${glyphFor(brainrot.name)}</span>`;
-  return `
-    <div class="p-tile r-${rarity} ${sizeClass} ${customArt ? 'has-art' : ''}" style="--rc:${rc};--rca:${rca}">
-      <div class="p-tile-facets"></div>
-      <span class="p-tile-mono">${escapeHtml(mono)}</span>
-      ${artOrGlyph}
-      <img src="${imgUrl}" alt="" loading="lazy" onerror="this.remove()" onload="this.parentElement.classList.add('has-photo')" />
-    </div>`;
-}
-
-/* Иконка САМОГО КЕЙСА (сундук) — отдельная сущность от арта персонажа
- * внутри него: пользователь прислал референс с уникальным сундуком под
- * тему каждого кейса (см. webapp/static/assets/cases/). Для 8 кейсов,
- * чьи сундуки реально вырезаны из присланных скриншотов, картинка
- * подхватится по тому же onerror/onload-паттерну, что и у prestigeTile;
- * для остальных — img не найдётся (404), останется только запасной
- * prestigeTile с артом топового персонажа, как было раньше. */
-function caseHeroArt(c, sizeClass = '') {
-  const fallback = prestigeTile(
-    { name: c.top_item_name || c.name, rarity: c.best_rarity || 'common', rarity_color: c.best_rarity_color, rarity_color_accent: c.best_rarity_color_accent, slug: c.top_item_slug || '' },
-    sizeClass
-  );
-  return `<div class="case-hero-wrap ${sizeClass}">
-    ${fallback}
-    <img class="case-hero-img" src="${c.case_image_url}" alt="" loading="lazy" onerror="this.remove()" />
-  </div>`;
-}
-
-function rarityBadge(brainrot) {
-  const rc = brainrot.rarity_color || '#8a93a8';
-  return `<span class="rarity-badge" style="--rc:${rc}">${escapeHtml(brainrot.rarity_label || '?')}</span>`;
-}
-
-function caseCardStyle(c) {
-  const rc = c.best_rarity_color || '#5b7cfa';
-  return `--rc:${rc}`;
+function rarityBadge(b) {
+  return `<span class="tier-badge tier-${b.rarity}">${escapeHtml(b.rarity_label || '?')}</span>`;
 }
 
 // ------------------------------------------------------------------- toast
@@ -276,6 +221,7 @@ function skeletonGrid() {
 }
 
 async function renderScreen(screen, params = {}) {
+  closeStage();
   renderDrawer(screen);
   const root = document.getElementById('screen');
   root.innerHTML = `<div class="section-title">&nbsp;</div>${skeletonGrid()}`;
@@ -298,70 +244,93 @@ window.addEventListener('hashchange', () => {
 
 // =================================================================== ГЛАВНАЯ / КЕЙСЫ
 
-async function renderCasesScreen(root, params = {}) {
-  const category = params.category || 'cases';
+function caseThemeVars(c) {
+  const [c1, c2, c3] = (c.theme && c.theme.colors) || ['#8b93ff', '#d7dcff', '#0b0d1f'];
+  return `--c1:${c1};--c2:${c2};--c3:${c3}`;
+}
+
+function caseCard(c, idx) {
+  return `
+    <button class="case-card fade-in-up" style="${caseThemeVars(c)};animation-delay:${Math.min(idx * 45, 400)}ms" data-case-id="${c.id}">
+      <div class="case-card-glow"></div>
+      <div class="case-card-art">${CaseArt.artifact(c, 'artifact-sm')}</div>
+      <div class="case-card-body">
+        <div class="case-card-name">${escapeHtml(c.name)}</div>
+        <div class="case-card-tagline">${escapeHtml(c.theme ? c.theme.tagline : '')}</div>
+        <div class="case-card-foot">
+          <span class="case-card-count">${c.item_count_label} брейнротов</span>
+          <span class="price-chip">${fmt(c.price_tokens)} 🎫</span>
+        </div>
+      </div>
+    </button>`;
+}
+
+async function renderCasesScreen(root) {
   const [data, me, recentWins] = await Promise.all([
-    api(`/api/cases?category=${category}`),
+    api('/api/cases'),
     refreshMe(),
-    api('/api/recent-wins?limit=12').catch(() => []),
+    api('/api/recent-wins?limit=14').catch(() => []),
   ]);
+  const all = data.collections.flatMap((col) => col.cases);
+  const featured = all.slice().sort((a, b) => b.price_tokens - a.price_tokens)[0];
 
-  const tabs = Object.entries(CATEGORY_LABELS).map(
-    ([key, label]) => `<button class="category-tab ${key === category ? 'active' : ''}" data-cat="${key}">${label}</button>`
-  ).join('');
-
-  const cards = data.cases.map((c, idx) => {
-    const price = c.price_tokens !== null ? `${c.price_tokens} 🎫` : 'по условию';
-    const count = c.item_count_label !== null ? `${c.item_count_label} шт.` : '? шт.';
-    return `
-      <button class="case-card fade-in-up ${c.is_openable ? '' : 'locked'}" style="${caseCardStyle(c)};animation-delay:${Math.min(idx * 35, 350)}ms" data-case-id="${c.id}">
-        ${c.is_openable ? '' : '<span class="lock-badge">🔒</span>'}
-        <div class="case-art">${caseHeroArt(c)}</div>
-        <div class="case-name">${escapeHtml(c.name)}</div>
-        ${c.best_rarity_label ? `<span class="rarity-badge" style="--rc:${c.best_rarity_color}">до ${escapeHtml(c.best_rarity_label)}</span>` : ''}
-        <div class="case-meta"><span>${count}</span><span class="case-price">${price}</span></div>
-      </button>`;
-  }).join('') || '<div class="empty-state">В этой категории пока нет кейсов.</div>';
+  const hero = featured ? `
+    <button class="hero-case fade-in-up" style="${caseThemeVars(featured)}" data-case-id="${featured.id}">
+      <div class="hero-case-bg"></div>
+      <div class="hero-case-text">
+        <div class="eyebrow">Главный кейс</div>
+        <div class="hero-case-name">${escapeHtml(featured.name)}</div>
+        <div class="hero-case-tagline">${escapeHtml(featured.theme ? featured.theme.tagline : '')}</div>
+        <span class="price-chip price-chip-lg">${fmt(featured.price_tokens)} 🎫</span>
+      </div>
+      <div class="hero-case-art">${CaseArt.artifact(featured, 'artifact-float')}</div>
+    </button>` : '';
 
   const ticker = recentWins.length ? `
-    <div class="ticker-wrap">
-      <div class="ticker-label"><span class="ticker-dot"></span> Последние выигрыши</div>
-      <div class="ticker-row">
-        ${recentWins.map((w, idx) => `
-          <div class="ticker-card fade-in-up" style="--rc:${w.rarity_color};animation-delay:${idx * 40}ms">
-            <div class="ticker-tile">${prestigeTile(w)}</div>
-            <div class="ticker-player">${escapeHtml(w.player)}</div>
-            <div class="ticker-value">${w.value} B</div>
+    <div class="live-strip">
+      <div class="live-label"><span class="live-dot"></span>Live-дропы</div>
+      <div class="live-row">
+        ${recentWins.map((w) => `
+          <div class="live-card" style="${glowVars(w)}" title="${escapeHtml(w.name)}">
+            ${brainrotArt(w)}
+            <div class="live-player">${escapeHtml(w.player)}</div>
+            <div class="live-value">${fmt(w.value)}</div>
           </div>`).join('')}
       </div>
     </div>` : '';
 
-  root.innerHTML = `
-    <div class="section-title">${CATEGORY_TITLES[category]}</div>
-    <div class="balance-hero">
-      <div class="balance-tile gold"><div class="balance-tile-label">Демо 🎫</div><div class="balance-tile-value">${me.game_tokens}</div></div>
-      <div class="balance-tile"><div class="balance-tile-label">Баланс B</div><div class="balance-tile-value">${me.balance}</div></div>
-    </div>
-    ${ticker}
-    <div class="category-tabs">${tabs}</div>
-    <div class="case-grid">${cards}</div>
-    <div class="btn-row" style="margin-top:14px">
-      <button class="btn btn-ghost" id="btn-inventory">🎒 Инвентарь</button>
-      <button class="btn btn-gold" id="btn-topup">🎁 Пополнить демо</button>
-    </div>`;
+  const sections = data.collections.map((col) => `
+    <section class="collection">
+      <div class="collection-head">
+        <h2 class="collection-title">${escapeHtml(col.title)}</h2>
+        <div class="collection-sub">${escapeHtml(col.subtitle)}</div>
+      </div>
+      <div class="case-grid ${col.cases.length === 1 ? 'single' : ''}">${col.cases.map(caseCard).join('')}</div>
+    </section>`).join('');
 
-  root.querySelectorAll('.category-tab').forEach((el) =>
-    el.addEventListener('click', () => navigate('home', { category: el.dataset.cat }))
-  );
-  root.querySelectorAll('.case-card').forEach((el) =>
-    el.addEventListener('click', () => openCaseDetail(Number(el.dataset.caseId)))
+  root.innerHTML = `
+    <div class="wallet-row">
+      <div class="wallet"><span class="wallet-label">Демо-баланс</span><span class="wallet-value" id="home-tokens">${fmt(me.game_tokens)} 🎫</span></div>
+      <button class="btn-chip" id="btn-topup">+ ${'Пополнить'}</button>
+      <button class="btn-chip ghost" id="btn-inventory">Инвентарь</button>
+    </div>
+    ${hero}
+    ${ticker}
+    ${sections}
+    <p class="fine-print">Внутри кейсов — только реальные брейнроты Steal a Brainrot тиров Secret и OG с официальными изображениями из вики игры. Шанс каждого — обратно пропорционален его ценности, цена кейса выведена из содержимого.</p>`;
+
+  root.querySelectorAll('[data-case-id]').forEach((el) =>
+    el.addEventListener('click', () => openCaseStage(Number(el.dataset.caseId)))
   );
   root.querySelector('#btn-inventory').addEventListener('click', () => navigate('inventory'));
   root.querySelector('#btn-topup').addEventListener('click', async () => {
     const res = await api('/api/demo-topup', { method: 'POST' });
-    toast(`+${res.amount} 🎫`, 'success');
+    toast(`+${fmt(res.amount)} 🎫`, 'success');
     ME.game_tokens = res.game_tokens;
-    navigate('home', { category });
+    const el = root.querySelector('#home-tokens');
+    el.textContent = `${fmt(res.game_tokens)} 🎫`;
+    popNumber(el);
+    refreshMe();
   });
 }
 
@@ -375,127 +344,327 @@ function renderDepositPlaceholder(root) {
     </div>`;
 }
 
-// =================================================================== СТРАНИЦА КЕЙСА + РУЛЕТКА
+// =================================================================== СЦЕНА КЕЙСА
 
-async function openCaseDetail(caseId) {
+let stageFx = null;
+
+function closeStage() {
+  if (stageFx) { stageFx.stop(); stageFx = null; }
+  const el = document.getElementById('case-stage');
+  if (!el) return;
+  el.classList.add('leaving');
+  setTimeout(() => el.remove(), 220);
+  document.body.classList.remove('stage-open');
+}
+
+async function openCaseStage(caseId, qty = 1) {
   const c = await api(`/api/cases/${caseId}`);
-  renderCaseDetailModal(c, 1);
-}
+  closeStage();
+  document.getElementById('case-stage')?.remove();
 
-function renderCaseDetailModal(c, qty) {
-  const price = c.price_tokens !== null ? `${c.price_tokens} 🎫 за 1 шт.` : 'цена по условию';
-  const items = (c.items || []).slice().sort((a, b) => b.value - a.value);
-  const dropTable = items.map((i, idx) => `
-    <div class="drop-tile fade-in-up" style="--rc:${i.rarity_color};animation-delay:${Math.min(idx * 30, 300)}ms">
-      ${prestigeTile(i)}
-      <div class="drop-name">${escapeHtml(i.name)}</div>
-      <div class="drop-value">${i.value} B</div>
-      <div class="drop-chance">${i.chance_percent}%</div>
-    </div>`).join('') || '<div class="empty-state">Дроп-пул этого кейса пока не подтверждён.</div>';
-  const totalCost = c.price_tokens !== null ? c.price_tokens * qty : null;
-
-  const overlay = openModal(`
-    <button class="modal-close" onclick="closeModal()">✕</button>
-    <div style="display:flex;justify-content:center">${caseHeroArt(c, '')}</div>
-    <style>#active-modal .p-tile:first-of-type{width:120px;height:120px;font-size:44px;margin-bottom:12px}
-    #active-modal .case-hero-wrap{width:120px;height:120px;margin-bottom:12px}</style>
-    <h2 style="margin:6px 0 4px;text-align:center">${escapeHtml(c.name)}</h2>
-    <div class="muted" style="text-align:center">${price} · ${c.item_count_label ?? '?'} предм. ${c.best_rarity_label ? `· до <span style="color:${c.best_rarity_color}">${escapeHtml(c.best_rarity_label)}</span>` : ''}</div>
-    ${c.note ? `<div class="muted" style="margin-top:6px;text-align:center">${escapeHtml(c.note)}</div>` : ''}
-    <div id="reel-slot"></div>
-    <div class="pill-row" style="margin-top:14px">
-      ${[1, 3, 5].map((q) => `<button class="pill qty-pill ${q === qty ? 'active' : ''}" data-qty="${q}">${q}</button>`).join('')}
-    </div>
-    ${c.is_openable
-      ? `<button class="btn btn-primary" id="btn-open-case">ОТКРЫТЬ КЕЙС ×${qty}${totalCost !== null ? ` — ${totalCost} 🎫` : ''}</button>`
-      : `<div class="empty-state">Кейс пока нельзя открыть.</div>`}
-    <h4 style="margin:18px 0 8px">Что может выпасть</h4>
-    <div class="drop-table">${dropTable}</div>
-  `);
-
-  overlay.querySelectorAll('.qty-pill').forEach((el) =>
-    el.addEventListener('click', () => renderCaseDetailModal(c, Number(el.dataset.qty)))
-  );
-  const openBtn = overlay.querySelector('#btn-open-case');
-  if (openBtn) openBtn.addEventListener('click', async () => {
-    openBtn.disabled = true;
-    try {
-      const res = await api(`/api/cases/${c.id}/open`, { method: 'POST', body: JSON.stringify({ qty }) });
-      ME.game_tokens = res.game_tokens;
-      if (qty === 1 && res.reel) {
-        openBtn.disabled = true;
-        await playReel(overlay.querySelector('#reel-slot'), res.reel, res.reveal_index);
-        renderCaseOpenResult(c, res.won);
-      } else {
-        renderCaseOpenResult(c, res.won);
-      }
-    } catch (err) {
-      toast('Ошибка: ' + err.message, 'error');
-      openBtn.disabled = false;
-    }
-  });
-}
-
-const REEL_ITEM_WIDTH = 104; // 96px карточка + 8px gap, см. .reel-item/.reel-track в app.css
-
-/** Рулетка: сервер уже решил результат (res.won[0]), reel[] — только
- * декорация вокруг него на позиции reveal_index (см. build_reel на
- * бэкенде). Анимация не выбирает исход — она едет к уже готовой позиции. */
-function playReel(slot, reel, revealIndex) {
-  return new Promise((resolve) => {
-    slot.innerHTML = `
-      <div class="reel-outer">
-        <div class="reel-fade left"></div>
-        <div class="reel-fade right"></div>
-        <div class="reel-marker"></div>
-        <div class="reel-track" id="reel-track">
-          ${reel.map((i) => `
-            <div class="reel-item" style="--rc:${i.rarity_color}">
-              ${prestigeTile(i)}
-              <div class="reel-item-name">${escapeHtml(i.name)}</div>
-              <div class="reel-item-value">${i.value} B</div>
-            </div>`).join('')}
-        </div>
-      </div>`;
-    const track = slot.querySelector('#reel-track');
-    const outerWidth = slot.querySelector('.reel-outer').clientWidth;
-    requestAnimationFrame(() => {
-      const target = revealIndex * REEL_ITEM_WIDTH + REEL_ITEM_WIDTH / 2 - outerWidth / 2;
-      track.style.transition = 'transform 4.2s cubic-bezier(0.09, 0.85, 0.12, 1)';
-      track.style.transform = `translateX(${-target}px)`;
-    });
-    track.addEventListener('transitionend', () => {
-      const landed = slot.querySelectorAll('.reel-item')[revealIndex];
-      if (landed) landed.style.boxShadow = '0 0 24px -2px var(--rc)';
-      setTimeout(resolve, 350);
-    }, { once: true });
-  });
-}
-
-function renderCaseOpenResult(c, won) {
-  if (won.length === 1) {
-    const w = won[0];
-    openModal(`
-      <button class="modal-close" onclick="closeModal()">✕</button>
-      <div class="reveal-card" style="--rc:${w.rarity_color}">
-        ${prestigeTile(w)}
-        <style>#active-modal .reveal-card .p-tile{width:110px;height:110px;font-size:40px;margin:0 auto 14px}</style>
-        ${rarityBadge(w)}
-        <div class="reveal-name" style="margin-top:8px">${escapeHtml(w.name)}</div>
-        <div class="reveal-value" style="--rc:${w.rarity_color}">${w.value} B</div>
+  const stage = document.createElement('div');
+  stage.id = 'case-stage';
+  stage.className = 'stage';
+  stage.style.cssText = caseThemeVars(c);
+  document.body.appendChild(stage);
+  document.body.classList.add('stage-open');
+  stage.innerHTML = `
+    <div class="stage-bg"></div>
+    <canvas class="stage-fx"></canvas>
+    <div class="stage-flash"></div>
+    <div class="stage-scroll">
+      <header class="stage-top">
+        <button class="stage-close" aria-label="Закрыть">✕</button>
+        <div class="stage-wallet"><span id="stage-tokens">${fmt(ME ? ME.game_tokens : 0)}</span> 🎫</div>
+      </header>
+      <div class="stage-hero" id="stage-hero">
+        <div class="stage-art">${CaseArt.artifact(c, 'artifact-lg artifact-float')}</div>
+        <div class="eyebrow">${escapeHtml(c.item_count_label + ' брейнротов · до ' + c.best_rarity_label)}</div>
+        <h1 class="stage-name">${escapeHtml(c.name)}</h1>
+        <p class="stage-lore">${escapeHtml(c.theme ? c.theme.lore : '')}</p>
       </div>
-      <button class="btn btn-primary" style="margin-top:16px" onclick="closeModal(); navigate('home')">Готово</button>
-      <button class="btn btn-ghost" style="margin-top:8px" onclick="closeModal(); openCaseDetail(${c.id})">Открыть ещё раз</button>
-    `);
+      <div class="stage-reels hidden" id="stage-reels"></div>
+      <div class="stage-controls" id="stage-controls"></div>
+      <section class="stage-contents">
+        <div class="contents-head">
+          <h3>Что внутри</h3>
+          <span class="muted">средний дроп ${fmt(Math.round(c.expected_value))} 🎫 · возврат ~${c.target_rtp_percent}%</span>
+        </div>
+        <div class="contents-grid">
+          ${c.items.map((i, idx) => `
+            <button class="content-tile fade-in-up" style="${glowVars(i)};animation-delay:${Math.min(idx * 30, 360)}ms" data-item="${idx}">
+              ${brainrotArt(i)}
+              <div class="content-name">${escapeHtml(i.name)}</div>
+              <div class="content-meta"><span class="content-value">${fmt(i.value)}</span><span class="content-chance">${formatChance(i.chance_percent)}</span></div>
+            </button>`).join('')}
+        </div>
+      </section>
+    </div>`;
+
+  stageFx = CaseArt.particles(stage.querySelector('.stage-fx'), c.theme ? c.theme.particles : 'dust', c.theme ? c.theme.colors : ['#fff', '#fff']);
+  stage.querySelector('.stage-close').addEventListener('click', () => { closeStage(); navigate('home'); });
+  stage.querySelectorAll('[data-item]').forEach((el) =>
+    el.addEventListener('click', () => openBrainrotSheet(c.items[Number(el.dataset.item)]))
+  );
+  paintStageControls(stage, c, qty);
+}
+
+function formatChance(p) {
+  if (p >= 10) return p.toFixed(1) + '%';
+  if (p >= 1) return p.toFixed(2) + '%';
+  return p.toFixed(3) + '%';
+}
+
+function paintStageControls(stage, c, qty) {
+  const controls = stage.querySelector('#stage-controls');
+  const total = c.price_tokens * qty;
+  const enough = ME && ME.game_tokens >= total;
+  controls.innerHTML = `
+    <div class="qty-switch" role="tablist">
+      ${[1, 3, 5].map((q) => `<button class="qty-opt ${q === qty ? 'active' : ''}" data-qty="${q}">×${q}</button>`).join('')}
+    </div>
+    <button class="open-btn" id="btn-open" ${enough ? '' : 'data-poor="1"'}>
+      <span class="open-btn-shine"></span>
+      <span class="open-btn-label">${enough ? 'Открыть' : 'Не хватает 🎫'}</span>
+      <span class="open-btn-price">${fmt(total)} 🎫</span>
+    </button>`;
+  controls.querySelectorAll('.qty-opt').forEach((el) =>
+    el.addEventListener('click', () => { haptic.tick(); paintStageControls(stage, c, Number(el.dataset.qty)); })
+  );
+  controls.querySelector('#btn-open').addEventListener('click', (e) => {
+    if (e.currentTarget.dataset.poor) {
+      toast(`Нужно ${fmt(total)} 🎫, у тебя ${fmt(ME.game_tokens)} 🎫. Пополни демо-баланс на главной.`, 'error');
+      return;
+    }
+    runOpening(stage, c, qty);
+  });
+}
+
+function sleep(ms) { return new Promise((r) => setTimeout(r, ms)); }
+
+async function runOpening(stage, c, qty) {
+  const controls = stage.querySelector('#stage-controls');
+  controls.classList.add('busy');
+  controls.querySelector('#btn-open').disabled = true;
+  const art = stage.querySelector('.stage-art .artifact');
+  haptic.impact('heavy');
+  art.classList.add('charging');
+
+  let res;
+  try {
+    [res] = await Promise.all([
+      api(`/api/cases/${c.id}/open`, { method: 'POST', body: JSON.stringify({ qty }) }),
+      sleep(CaseArt.REDUCED ? 100 : 900),
+    ]);
+  } catch (err) {
+    art.classList.remove('charging');
+    controls.classList.remove('busy');
+    toast('Ошибка: ' + err.message, 'error');
+    paintStageControls(stage, c, qty);
     return;
   }
-  const rows = won.map((i) => `<div class="item-row" style="--rc:${i.rarity_color}">${rarityBadge(i)}<span style="flex:1;margin:0 8px">${escapeHtml(i.name)}</span><span class="item-value" style="color:${i.rarity_color}">${i.value} B</span></div>`).join('');
+  ME.game_tokens = res.game_tokens;
+  const walletEl = stage.querySelector('#stage-tokens');
+  walletEl.textContent = fmt(res.game_tokens);
+  popNumber(walletEl);
+  refreshMe().catch(() => {});
+
+  // Артефакт «лопается» — вспышка цветом темы и старт ленты.
+  flash(stage, 'var(--c1)');
+  stageFx && stageFx.burst(stage.clientWidth / 2, stage.querySelector('.stage-art').getBoundingClientRect().top + 90, getComputedStyle(stage).getPropertyValue('--c2').trim() || '#fff', 0.8);
+  stage.querySelector('#stage-hero').classList.add('collapsed');
+  controls.innerHTML = '<button class="skip-btn" id="btn-skip">Пропустить</button>';
+
+  const reelsEl = stage.querySelector('#stage-reels');
+  reelsEl.classList.remove('hidden');
+  const multi = res.reels.length > 1;
+  reelsEl.innerHTML = res.reels.map((reel, r) => `
+    <div class="reel ${multi ? 'reel-sm' : ''}" data-reel="${r}">
+      <div class="reel-marker"></div>
+      <div class="reel-track">
+        ${reel.map((i) => `
+          <div class="reel-card" style="${glowVars(i)}">
+            ${brainrotArt(i)}
+            ${multi ? '' : `<div class="reel-card-name">${escapeHtml(i.name)}</div>`}
+            <div class="reel-card-bar"></div>
+          </div>`).join('')}
+      </div>
+    </div>`).join('');
+
+  const spins = [...reelsEl.querySelectorAll('.reel')].map((el, r) =>
+    spinReel(el, res.reveal_index, (CaseArt.REDUCED ? 700 : (multi ? 3600 : 5200)) + r * 450)
+  );
+  controls.querySelector('#btn-skip').addEventListener('click', () => spins.forEach((s) => s.skip()));
+  await Promise.all(spins.map((s) => s.done));
+
+  // Эффект остановки.
+  const best = res.won.slice().sort((a, b) => b.value - a.value)[0];
+  const [, bc] = valueBand(best.value);
+  haptic.success();
+  flash(stage, bc);
+  const reelRect = reelsEl.getBoundingClientRect();
+  stageFx && stageFx.burst(stage.clientWidth / 2, reelRect.top + reelRect.height / 2, bc, best.rarity === 'og' ? 2.2 : best.value >= 2500 ? 1.5 : 1);
+  if (best.rarity === 'og' || best.value >= 10000) stage.classList.add('shake');
+  await sleep(CaseArt.REDUCED ? 100 : 750);
+  stage.classList.remove('shake');
+  showReveal(stage, c, qty, res.won);
+}
+
+/** Анимация ленты: сервер уже выбрал победителя (он стоит на revealIndex).
+ * Лента едет с сильным замедлением, «перелетает» внутрь соседней карточки
+ * на случайную долю и доводится ровно в центр — ощущение живой остановки. */
+function spinReel(reelEl, revealIndex, duration) {
+  const track = reelEl.querySelector('.reel-track');
+  const cards = track.children;
+  const cardW = cards[0].getBoundingClientRect().width + parseFloat(getComputedStyle(track).columnGap || '0');
+  const viewW = reelEl.clientWidth;
+  const center = revealIndex * cardW + cardW / 2 - viewW / 2;
+  const jitter = (Math.random() - 0.5) * cardW * 0.7;
+  const target = center + jitter;
+  const marker = reelEl.querySelector('.reel-marker');
+  let skipped = false, lastIdx = -1, resolve;
+  const done = new Promise((r) => { resolve = r; });
+  const start = performance.now();
+  const ease = (t) => 1 - Math.pow(1 - t, 4.2);
+
+  function finish() {
+    track.style.transition = 'transform 380ms cubic-bezier(.34,1.56,.64,1)';
+    track.style.transform = `translate3d(${-center}px,0,0)`;
+    setTimeout(() => {
+      cards[revealIndex].classList.add('won');
+      reelEl.classList.add('stopped');
+      resolve();
+    }, 400);
+  }
+  function frame(now) {
+    if (skipped) return;
+    const t = Math.min(1, (now - start) / duration);
+    const x = target * ease(t);
+    track.style.transform = `translate3d(${-x}px,0,0)`;
+    const idx = Math.floor((x + viewW / 2) / cardW);
+    if (idx !== lastIdx) {
+      lastIdx = idx;
+      marker.classList.remove('tick'); void marker.offsetWidth; marker.classList.add('tick');
+      if (t < 0.97) haptic.tick();
+    }
+    if (t < 1) requestAnimationFrame(frame); else finish();
+  }
+  requestAnimationFrame(frame);
+  return {
+    done,
+    skip() { if (!skipped) { skipped = true; finish(); } },
+  };
+}
+
+function flash(stage, color) {
+  const el = stage.querySelector('.stage-flash');
+  el.style.background = `radial-gradient(circle at 50% 45%, ${color}, transparent 70%)`;
+  el.classList.remove('on'); void el.offsetWidth; el.classList.add('on');
+}
+
+function gameInfoHtml(b) {
+  if (!b.game) return '';
+  return `
+    <div class="game-info">
+      <div><span>Цена в игре</span><b>$${escapeHtml(b.game.cost)}</b></div>
+      <div><span>Доход</span><b>$${escapeHtml(b.game.income)}/с</b></div>
+      <a href="${b.game.wiki_url}" target="_blank" rel="noopener">вики · ${escapeHtml(b.game.as_of)}</a>
+    </div>`;
+}
+
+function showReveal(stage, c, qty, won) {
+  const reelsEl = stage.querySelector('#stage-reels');
+  const controls = stage.querySelector('#stage-controls');
+  const total = won.reduce((s, w) => s + w.value, 0);
+  const payoutTotal = won.reduce((s, w) => s + w.sell_payout, 0);
+
+  const cards = won.map((w, i) => `
+    <div class="reveal ${won.length > 1 ? 'reveal-sm' : ''} ${w.rarity === 'og' ? 'is-og' : ''}" style="${glowVars(w)};animation-delay:${i * 90}ms" data-won="${i}">
+      <div class="reveal-rays"></div>
+      <div class="reveal-art">${brainrotArt(w)}</div>
+      ${rarityBadge(w)}
+      <div class="reveal-name">${escapeHtml(w.name)}</div>
+      <div class="reveal-value">${fmt(w.value)} 🎫</div>
+      ${won.length === 1 ? gameInfoHtml(w) : ''}
+      ${won.length > 1 ? `<button class="sell-mini" data-sell="${i}">↯ ${fmt(w.sell_payout)} 🎫</button>` : ''}
+    </div>`).join('');
+
+  reelsEl.innerHTML = `
+    <div class="reveal-wrap ${won.length > 1 ? 'multi' : ''}">${cards}</div>
+    ${won.length > 1 ? `<div class="reveal-total">Итого: <b>${fmt(total)} 🎫</b></div>` : ''}`;
+
+  controls.classList.remove('busy');
+  controls.innerHTML = `
+    <div class="reveal-actions">
+      <button class="btn-chip ghost" id="btn-keep">Забрать${won.length > 1 ? ' всё' : ''}</button>
+      <button class="btn-chip ghost" id="btn-sell-all">Продать${won.length > 1 ? ' всё' : ''} · ${fmt(payoutTotal)} 🎫</button>
+    </div>
+    <button class="open-btn" id="btn-again">
+      <span class="open-btn-shine"></span>
+      <span class="open-btn-label">Ещё раз</span>
+      <span class="open-btn-price">${fmt(c.price_tokens * qty)} 🎫</span>
+    </button>`;
+
+  const sold = new Set();
+  async function sell(i) {
+    if (sold.has(i)) return 0;
+    sold.add(i);
+    const res = await api(`/api/inventory/${won[i].inventory_id}/sell`, { method: 'POST' });
+    ME.game_tokens = res.game_tokens;
+    stage.querySelector('#stage-tokens').textContent = fmt(res.game_tokens);
+    const card = reelsEl.querySelector(`[data-won="${i}"]`);
+    card.classList.add('sold');
+    const mini = card.querySelector('.sell-mini');
+    if (mini) { mini.disabled = true; mini.textContent = `+${fmt(res.payout)} 🎫`; }
+    return res.payout;
+  }
+
+  reelsEl.querySelectorAll('[data-sell]').forEach((el) =>
+    el.addEventListener('click', async () => {
+      el.disabled = true;
+      try { const p = await sell(Number(el.dataset.sell)); if (p) toast(`+${fmt(p)} 🎫`, 'success'); }
+      catch (err) { toast('Ошибка: ' + err.message, 'error'); el.disabled = false; }
+    })
+  );
+  controls.querySelector('#btn-sell-all').addEventListener('click', async (e) => {
+    e.currentTarget.disabled = true;
+    let sum = 0;
+    for (let i = 0; i < won.length; i++) { try { sum += await sell(i); } catch (err) { /* уже продан */ } }
+    if (sum) toast(`Продано: +${fmt(sum)} 🎫`, 'success');
+    popNumber(stage.querySelector('#stage-tokens'));
+  });
+  controls.querySelector('#btn-keep').addEventListener('click', () => {
+    toast(won.length > 1 ? 'Брейнроты в инвентаре' : `${won[0].name} — в инвентаре`, 'success');
+    resetStage(stage, c, qty);
+  });
+  controls.querySelector('#btn-again').addEventListener('click', () => {
+    resetStage(stage, c, qty);
+    runOpening(stage, c, qty);
+  });
+}
+
+function resetStage(stage, c, qty) {
+  const reelsEl = stage.querySelector('#stage-reels');
+  reelsEl.classList.add('hidden');
+  reelsEl.innerHTML = '';
+  const art = stage.querySelector('.stage-art .artifact');
+  art.classList.remove('charging');
+  stage.querySelector('#stage-hero').classList.remove('collapsed');
+  paintStageControls(stage, c, qty);
+  refreshMe().catch(() => {});
+}
+
+function openBrainrotSheet(b) {
   openModal(`
     <button class="modal-close" onclick="closeModal()">✕</button>
-    <h2 style="margin:0 0 10px">Результат: ${escapeHtml(c.name)}</h2>
-    <div class="card" style="padding:0">${rows}</div>
-    <button class="btn btn-primary" style="margin-top:14px" onclick="closeModal(); navigate('home')">Готово</button>
-  `);
+    <div class="reveal" style="${glowVars(b)}">
+      <div class="reveal-rays"></div>
+      <div class="reveal-art">${brainrotArt(b)}</div>
+      ${rarityBadge(b)}
+      <div class="reveal-name">${escapeHtml(b.name)}</div>
+      <div class="reveal-value">${fmt(b.value)} 🎫 · шанс ${formatChance(b.chance_percent)}</div>
+      ${gameInfoHtml(b)}
+    </div>`);
 }
 
 // =================================================================== ИНВЕНТАРЬ
@@ -528,9 +697,9 @@ function paintInventory(root, items) {
 
   const tiles = sorted.map((i, idx) => `
     <div class="inv-tile fade-in-up" style="--rc:${i.rarity_color};animation-delay:${Math.min(idx * 25, 300)}ms">
-      ${prestigeTile(i)}
+      ${brainrotArt(i)}
       <div class="inv-name">${escapeHtml(i.name)}</div>
-      <div class="inv-value">${i.value} B</div>
+      <div class="inv-value">${fmt(i.value)} 🎫</div>
       <button class="inv-sell-btn" data-sell="${i.id}" data-payout="${Math.round(i.value * 0.9)}">Продать · ${Math.round(i.value * 0.9)} 🎫</button>
     </div>`).join('') || '<div class="empty-state" style="grid-column:1/-1">Пусто — открой кейс на главной.</div>';
 
@@ -611,11 +780,11 @@ async function renderProfileScreen(root) {
     ${bestDrop ? `
       <h4 style="margin:18px 0 8px">Лучший дроп</h4>
       <div class="reveal-card" style="--rc:${bestDrop.rarity_color};padding:16px">
-        ${prestigeTile(bestDrop)}
+        ${brainrotArt(bestDrop)}
         <style>#app .reveal-card .p-tile{width:64px;height:64px;font-size:24px;margin:0 auto 8px}</style>
         ${rarityBadge(bestDrop)}
         <div class="reveal-name" style="font-size:15px;margin-top:6px">${escapeHtml(bestDrop.name)}</div>
-        <div class="reveal-value" style="font-size:16px;--rc:${bestDrop.rarity_color}">${bestDrop.value} B</div>
+        <div class="reveal-value" style="font-size:16px;--rc:${bestDrop.rarity_color}">${fmt(bestDrop.value)} 🎫</div>
       </div>` : ''}
     <button class="btn btn-ghost" style="margin-top:8px" onclick="navigate('inventory')">🎒 Весь инвентарь</button>
   `;
@@ -641,11 +810,11 @@ async function renderUpgraderScreen(root) {
     </div>
     <div class="slot-row">
       <button class="slot ${contribution ? 'filled' : ''}" id="slot-contribution">
-        ${contribution ? `${prestigeTile(contribution)}${escapeHtml(contribution.name)}<br><span class="item-value">${contribution.value} B</span>` : 'ТВОЙ ВКЛАД<br>выбрать из инвентаря'}
+        ${contribution ? `${brainrotArt(contribution)}${escapeHtml(contribution.name)}<br><span class="item-value">${fmt(contribution.value)} 🎫</span>` : 'ТВОЙ ВКЛАД<br>выбрать из инвентаря'}
       </button>
       <div class="slot-arrow">→</div>
       <button class="slot ${target ? 'filled' : ''}" id="slot-target">
-        ${target ? `${prestigeTile(target)}${escapeHtml(target.name)}<br><span class="item-value">${target.value} B</span>` : 'ЖЕЛАЕМЫЙ ПРЕДМЕТ<br>выбрать цель'}
+        ${target ? `${brainrotArt(target)}${escapeHtml(target.name)}<br><span class="item-value">${fmt(target.value)} 🎫</span>` : 'ЖЕЛАЕМЫЙ ПРЕДМЕТ<br>выбрать цель'}
       </button>
     </div>
     <button class="btn btn-primary" id="btn-spin" ${contribution && target ? '' : 'disabled'}>ПРОКАЧАТЬ</button>
@@ -688,7 +857,7 @@ async function renderUpgraderScreen(root) {
         }),
       });
       upgraderState = { contribution: null, target: null };
-      if (res.success) toast(`✅ Успех! Получен: ${res.won_item.name} (${res.won_item.value} B)`, 'success');
+      if (res.success) toast(`✅ Успех! Получен: ${res.won_item.name} (${fmt(res.won_item.value)} 🎫)`, 'success');
       else toast('❌ Не повезло, предмет потерян.', 'error');
       renderUpgraderScreen(root);
     } catch (err) {
@@ -707,7 +876,7 @@ function computeChance(contributionValue, targetValue) {
 function openItemPicker(items, onPick) {
   const rows = items.map((i) => `
     <button class="item-row" style="width:100%;background:none;border:none;color:inherit;cursor:pointer;--rc:${i.rarity_color}" data-id="${i.id}">
-      ${prestigeTile(i)}<span style="flex:1;margin:0 8px;text-align:left">${escapeHtml(i.name)}</span><span class="item-value" style="color:${i.rarity_color}">${i.value} B</span>
+      ${brainrotArt(i)}<span style="flex:1;margin:0 8px;text-align:left">${escapeHtml(i.name)}</span><span class="item-value" style="color:${i.rarity_color}">${fmt(i.value)} 🎫</span>
     </button>`).join('') || '<div class="empty-state">Инвентарь пуст — сначала открой кейс.</div>';
   const overlay = openModal(`
     <button class="modal-close" onclick="closeModal()">✕</button>
@@ -727,7 +896,7 @@ function openItemPicker(items, onPick) {
 function openTargetPicker(targets, onPick) {
   const rows = targets.map((t, idx) => `
     <button class="item-row" style="width:100%;background:none;border:none;color:inherit;cursor:pointer;--rc:${t.rarity_color}" data-idx="${idx}">
-      ${prestigeTile(t)}<span style="flex:1;margin:0 8px;text-align:left">${escapeHtml(t.name)}</span><span class="item-value" style="color:${t.rarity_color}">${t.value} B</span>
+      ${brainrotArt(t)}<span style="flex:1;margin:0 8px;text-align:left">${escapeHtml(t.name)}</span><span class="item-value" style="color:${t.rarity_color}">${fmt(t.value)} 🎫</span>
     </button>`).join('') || '<div class="empty-state">Нет подходящих целей дороже вклада.</div>';
   const overlay = openModal(`
     <button class="modal-close" onclick="closeModal()">✕</button>
@@ -767,7 +936,7 @@ async function renderCrashScreen(root) {
     try {
       const res = await api('/api/crash/cashout', { method: 'POST' });
       clearInterval(crashPollTimer);
-      toast(`💰 Забрано ×${res.multiplier}: ${res.won_item.name} (${res.won_item.value} B)`, 'success');
+      toast(`💰 Забрано ×${res.multiplier}: ${res.won_item.name} (${fmt(res.won_item.value)} 🎫)`, 'success');
       renderCrashScreen(root);
     } catch (err) { toast('Ошибка: ' + err.message, 'error'); }
   });
@@ -790,7 +959,7 @@ function startCrashPolling(root) {
 }
 
 function paintCrash(root, state) {
-  const stakeLabel = state.stake ? `${escapeHtml(state.stake.name)} (${state.stake.value} B)` : 'предмет не выбран';
+  const stakeLabel = state.stake ? `${escapeHtml(state.stake.name)} (${fmt(state.stake.value)} 🎫)` : 'предмет не выбран';
   root.innerHTML = `
     <div class="section-title">КРАШ</div>
     <div class="muted" style="text-align:center">История: ${state.history}</div>
@@ -826,7 +995,7 @@ function paintDice(root, rules) {
   root.innerHTML = `
     <div class="section-title">ДАЙСЫ</div>
     <button class="slot ${item ? 'filled' : ''}" id="slot-dice-item" style="width:100%;margin-bottom:10px;flex-direction:row;gap:10px">
-      ${item ? `${prestigeTile(item)}Ставка: ${escapeHtml(item.name)} — ${item.value} B` : 'Выбрать предмет из инвентаря'}
+      ${item ? `${brainrotArt(item)}Ставка: ${escapeHtml(item.name)} — ${fmt(item.value)} 🎫` : 'Выбрать предмет из инвентаря'}
     </button>
     <div class="color-row">${colors}</div>
     <button class="btn btn-primary" id="btn-dice-roll" ${item && color ? '' : 'disabled'}>БРОСИТЬ</button>
@@ -854,7 +1023,7 @@ function paintDice(root, rules) {
       });
       diceState = { item: null, color: null };
       const diceStr = res.dice.join(' ');
-      if (res.win) toast(`${diceStr} — совпадений: ${res.match_count}${res.bonus ? ' 🌈 БОНУС' : ''}. Выигрыш ×${res.multiplier}: ${res.won_item.value} B`, 'success');
+      if (res.win) toast(`${diceStr} — совпадений: ${res.match_count}${res.bonus ? ' 🌈 БОНУС' : ''}. Выигрыш ×${res.multiplier}: ${fmt(res.won_item.value)} 🎫`, 'success');
       else toast(`${diceStr} — совпадений: ${res.match_count}. Проигрыш.`, 'error');
       paintDice(root, rules);
     } catch (err) {
@@ -894,8 +1063,8 @@ function renderBattleResult(res) {
   openModal(`
     <button class="modal-close" onclick="closeModal()">✕</button>
     <h2>${title}</h2>
-    <div class="item-row" style="--rc:${res.player_item.rarity_color}">${prestigeTile(res.player_item)}<span style="flex:1;margin:0 8px">Ты: ${escapeHtml(res.player_item.name)}</span><span class="item-value" style="color:${res.player_item.rarity_color}">${res.player_item.value} B</span></div>
-    <div class="item-row" style="--rc:${res.bot_item.rarity_color}">${prestigeTile(res.bot_item)}<span style="flex:1;margin:0 8px">Бот: ${escapeHtml(res.bot_item.name)}</span><span class="item-value" style="color:${res.bot_item.rarity_color}">${res.bot_item.value} B</span></div>
+    <div class="item-row" style="--rc:${res.player_item.rarity_color}">${brainrotArt(res.player_item)}<span style="flex:1;margin:0 8px">Ты: ${escapeHtml(res.player_item.name)}</span><span class="item-value" style="color:${res.player_item.rarity_color}">${fmt(res.player_item.value)} 🎫</span></div>
+    <div class="item-row" style="--rc:${res.bot_item.rarity_color}">${brainrotArt(res.bot_item)}<span style="flex:1;margin:0 8px">Бот: ${escapeHtml(res.bot_item.name)}</span><span class="item-value" style="color:${res.bot_item.rarity_color}">${fmt(res.bot_item.value)} 🎫</span></div>
     <style>#active-modal .item-row .p-tile{width:36px;height:36px;font-size:14px;flex-shrink:0}</style>
     <button class="btn btn-primary" style="margin-top:14px" onclick="closeModal()">Готово</button>
   `);
@@ -1089,7 +1258,7 @@ function stakingStatsHtml(s) {
 
 window.closeModal = closeModal;
 window.navigate = navigate;
-window.openCaseDetail = openCaseDetail;
+window.openCaseStage = openCaseStage;
 
 (async function boot() {
   try {

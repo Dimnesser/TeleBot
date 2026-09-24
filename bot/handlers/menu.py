@@ -70,7 +70,7 @@ async def handle_menu(callback: CallbackQuery, callback_data: MainMenuCB, state:
         # [ПОДТВЕРЖДЕНО СКРИНШОТОМ] «ГЛАВНАЯ» — это сама лента кейсов
         # (КЕЙСЫ / ТЕМАТИЧЕСКИЕ / ALL-IN / ПАРТНЁРЫ / БЕСПЛАТНЫЕ), а не
         # текстовый список разделов.
-        await open_cases_home(callback, state, category=CaseCategory.CASES, page=0)
+        await open_cases_home(callback, state, category=CaseCategory.STARTER, page=0)
         return
 
     if section == "menu":

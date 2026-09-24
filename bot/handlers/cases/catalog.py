@@ -21,11 +21,11 @@ from bot.keyboards.callbacks import (
 )
 from bot.keyboards.cases import case_detail_keyboard, cases_list_keyboard
 from bot.services import quest_service
-from bot.services.cases_service import draw_items, total_cost
+from bot.data.brainrot_roster import RARITY_LABEL, rarity_for
+from bot.services.cases_service import draw_items, item_weight, total_cost
 from bot.utils.texts import (
     CASE_DETAIL_BALANCE_LINE,
     CASE_DETAIL_DROP_POOL_HEADER,
-    CASE_DETAIL_DROP_POOL_PARTIAL,
     CASE_DETAIL_HEADER,
     CASE_DETAIL_NOT_OPENABLE,
     CASE_DETAIL_NOTE_LINE,
@@ -53,7 +53,7 @@ INVENTORY_LIMIT = 10
 
 
 async def open_cases_home(
-    callback: CallbackQuery, state: FSMContext, category: CaseCategory = CaseCategory.CASES, page: int = 0
+    callback: CallbackQuery, state: FSMContext, category: CaseCategory = CaseCategory.STARTER, page: int = 0
 ) -> None:
     await state.update_data(cases_category=category.value, cases_page=page)
 
@@ -80,7 +80,7 @@ async def handle_category(callback: CallbackQuery, callback_data: CasesCategoryC
 
 async def _render_case_detail(callback: CallbackQuery, state: FSMContext, case_id: int, qty: int) -> None:
     data = await state.get_data()
-    category = CaseCategory(data.get("cases_category", CaseCategory.CASES.value))
+    category = CaseCategory(data.get("cases_category", CaseCategory.STARTER.value))
     page = data.get("cases_page", 0)
 
     async with async_session() as session:
@@ -103,10 +103,11 @@ async def _render_case_detail(callback: CallbackQuery, state: FSMContext, case_i
     lines.append("")
     if items:
         lines.append(CASE_DETAIL_DROP_POOL_HEADER)
-        if case.item_count_label and len(items) < case.item_count_label:
-            lines.append(CASE_DETAIL_DROP_POOL_PARTIAL.format(known=len(items), total=case.item_count_label))
+        total_weight = sum(item_weight(i) for i in items)
         for item in items:
-            lines.append(f"• {item.name} — {item.value} B")
+            rarity = RARITY_LABEL[rarity_for(item.name, item.value)]
+            chance = item_weight(item) / total_weight * 100
+            lines.append(f"• {item.name} · {rarity} · {chance:.2f}% · {item.value} 🎫")
     else:
         lines.append(CASE_DETAIL_NOT_OPENABLE)
 
@@ -170,7 +171,10 @@ async def handle_confirm_open(callback: CallbackQuery, callback_data: CaseConfir
         tokens_after = user.game_tokens
 
     result_lines = [CASE_OPEN_RESULT_HEADER.format(name=case.name, qty=callback_data.qty)]
-    result_lines.extend(CASE_OPEN_RESULT_LINE.format(name=item.name, value=item.value) for item in won)
+    result_lines.extend(
+        CASE_OPEN_RESULT_LINE.format(name=item.name, value=item.value, rarity=RARITY_LABEL[rarity_for(item.name, item.value)])
+        for item in won
+    )
     result_lines.append(CASE_OPEN_RESULT_FOOTER.format(tokens=tokens_after))
 
     await callback.message.edit_text(
@@ -199,7 +203,7 @@ async def handle_inventory(callback: CallbackQuery, state: FSMContext) -> None:
         entries = await inventory_repo.list_recent(session, user, limit=INVENTORY_LIMIT)
 
     data = await state.get_data()
-    category = CaseCategory(data.get("cases_category", CaseCategory.CASES.value))
+    category = CaseCategory(data.get("cases_category", CaseCategory.STARTER.value))
     page = data.get("cases_page", 0)
 
     lines = [CASES_INVENTORY_HEADER.format(limit=INVENTORY_LIMIT)]

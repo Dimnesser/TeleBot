@@ -8,7 +8,7 @@ from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker, create_asyn
 
 from bot.config import config
 from bot.data.brainrot_roster import RARITY_ORDER, Rarity
-from bot.data.seed_cases import CASES_CONTENT_VERSION, SEED_CASES
+from bot.data.seed_cases import CASES_CONTENT_VERSION, SEED_CASES, SEED_CASES_BY_CODE
 from bot.data.seed_items import SEED_ITEMS
 from bot.data.seed_quests import SEED_QUESTS
 from bot.database.models import AppMeta, Base, Case, CaseItem, DepositItem, Quest
@@ -140,6 +140,7 @@ async def _seed_quests_if_empty() -> None:
     async with async_session() as session:
         result = await session.execute(select(Quest.id).limit(1))
         if result.scalar_one_or_none() is not None:
+            await _retarget_stale_case_quests(session)
             return
         session.add_all(
             Quest(
@@ -154,4 +155,30 @@ async def _seed_quests_if_empty() -> None:
             )
             for quest in SEED_QUESTS
         )
+        await session.commit()
+
+
+async def _retarget_stale_case_quests(session: AsyncSession) -> None:
+    """Квест «открой кейс X», чей кейс исчез из каталога после пересева,
+    переписывается на квест из SEED_QUESTS с тем же scope/sort_order (id и
+    прогресс игроков сохраняются) — иначе его стало бы невозможно выполнить.
+    """
+    quests = (await session.execute(select(Quest))).scalars().all()
+    changed = False
+    for quest in quests:
+        if not quest.target_type.startswith("open_case:"):
+            continue
+        if quest.target_type.split(":", 1)[1] in SEED_CASES_BY_CODE:
+            continue
+        seed = next((q for q in SEED_QUESTS if q.scope == quest.scope and q.sort_order == quest.sort_order), None)
+        if seed is None:
+            continue
+        quest.code = seed.code
+        quest.title = seed.title
+        quest.description = seed.description
+        quest.target_type = seed.target_type
+        quest.target_count = seed.target_count
+        quest.reward_tokens = seed.reward_tokens
+        changed = True
+    if changed:
         await session.commit()

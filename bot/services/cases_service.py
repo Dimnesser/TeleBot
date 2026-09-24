@@ -3,26 +3,18 @@ from __future__ import annotations
 
 import random
 
-from bot.data.brainrot_roster import RARITY_DROP_WEIGHT, Rarity
 from bot.database.models import Case, CaseItem
 
 
 def item_weight(item: CaseItem) -> float:
-    """Вес предмета в случайном розыгрыше.
+    """Вес предмета ∝ 1/ценность.
 
-    Основной путь — по тиру редкости (RARITY_DROP_WEIGHT в
-    bot.data.brainrot_roster: Common 45% ... OG 0.3%, как в CS2-подобных
-    case-opening играх). Для двух легаси-кейсов со скриншота («Драгон»,
-    «Тако»), где redkость выведена из value автоматически, поведение то
-    же — там rarity тоже проставлен при сидировании (_infer_rarity).
-    Обратная зависимость от value — fallback только для записей без rarity
-    (не должно происходить в текущих данных, оставлено для устойчивости).
+    Ценность выведена из реальной внутриигровой цены персонажа, поэтому
+    дорогой в игре персонаж настолько же редок в кейсе. Побочный эффект
+    такого веса — каждый предмет вносит в средний дроп одинаковый вклад,
+    и цену кейса можно честно посчитать из содержимого
+    (bot.data.seed_cases.price_for).
     """
-    if item.rarity:
-        try:
-            return RARITY_DROP_WEIGHT[Rarity(item.rarity)]
-        except ValueError:
-            pass
     return 1.0 / max(item.value, 1)
 
 

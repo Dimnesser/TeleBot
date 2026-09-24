@@ -1,9 +1,9 @@
 """Сид-данные квестов.
 
-[ПОДТВЕРЖДЕНО СКРИНШОТОМ] «Открой Сикс Севен» и «Сыграй в апгрейдере» — с
-точными текстами, целями (0/1) и наградами (+23 🎫 / +6 🎫). Недельный
-«Открой Тако 3 раза» виден только заголовком снизу экрана (обрезан) —
-reward_tokens для него [ЛОГИЧЕСКИ ПРЕДПОЛОЖЕНО].
+Форма квестов (дневной «открой кейс», дневной «спин в апгрейдере»,
+недельный «открой кейс ×3») — со скриншота. Квесты на кейсы указывают на
+кейсы из bot/data/seed_cases.py; при пересеве каталога старые квесты
+переписываются на эти (bot.database.engine._retarget_stale_case_quests).
 """
 from __future__ import annotations
 
@@ -26,11 +26,11 @@ class SeedQuest:
 
 SEED_QUESTS: list[SeedQuest] = [
     SeedQuest(
-        code="daily_open_six_seven",
+        code="daily_open_nonna_kitchen",
         scope=QuestScope.DAILY,
-        title="Открой Сикс Севен",
-        description="Открой кейс «Сикс Севен» один раз.",
-        target_type="open_case:cases_six_seven",
+        title="Загляни на Кухню Нонны",
+        description="Открой кейс «Кухня Нонны» один раз.",
+        target_type="open_case:nonna_kitchen",
         target_count=1,
         reward_tokens=23,
         sort_order=1,
@@ -46,13 +46,13 @@ SEED_QUESTS: list[SeedQuest] = [
         sort_order=2,
     ),
     SeedQuest(
-        code="weekly_open_tako_3",
+        code="weekly_open_dragon_forge_3",
         scope=QuestScope.WEEKLY,
-        title="Открой Тако 3 раза",
-        description="Открой кейс «Тако» три раза.",
-        target_type="open_case:cases_tako",
+        title="Три удара молота",
+        description="Открой кейс «Драконья Кузня» три раза.",
+        target_type="open_case:dragon_forge",
         target_count=3,
-        reward_tokens=60,
+        reward_tokens=240,
         sort_order=1,
     ),
 ]

@@ -4,7 +4,7 @@ from __future__ import annotations
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from bot.data.brainrot_roster import infer_rarity
+from bot.data.brainrot_roster import rarity_for
 from bot.database.models import InventoryItem, User
 
 
@@ -15,9 +15,9 @@ async def add_items(
     item_names_and_values: list[tuple[str, int]],
     case_id: int | None = None,
 ) -> list[InventoryItem]:
-    # rarity выводится из value автоматически (infer_rarity) — вызывающему
-    # коду (кейсы/апгрейдер/краш/дайсы/батл) не нужно её прокидывать отдельно,
-    # а значения демо-токенов и так посчитаны из тиров редкости при сидировании.
+    # rarity — реальный тир персонажа из ростера (rarity_for); по ценности
+    # угадывается только для имён вне ростера. Вызывающему коду
+    # (кейсы/апгрейдер/краш/дайсы/батл) её прокидывать не нужно.
     entries = [
         InventoryItem(
             user_id=user.id,
@@ -25,7 +25,7 @@ async def add_items(
             case_name=source_name,
             item_name=name,
             value=value,
-            rarity=infer_rarity(value).value,
+            rarity=rarity_for(name, value).value,
         )
         for name, value in item_names_and_values
     ]
