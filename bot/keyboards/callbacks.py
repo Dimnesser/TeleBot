@@ -50,6 +50,10 @@ class StarsSkipPromoCB(CallbackData, prefix="stars_skip"):
     pass
 
 
+class DepositSkipPromoCB(CallbackData, prefix="dep_skip"):
+    pass
+
+
 class StarsCreateInvoiceCB(CallbackData, prefix="stars_inv"):
     pass
 

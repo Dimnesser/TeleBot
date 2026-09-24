@@ -401,8 +401,10 @@ async def post_deposit_request(request: web.Request) -> web.Response:
         return web.json_response({"error": "bad_cart", "message": "Выбери предметы (учитывай «от N шт»)"}, status=400)
     try:
         deposit, position = await deposit_moderation.submit_deposit(
-            session, request.app["bot"], user, category, cart, nickname, items
+            session, request.app["bot"], user, category, cart, nickname, items, code=body.get("code"),
         )
+    except stars_service.BadCode:
+        return web.json_response({"error": "bad_code", "message": "Такого кода нет"}, status=400)
     except deposit_moderation.DepositAlreadyOpen as exc:
         return web.json_response({
             "error": "already_open", "request_id": exc.request.id,
@@ -424,6 +426,8 @@ def _deposit_request_json(req: DepositRequest, items_by_id: dict, position: int 
         "status": req.status.value,
         "status_label": status_label,
         "queue_position": position,
+        "promo_code": req.promo_code,
+        "bonus_b": deposit_moderation.bonus_amount(req.total_b, req.bonus_percent),
         "nickname": req.game_nickname,
         "items": [
             {"name": items_by_id[int(i)].name if int(i) in items_by_id else "?", "qty": q}
@@ -460,6 +464,16 @@ async def _stars_quote(request: web.Request, body: dict):
     except stars_service.BadCode:
         return None, web.json_response({"error": "bad_code", "message": "Такого кода нет"}, status=400)
     return q, None
+
+
+@routes.get("/api/deposit/code")
+async def get_deposit_code(request: web.Request) -> web.Response:
+    """Проверка кода для пополнения (Stars/брейнроты/гирсы) — бонус в %."""
+    try:
+        code, bonus = await stars_service.code_bonus_percent(request["session"], request["user"], request.query.get("code"))
+    except stars_service.BadCode:
+        return web.json_response({"error": "bad_code", "message": "Такого кода нет"}, status=400)
+    return web.json_response({"code": code, "bonus_percent": bonus})
 
 
 @routes.post("/api/deposit/stars/quote")

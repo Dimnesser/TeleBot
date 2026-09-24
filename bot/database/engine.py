@@ -100,6 +100,8 @@ async def _migrate_add_missing_columns() -> None:
         ("users", "free_case_at", "DATETIME"),
         ("stars_deposits", "credited_b", "INTEGER"),
         ("users", "luck", "FLOAT"),
+        ("deposit_requests", "promo_code", "VARCHAR(32)"),
+        ("deposit_requests", "bonus_percent", "FLOAT"),
     ]
     async with engine.begin() as conn:
         for table, column, coltype in columns_to_add:

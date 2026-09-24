@@ -86,6 +86,9 @@ class DepositRequest(Base):
     buff: Mapped[str | None] = mapped_column(String(32), nullable=True)
     game_nickname: Mapped[str] = mapped_column(String(64))
     total_b: Mapped[int] = mapped_column(Integer)
+    # Код при заявке (промо/партнёрский/реферальный) и его бонус к зачислению, %.
+    promo_code: Mapped[str | None] = mapped_column(String(32), nullable=True)
+    bonus_percent: Mapped[float | None] = mapped_column(Float, nullable=True)
     status: Mapped[DepositRequestStatus] = mapped_column(
         SAEnum(DepositRequestStatus), default=DepositRequestStatus.PENDING
     )

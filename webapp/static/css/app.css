@@ -1175,3 +1175,5 @@ button.dep-item:active { transform: scale(.97); }
 .stock-name small { color: var(--text-faint); font-weight: 600; }
 .luck-form { grid-template-columns: 1fr auto auto; }
 .luck-note { font-size: 12px; margin: 2px 2px 6px; }
+.stars-hint.ok { color: #3ee08a; }
+.dep-confirm .stars-code { margin-bottom: 0; }

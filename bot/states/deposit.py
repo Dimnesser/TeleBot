@@ -8,6 +8,7 @@ class DepositCatalog(StatesGroup):
     browsing = State()
     waiting_search = State()
     waiting_nickname = State()
+    waiting_promo = State()
 
 
 class DepositStars(StatesGroup):

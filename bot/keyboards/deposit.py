@@ -8,6 +8,7 @@ from bot.database.models import DepositCategory, DepositItem
 from bot.keyboards.callbacks import (
     DepositAdminCB,
     DepositCloseCB,
+    DepositSkipPromoCB,
     DepositConfirmCB,
     DepositNextCB,
     DepositQtyCB,
@@ -107,6 +108,13 @@ def admin_request_keyboard(request_id: int) -> InlineKeyboardMarkup:
 def stars_amount_keyboard() -> InlineKeyboardMarkup:
     builder = InlineKeyboardBuilder()
     builder.row(*_tabs_row("stars"))
+    builder.row(InlineKeyboardButton(text="✕ Отмена", callback_data=DepositCloseCB().pack()))
+    return builder.as_markup()
+
+
+def deposit_promo_keyboard() -> InlineKeyboardMarkup:
+    builder = InlineKeyboardBuilder()
+    builder.row(InlineKeyboardButton(text="Пропустить", callback_data=DepositSkipPromoCB().pack()))
     builder.row(InlineKeyboardButton(text="✕ Отмена", callback_data=DepositCloseCB().pack()))
     return builder.as_markup()
 

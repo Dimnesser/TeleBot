@@ -484,7 +484,7 @@ function depositHistoryHtml(requests) {
     ${requests.map((r) => `
       <div class="dep-req st-${r.status}">
         <div><b>#${r.id}</b> · ${r.items.map((i) => `${escapeHtml(i.name)} ×${i.qty}`).join(', ')}</div>
-        <div class="dep-req-foot"><span>${fmt(r.total_b)}${coinIcon()}</span><span class="dep-status">${escapeHtml(r.status_label)}</span></div>
+        <div class="dep-req-foot"><span>${fmt(r.total_b)}${coinIcon()}${r.bonus_b ? `<span class="wd-topup">+${fmt(r.bonus_b)} по коду</span>` : ''}</span><span class="dep-status">${escapeHtml(r.status_label)}</span></div>
       </div>`).join('')}`;
 }
 
@@ -560,18 +560,39 @@ function confirmDeposit(root, items, cart, unit) {
     <div class="dep-confirm">
       <div class="subscribe-title">Заявка на пополнение</div>
       <div class="dep-confirm-list">${picked.map((i) => `<div><span>${escapeHtml(i.name)} ×${cart[i.id]}</span><b>${fmt(unit(i) * cart[i.id])}${coinIcon()}</b></div>`).join('')}</div>
-      <div class="dep-confirm-total">Зачислим <b>${fmt(total)}</b>${coinIcon()} после трейда</div>
+      <div class="dep-confirm-total">Зачислим <b id="dep-get">${fmt(total)}</b>${coinIcon()} после трейда</div>
+      <input class="field stars-code" id="dep-code" maxlength="32" placeholder="Промокод (необязательно)" autocomplete="off">
+      <div class="stars-hint" id="dep-code-hint">Любой промокод, партнёрский или реферальный код — бонус к зачислению.</div>
       <div class="dep-confirm-note">Заявка встанет в очередь. Трейды — по одному, в порядке очереди; модератор кинет трейд на этот ник.</div>
       <input class="field" id="dep-nick" maxlength="32" placeholder="Твой ник в Steal a Brainrot" autocomplete="off">
       <button class="open-btn" id="dep-send">Встать в очередь</button>
     </div>`);
   const nick = overlay.querySelector('#dep-nick');
-  nick.focus();
+  const codeInput = overlay.querySelector('#dep-code');
+  let codeOk = true, seq = 0, timer = null;
+  const checkCode = async () => {
+    const code = codeInput.value.trim(); const my = ++seq;
+    const hint = overlay.querySelector('#dep-code-hint');
+    if (!code) { codeOk = true; overlay.querySelector('#dep-get').textContent = fmt(total); hint.textContent = 'Любой промокод, партнёрский или реферальный код — бонус к зачислению.'; hint.classList.remove('ok'); return; }
+    try {
+      const r = await api('/api/deposit/code?code=' + encodeURIComponent(code));
+      if (my !== seq) return;
+      codeOk = true;
+      overlay.querySelector('#dep-get').textContent = fmt(total + Math.floor(total * r.bonus_percent / 100));
+      hint.textContent = `Код принят: +${r.bonus_percent}% к зачислению`; hint.classList.add('ok');
+    } catch (err) {
+      if (my !== seq) return;
+      codeOk = false; overlay.querySelector('#dep-get').textContent = fmt(total);
+      hint.textContent = 'Такого кода нет — проверь или оставь поле пустым.'; hint.classList.remove('ok');
+    }
+  };
+  codeInput.addEventListener('input', () => { clearTimeout(timer); timer = setTimeout(checkCode, 250); });
   overlay.querySelector('#dep-send').addEventListener('click', async (e) => {
+    if (!codeOk) { toast('Такого кода нет — исправь или очисти поле', 'error'); return; }
     const btn = e.currentTarget; btn.disabled = true;
     try {
       const res = await api('/api/deposit/request', { method: 'POST', body: JSON.stringify({
-        category: depositTab, items: cart, nickname: nick.value.trim(),
+        category: depositTab, items: cart, nickname: nick.value.trim(), code: codeInput.value.trim(),
       }) });
       closeModal(); haptic.success();
       toast(res.queue_position === 1 ? `Заявка #${res.request.id}: ты первый — жди трейд` : `Заявка #${res.request.id}: ты ${res.queue_position}-й в очереди`, 'success');
@@ -1392,7 +1413,7 @@ async function bindAdminPanel(root) {
         <div class="admin-dep-head"><b>${r.queue_position}.</b><b>#${r.id}</b><span>${escapeHtml(r.player)}</span><span class="dep-status">${r.queue_position === 1 ? 'Кинуть трейд' : 'Ждёт'}</span></div>
         <div class="admin-dep-items">${r.items.map((i) => `${escapeHtml(i.name)} ×${i.qty}`).join(', ')}</div>
         <div class="admin-dep-foot">
-          <span>ник: <b>${escapeHtml(r.nickname)}</b> · ${fmt(r.total_b)}${coinIcon()}</span>
+          <span>ник: <b>${escapeHtml(r.nickname)}</b> · ${fmt(r.total_b)}${coinIcon()}${r.bonus_b ? ` +${fmt(r.bonus_b)} (${escapeHtml(r.promo_code)})` : ''}</span>
           <span class="admin-dep-actions">
             ${r.queue_position === 1 ? `<button class="btn-chip" data-dep="${r.id}" data-act="approve">Зачислить</button>` : ''}
             <button class="btn-chip ghost" data-dep="${r.id}" data-act="reject">Отклонить</button>

@@ -17,12 +17,14 @@ from bot.keyboards.callbacks import (
     DepositNextCB,
     DepositQtyCB,
     DepositResetFiltersCB,
+    DepositSkipPromoCB,
     DepositSearchCB,
     DepositSortCB,
     DepositTabCB,
 )
-from bot.keyboards.deposit import catalog_keyboard, confirm_keyboard
-from bot.services.deposit_moderation import DepositAlreadyOpen, submit_deposit
+from bot.keyboards.deposit import catalog_keyboard, confirm_keyboard, deposit_promo_keyboard
+from bot.services import stars_service
+from bot.services.deposit_moderation import DepositAlreadyOpen, bonus_amount, submit_deposit
 from bot.services.deposit_service import apply_delta, cart_is_valid, cart_total, get_buff
 from bot.states.deposit import DepositCatalog
 from bot.utils.texts import (
@@ -36,9 +38,11 @@ from bot.utils.texts import (
     DEPOSIT_CLOSED_TEXT,
     DEPOSIT_CONFIRM_TEXT,
     DEPOSIT_NICKNAME_INVALID,
+    DEPOSIT_PROMO_PROMPT,
     DEPOSIT_ALREADY_OPEN_TEXT,
     DEPOSIT_QUEUED_TEXT,
     DEPOSIT_SUBMITTED_TEXT,
+    STARS_BAD_CODE,
 )
 
 router = Router(name="deposit_catalog")
@@ -201,14 +205,46 @@ async def handle_nickname(message: Message, state: FSMContext) -> None:
             return
         total = cart_total(items, cart, NO_BUFF)
 
-    await state.update_data(nickname=nickname, total=total)
+    await state.update_data(nickname=nickname, total=total, promo=None)
+    await state.set_state(DepositCatalog.waiting_promo)
+    await message.answer(DEPOSIT_PROMO_PROMPT, reply_markup=deposit_promo_keyboard())
+
+
+@router.callback_query(DepositSkipPromoCB.filter(), DepositCatalog.waiting_promo)
+async def handle_promo_skip(callback: CallbackQuery, state: FSMContext) -> None:
+    await _show_confirm(callback.message, state, None, callback.from_user)
+    await callback.answer()
+
+
+@router.message(DepositCatalog.waiting_promo)
+async def handle_promo_input(message: Message, state: FSMContext) -> None:
+    await _show_confirm(message, state, (message.text or "").strip() or None, message.from_user)
+
+
+async def _show_confirm(message: Message, state: FSMContext, promo: str | None, from_user) -> None:
+    data = await _load_state(state)
+    category = DepositCategory(data["category"])
+    cart: dict[int, int] = {int(k): v for k, v in data["cart"].items()}
+    async with async_session() as session:
+        user = await get_or_create_user(session, from_user.id, from_user.username, from_user.first_name)
+        try:
+            code, bonus = await stars_service.code_bonus_percent(session, user, promo)
+        except stars_service.BadCode:
+            await message.answer(STARS_BAD_CODE, reply_markup=deposit_promo_keyboard())
+            return
+        items = await items_repo.list_items(session, category)
+    await state.update_data(promo=code)
     await state.set_state(DepositCatalog.browsing)
 
+    total = data["total"]
     items_by_id = {item.id: item for item in items}
-    items_text = ", ".join(f"{items_by_id[item_id].emoji} {items_by_id[item_id].name} × {qty}" for item_id, qty in cart.items())
-
+    items_text = ", ".join(f"{items_by_id[i].emoji} {items_by_id[i].name} × {q}" for i, q in cart.items() if i in items_by_id)
+    extra = bonus_amount(total, bonus)
     await message.answer(
-        DEPOSIT_CONFIRM_TEXT.format(nickname=nickname, items=items_text, total=total),
+        DEPOSIT_CONFIRM_TEXT.format(
+            nickname=data["nickname"], items=items_text, promo=code or "—",
+            total=total + extra, bonus=f" (+{extra} B по коду)" if extra else "",
+        ),
         reply_markup=confirm_keyboard(),
     )
 
@@ -234,7 +270,12 @@ async def handle_confirm(callback: CallbackQuery, callback_data: DepositConfirmC
         )
         items = await items_repo.list_items(session, category)
         try:
-            request, position = await submit_deposit(session, callback.bot, user, category, cart, nickname, items)
+            request, position = await submit_deposit(
+                session, callback.bot, user, category, cart, nickname, items, code=data.get("promo"),
+            )
+        except stars_service.BadCode:
+            await callback.answer(STARS_BAD_CODE, show_alert=True)
+            return
         except DepositAlreadyOpen as exc:
             await callback.answer(DEPOSIT_ALREADY_OPEN_TEXT.format(request_id=exc.request.id), show_alert=True)
             return

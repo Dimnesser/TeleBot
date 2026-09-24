@@ -9,6 +9,7 @@
 from __future__ import annotations
 
 import logging
+import math
 from dataclasses import dataclass
 
 from aiogram import Bot
@@ -18,7 +19,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from bot.database.models import DepositCategory, DepositItem, DepositRequest, DepositRequestStatus, User
 from bot.database.repo import deposit_items as items_repo
 from bot.database.repo import deposit_requests as requests_repo
-from bot.services import withdraw_service
+from bot.services import stars_service, withdraw_service
 from bot.services.deposit_service import cart_total, get_buff
 from bot.services.notify import notify_admins_new_request
 from bot.services.partner_service import deposit_bonus
@@ -59,19 +60,28 @@ async def queue_position(session: AsyncSession, request: DepositRequest) -> int:
     return ahead + 1
 
 
+def bonus_amount(total_b: int, bonus_percent: float | None) -> int:
+    return math.floor(total_b * (bonus_percent or 0) / 100)
+
+
 async def submit_deposit(
     session: AsyncSession, bot: Bot, user: User, category: DepositCategory, cart: dict[int, int],
-    nickname: str, items: list[DepositItem],
+    nickname: str, items: list[DepositItem], code: str | None = None,
 ) -> tuple[DepositRequest, int]:
-    """Встать в очередь. Если очередь пуста — заявка сразу в работе."""
+    """Встать в очередь. Если очередь пуста — заявка сразу в работе.
+    code — как у Stars: любой рабочий код даёт бонус (stars_service.BadCode иначе)."""
     if (existing := await open_request_of(session, user)) is not None:
         raise DepositAlreadyOpen(existing)
+    code, bonus = await stars_service.code_bonus_percent(session, user, code)
     busy = (await requests_repo.count_status(session, DepositRequestStatus.PENDING)) > 0
     request = await requests_repo.create_request(
         session, user, category, cart, buff=None, game_nickname=nickname,
         total_b=cart_total(items, cart, get_buff("none")),
         status=DepositRequestStatus.QUEUED if busy else DepositRequestStatus.PENDING,
     )
+    if code:
+        request.promo_code, request.bonus_percent = code, bonus
+        await session.commit()
     if not busy:
         await notify_admins_new_request(bot, request, user, category, {i.id: i for i in items})
     return request, await queue_position(session, request)
@@ -96,7 +106,8 @@ async def resolve_deposit(
 
     credited = 0
     if approve:
-        credited = request.total_b + deposit_bonus(user, request.total_b)  # бонус партнёрского кода
+        # бонус за код из заявки + бонус партнёрского кода игрока
+        credited = request.total_b + bonus_amount(request.total_b, request.bonus_percent) + deposit_bonus(user, request.total_b)
         user.balance += credited
         if request.category == DepositCategory.BRAINROT:
             # принятые брейнроты теперь у админа — сразу в сток для вывода

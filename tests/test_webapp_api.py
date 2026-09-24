@@ -798,3 +798,24 @@ async def test_admin_luck_set_and_cancel(client, auth_headers, admin_headers) ->
 async def test_stars_no_upper_limit(client, auth_headers) -> None:
     r = await client.post("/api/deposit/stars/quote", headers=auth_headers, json={"amount": 5_000_000})
     assert r.status == 200 and (await r.json())["credited"] == 8_750_000
+
+
+async def test_deposit_request_with_code_bonus(client, auth_headers, admin_headers) -> None:
+    catalog = await (await client.get("/api/deposit/catalog", headers=auth_headers)).json()
+    kraken = next(i for i in catalog["brainrot"] if i["name"] == "Kraken")
+    assert (await client.get("/api/deposit/code?code=NOPE", headers=auth_headers)).status == 400
+    await client.post("/api/admin/promos", headers=admin_headers, json={"kind": "balance", "amount": 1, "code": "dep10"})
+    assert (await (await client.get("/api/deposit/code?code=dep10", headers=auth_headers)).json())["bonus_percent"] == 10
+
+    r = await client.post("/api/deposit/request", headers=auth_headers,
+                          json={"category": "brainrot", "items": {kraken["id"]: 1}, "nickname": "dimon", "code": "NOPE"})
+    assert r.status == 400 and (await r.json())["error"] == "bad_code"
+    r = await client.post("/api/deposit/request", headers=auth_headers,
+                          json={"category": "brainrot", "items": {kraken["id"]: 1}, "nickname": "dimon", "code": "dep10"})
+    req = (await r.json())["request"]
+    assert req["promo_code"] == "DEP10" and req["bonus_b"] == 307
+
+    before = (await (await client.get("/api/me", headers=auth_headers)).json())["balance"]
+    r = await client.post(f"/api/admin/deposits/{req['id']}", headers=admin_headers, json={"action": "approve"})
+    assert (await r.json())["credited"] == 3077 + 307
+    assert (await (await client.get("/api/me", headers=auth_headers)).json())["balance"] == before + 3384
