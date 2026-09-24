@@ -1452,11 +1452,12 @@ function adminUserHtml(u) {
         <div class="inline-form"><input class="field" id="g-balance" type="number" min="1" placeholder="Сколько B" /><button class="btn-chip" data-grant="balance">Выдать B</button><button class="btn-chip ghost" id="g-take">Списать</button></div>
         <button class="btn-chip danger" id="g-zero">🗑 Обнулить баланс (${fmt(u.balance)} B)</button>
         <div class="inline-form luck-form">
-          <input class="field" id="g-luck" type="number" min="0.1" max="20" step="0.1" placeholder="Подкрутка ×" value="${u.luck || ''}" />
+          <input class="field" id="g-luck" type="number" min="0" max="20" step="0.1" placeholder="Подкрутка ×" value="${u.luck ?? ''}" />
           <button class="btn-chip" id="g-luck-set">Подкрутить</button>
-          ${u.luck ? '<button class="btn-chip ghost" id="g-luck-off">Снять</button>' : ''}
+          <button class="btn-chip danger" id="g-luck-zero">×0</button>
+          ${u.luck != null ? '<button class="btn-chip ghost" id="g-luck-off">Снять</button>' : ''}
         </div>
-        <div class="muted luck-note">${u.luck ? `Подкрутка ×${u.luck}: ${u.luck > 1 ? 'чаще' : 'реже'} окупающий дроп в кейсах и батле, шанс апгрейдера ×${u.luck}` : 'Шансы честные. ×2 — вдвое чаще окупающий дроп и шанс апгрейда, ×0.5 — наоборот.'}</div>
+        <div class="muted luck-note">${u.luck === 0 ? 'Подкрутка ×0: апгрейдер никогда не заходит, из кейсов и батлов — только дроп дешевле цены кейса.' : u.luck != null ? `Подкрутка ×${u.luck}: ${u.luck > 1 ? 'чаще' : 'реже'} окупающий дроп в кейсах и батле, шанс апгрейдера ×${u.luck}` : 'Шансы честные. ×2 — вдвое чаще окупающий дроп и шанс апгрейда, ×0.5 — наоборот, ×0 — ничего не заходит.'}</div>
         <div class="inline-form"><select class="field" id="g-case">${caseOptions()}</select><input class="field narrow" id="g-case-n" type="number" min="1" value="1" /><button class="btn-chip" data-grant="case">Выдать кейс</button></div>
       </div>
     </div>`;
@@ -1684,10 +1685,14 @@ async function bindAdminPanel(root) {
     const setLuck = async (luck) => {
       try {
         showUser(await api('/api/admin/luck', { method: 'POST', body: JSON.stringify({ user: String(current.tg_id), luck }) }));
-        toast(luck ? `Подкрутка ×${luck} включена` : 'Подкрутка снята — шансы честные', 'success');
+        toast(luck != null ? `Подкрутка ×${luck} включена` : 'Подкрутка снята — шансы честные', 'success');
       } catch (err) { toast(err.message, 'error'); }
     };
-    userBox.querySelector('#g-luck-set').addEventListener('click', () => setLuck(Number(userBox.querySelector('#g-luck').value) || null));
+    userBox.querySelector('#g-luck-set').addEventListener('click', () => {
+      const raw = userBox.querySelector('#g-luck').value.trim();
+      setLuck(raw === '' ? null : Number(raw));
+    });
+    userBox.querySelector('#g-luck-zero').addEventListener('click', () => setLuck(0));
     const setBalance = async (body, done) => {
       try {
         showUser(await api('/api/admin/balance', { method: 'POST', body: JSON.stringify({ user: String(current.tg_id), ...body }) }));

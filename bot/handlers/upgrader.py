@@ -28,6 +28,7 @@ from bot.services import quest_service
 from bot.services.upgrader_service import (
     chance_percent,
     find_nearest_target,
+    lucky_chance,
     roll_success,
     target_value_for_chance,
     target_value_for_multiplier,
@@ -238,7 +239,7 @@ async def handle_confirm(callback: CallbackQuery, state: FSMContext) -> None:
             return
 
         chance = chance_percent(contribution_value, target_value)
-        success = roll_success(chance)
+        success = roll_success(lucky_chance(chance, user.luck))
 
         await inventory_repo.delete(session, item)
         if success:

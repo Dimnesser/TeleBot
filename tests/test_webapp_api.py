@@ -793,6 +793,8 @@ async def test_admin_luck_set_and_cancel(client, auth_headers, admin_headers) ->
     assert (await r.json())["luck"] == 5
     r = await client.post("/api/admin/luck", headers=admin_headers, json={"user": "999111", "luck": 100})
     assert r.status == 400
+    r = await client.post("/api/admin/luck", headers=admin_headers, json={"user": "999111", "luck": 0})
+    assert (await r.json())["luck"] == 0
     r = await client.post("/api/admin/luck", headers=admin_headers, json={"user": "999111", "luck": None})
     assert (await r.json())["luck"] is None
 

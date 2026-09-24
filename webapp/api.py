@@ -78,7 +78,7 @@ from bot.services.cases_service import REEL_REVEAL_INDEX, build_reel, draw_items
 from bot.services.dice_service import COLORS, MATCH_PAYOUT_TABLE, resolve_roll
 from bot.services.giveaway_service import resolve_all_expired
 from bot.services.staking_service import MIN_STAKE_AMOUNT, STAKE_TIERS, is_matured, payout_amount, tier_by_term
-from bot.services.upgrader_service import chance_percent, roll_success
+from bot.services.upgrader_service import chance_percent, lucky_chance, roll_success
 from bot.utils.texts import FAQ_ENTRIES
 from webapp import crash_runtime as crash_rt
 
@@ -874,7 +874,7 @@ async def post_upgrader_spin(request: web.Request) -> web.Response:
 
     chance = chance_percent(stake_value, target_value)
     # Подкрутка админа меняет реальный шанс; игроку показывается честный.
-    success = roll_success(min(95, chance * user.luck) if user.luck else chance)
+    success = roll_success(lucky_chance(chance, user.luck))
     # Точка остановки стрелки (0..100): внутри зоны шанса при успехе, вне — при
     # проигрыше. Чисто визуальная, исход уже решён выше.
     roll_point = random.uniform(0, chance) if success else random.uniform(chance, 100)
@@ -1335,7 +1335,7 @@ def _require_admin(request: web.Request) -> web.Response | None:
 
 @routes.post("/api/admin/luck")
 async def post_admin_luck(request: web.Request) -> web.Response:
-    """Подкрутка шансов игрока: luck ×0.1…×20, null — снять (честные шансы)."""
+    """Подкрутка шансов игрока: luck ×0…×20 (0 — ничего не заходит), null — снять."""
     if (denied := _require_admin(request)) is not None:
         return denied
     session = request["session"]
@@ -1348,8 +1348,8 @@ async def post_admin_luck(request: web.Request) -> web.Response:
         target.luck = None
     else:
         value = _num(luck)
-        if value is None or not 0.1 <= value <= 20:
-            return web.json_response({"error": "bad_luck", "message": "Подкрутка: от ×0.1 до ×20"}, status=400)
+        if value is None or not 0 <= value <= 20:
+            return web.json_response({"error": "bad_luck", "message": "Подкрутка: от ×0 до ×20"}, status=400)
         target.luck = value
     await session.commit()
     return web.json_response(await _admin_user_json(session, target))

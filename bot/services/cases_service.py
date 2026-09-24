@@ -27,13 +27,15 @@ def draw_items(
 ) -> list[CaseItem]:
     """luck — подкрутка админа для игрока (User.luck): вес предметов, которые
     окупают кейс (ценность ≥ цены; у бесплатного — дороже медианы), × luck.
-    >1 — чаще окупается, <1 — реже; None — честные веса."""
+    >1 — чаще окупается, <1 — реже, 0 — не окупается никогда; None — честные веса."""
     if not items:
         return []
     weights = [item_weight(item) for item in items]
-    if luck and luck != 1:
+    if luck is not None and luck != 1:
         threshold = case_price or sorted(i.value for i in items)[len(items) // 2]
         weights = [w * luck if i.value >= threshold else w for w, i in zip(weights, items)]
+        if not any(weights):  # всё в кейсе окупает его — при ×0 падает самое дешёвое
+            return [min(items, key=lambda i: i.value)] * quantity
     return random.choices(items, weights=weights, k=quantity)
 
 

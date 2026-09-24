@@ -43,3 +43,9 @@ def find_nearest_target(
 
 def roll_success(chance: int) -> bool:
     return random.uniform(0, 100) < chance
+
+
+def lucky_chance(chance: float, luck: float | None) -> float:
+    """Реальный шанс с подкруткой админа (User.luck): None — честный,
+    0 — апгрейд никогда не зайдёт, иначе шанс × luck (не выше 95%)."""
+    return chance if luck is None else min(95, chance * luck)

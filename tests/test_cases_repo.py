@@ -95,3 +95,16 @@ def test_luck_shifts_drops_towards_profitable_items():
     random.seed(1)
     lucky = sum(i.value >= 100 for i in draw_items(items, 4000, luck=20, case_price=100))
     assert lucky > fair * 5
+
+
+def test_zero_luck_never_pays_off():
+    from bot.database.models import CaseItem
+    from bot.services.cases_service import draw_items
+    from bot.services.upgrader_service import lucky_chance, roll_success
+
+    items = [CaseItem(name=n, value=v) for n, v in (("cheap", 5), ("mid", 30), ("top", 1000))]
+    assert all(i.value < 100 for i in draw_items(items, 2000, luck=0, case_price=100))
+    # всё в кейсе дороже цены — падает самое дешёвое, без ошибки
+    assert {i.name for i in draw_items(items, 50, luck=0, case_price=1)} == {"cheap"}
+    assert lucky_chance(75, 0) == 0 and not any(roll_success(lucky_chance(75, 0)) for _ in range(2000))
+    assert lucky_chance(40, None) == 40 and lucky_chance(40, 3) == 95
