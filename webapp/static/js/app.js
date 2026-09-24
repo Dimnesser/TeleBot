@@ -469,6 +469,12 @@ async function renderDepositScreen(root) {
       <div id="dep-body"></div>
     </section>
     <section class="dep-history" id="dep-history">${depositHistoryHtml(requests)}</section>`;
+  root.querySelectorAll('[data-dcancel]').forEach((el) => el.addEventListener('click', async () => {
+    if (!confirm(`Отменить заявку #${el.dataset.dcancel}?`)) return;
+    try { await api(`/api/deposit/requests/${el.dataset.dcancel}/cancel`, { method: 'POST' }); toast('Заявка отменена', 'success'); }
+    catch (err) { toast(err.message, 'error'); }
+    renderDepositScreen(root);
+  }));
   root.querySelectorAll('[data-tab]').forEach((el) => el.addEventListener('click', () => {
     depositTab = el.dataset.tab; haptic.tick();
     root.querySelectorAll('[data-tab]').forEach((t) => t.classList.toggle('active', t === el));
@@ -485,6 +491,7 @@ function depositHistoryHtml(requests) {
       <div class="dep-req st-${r.status}">
         <div><b>#${r.id}</b> · ${r.items.map((i) => `${escapeHtml(i.name)} ×${i.qty}`).join(', ')}</div>
         <div class="dep-req-foot"><span>${fmt(r.total_b)}${coinIcon()}${r.bonus_b ? `<span class="wd-topup">+${fmt(r.bonus_b)} по коду</span>` : ''}</span><span class="dep-status">${escapeHtml(r.status_label)}</span></div>
+        ${r.status === 'pending' || r.status === 'queued' ? `<button class="dep-cancel" data-dcancel="${r.id}">Отменить</button>` : ''}
       </div>`).join('')}`;
 }
 
@@ -671,11 +678,14 @@ function paintStars(body) {
  * сам; нет — обмен на брейнротов из стока примерно той же цены (можно
  * несколькими штуками), недостающее бот доплачивает в B. */
 
+let withdrawMode = 'withdraw'; // или 'exchange' — после кнопки «Обменять»
+
 async function renderWithdrawScreen(root) {
   const [stock, inventory, requests] = await Promise.all([
     api('/api/withdraw/stock'), api('/api/inventory?limit=200'), api('/api/withdraw/requests').catch(() => []),
   ]);
   const inStock = Object.fromEntries(stock.map((s) => [s.name, s.count]));
+  const openWd = requests.find((r) => r.status === 'pending' || r.status === 'queued');
   const inv = inventory.slice().sort((a, b) => b.value - a.value);
   root.innerHTML = `
     <section class="dep">
@@ -693,7 +703,15 @@ async function renderWithdrawScreen(root) {
     </section>
     <section class="dep">
       <div class="dep-eyebrow">Твой инвентарь</div>
-      <h1 class="dep-title">Что вывести</h1>
+      <h1 class="dep-title">${withdrawMode === 'exchange' ? 'Что обменять' : 'Что вывести'}</h1>
+      <div class="dep-tabs two">
+        <button class="dep-tab ${withdrawMode === 'withdraw' ? 'active' : ''}" data-mode="withdraw">📤 Вывести</button>
+        <button class="dep-tab ${withdrawMode === 'exchange' ? 'active' : ''}" data-mode="exchange">🔁 Обменять</button>
+      </div>
+      <p class="dep-hint">${withdrawMode === 'exchange'
+        ? 'Обмен — вместо своего брейнрота получаешь других из стока примерно той же цены (можно несколько штук), разницу бот доплатит на баланс.'
+        : 'Вывод — получаешь этого же брейнрота, если он есть в стоке; если нет, бот предложит обмен.'}</p>
+      ${openWd ? `<div class="dep-queue"><b>${escapeHtml(openWd.status_label)}</b><span>Вывод #${openWd.id} · ${escapeHtml(openWd.item.name)} · ник ${escapeHtml(openWd.nickname)}. Новый — после решения по этому.</span></div>` : ''}
       ${inv.length ? `<div class="dep-grid">${inv.map((i) => `
         <button class="dep-item wd-item" data-id="${i.id}">
           ${inStock[i.name] ? '<span class="stock-badge">в стоке</span>' : ''}
@@ -708,13 +726,22 @@ async function renderWithdrawScreen(root) {
         <div class="dep-req st-${r.status === 'done' ? 'approved' : r.status === 'cancelled' ? 'rejected' : 'pending'}">
           <div><b>#${r.id}</b> · ${escapeHtml(r.item.name)} → ${r.payout.map((p) => `${escapeHtml(p.name)} ×${p.qty}`).join(', ')}${r.topup_b ? ` + ${fmt(r.topup_b)} B` : ''}</div>
           <div class="dep-req-foot"><span>ник ${escapeHtml(r.nickname)}</span><span class="dep-status">${escapeHtml(r.status_label)}</span></div>
+          ${r.status === 'pending' || r.status === 'queued' ? `<button class="dep-cancel" data-wcancel="${r.id}">Отменить</button>` : ''}
         </div>`).join('')}
     </section>` : ''}`;
-  root.querySelectorAll('.wd-item').forEach((el) => el.addEventListener('click', () => openWithdrawSheet(root, Number(el.dataset.id))));
+  root.querySelectorAll('.wd-item').forEach((el) => el.addEventListener('click', () =>
+    openWithdrawSheet(Number(el.dataset.id), withdrawMode === 'exchange', () => renderWithdrawScreen(root))));
+  root.querySelectorAll('[data-mode]').forEach((el) => el.addEventListener('click', () => { withdrawMode = el.dataset.mode; renderWithdrawScreen(root); }));
+  root.querySelectorAll('[data-wcancel]').forEach((el) => el.addEventListener('click', async () => {
+    if (!confirm(`Отменить заявку на вывод #${el.dataset.wcancel}? Брейнрот вернётся в инвентарь.`)) return;
+    try { await api(`/api/withdraw/${el.dataset.wcancel}/cancel`, { method: 'POST' }); toast('Вывод отменён', 'success'); }
+    catch (err) { toast(err.message, 'error'); }
+    renderWithdrawScreen(root);
+  }));
 }
 
-async function openWithdrawSheet(root, itemId) {
-  const { item, options } = await api(`/api/withdraw/options/${itemId}`);
+async function openWithdrawSheet(itemId, exchange = false, onDone = null) {
+  const { item, options } = await api(`/api/withdraw/options/${itemId}${exchange ? '?exchange=1' : ''}`);
   const optHtml = (o, idx) => `
     <button class="wd-opt ${idx === 0 ? 'picked' : ''}" data-idx="${idx}">
       <div class="wd-opt-items">${o.items.map((b) => `
@@ -724,11 +751,11 @@ async function openWithdrawSheet(root, itemId) {
   const overlay = openModal(`
     <button class="modal-close" onclick="closeModal()">✕</button>
     <div class="dep-confirm">
-      <div class="subscribe-title">Вывод: ${escapeHtml(item.name)}</div>
-      <div class="muted" style="text-align:center">Ценность ${fmt(item.value)} B${options.length && !options[0].direct ? ' · нет в стоке, выбери обмен' : ''}</div>
+      <div class="subscribe-title">${exchange ? 'Обмен' : 'Вывод'}: ${escapeHtml(item.name)}</div>
+      <div class="muted" style="text-align:center">Ценность ${fmt(item.value)} B${!exchange && options.length && !options[0].direct ? ' · нет в стоке, выбери обмен' : ''}</div>
       ${options.length ? `<div class="wd-opts">${options.map(optHtml).join('')}</div>
         <input class="field" id="wd-nick" maxlength="32" placeholder="Твой ник в Steal a Brainrot" autocomplete="off">
-        <button class="open-btn" id="wd-send">Вывести</button>`
+        <button class="open-btn" id="wd-send">${exchange || !options[0].direct ? 'Обменять' : 'Вывести'}</button>`
         : '<div class="empty-state">В стоке сейчас нет ничего подходящего — загляни позже.</div>'}
     </div>`);
   if (!options.length) return;
@@ -741,11 +768,11 @@ async function openWithdrawSheet(root, itemId) {
     const btn = e.currentTarget; btn.disabled = true;
     try {
       const r = await api('/api/withdraw', { method: 'POST', body: JSON.stringify({
-        item_id: itemId, option_key: options[chosen].key, nickname: overlay.querySelector('#wd-nick').value.trim(),
+        item_id: itemId, option_key: options[chosen].key, nickname: overlay.querySelector('#wd-nick').value.trim(), exchange,
       }) });
       closeModal(); haptic.success();
-      toast(`Вывод #${r.id} создан — жди трейд от админа`, 'success');
-      renderWithdrawScreen(root);
+      toast(r.queue_position === 1 ? `Заявка #${r.id}: ты 1-й в очереди — жди трейд` : `Заявка #${r.id}: ты ${r.queue_position}-й в очереди`, 'success');
+      if (onDone) onDone();
     } catch (err) { toast(err.message, 'error'); btn.disabled = false; }
   });
 }
@@ -1122,6 +1149,10 @@ function paintInventory(root, items) {
       <div class="inv-name">${escapeHtml(i.name)}</div>
       <div class="inv-value">${fmt(i.value)}${coinIcon()}</div>
       <button class="inv-sell-btn" data-sell="${i.id}" data-payout="${Math.round(i.value * 0.9)}">Продать · ${Math.round(i.value * 0.9)}${coinIcon()}</button>
+      <div class="inv-actions">
+        <button class="inv-act" data-wd="${i.id}">Вывести</button>
+        <button class="inv-act" data-ex="${i.id}">Обменять</button>
+      </div>
     </div>`).join('') || '<div class="empty-state" style="grid-column:1/-1">Пусто — открой кейс на главной.</div>';
 
   root.innerHTML = `
@@ -1132,11 +1163,14 @@ function paintInventory(root, items) {
       <button class="pill sort-pill ${inventorySort === 'rarity' ? 'active' : ''}" data-sort="rarity">По редкости</button>
       <button class="pill sort-pill ${inventorySort === 'date' ? 'active' : ''}" data-sort="date">По дате</button>
     </div>
-    ${items.length ? `<div class="btn-row"><button class="btn btn-ghost" id="btn-sell-all" style="flex:1">💰 Продать всё (${items.length})</button></div>` : ''}
+    ${items.length ? `<div class="btn-row"><button class="btn btn-ghost" id="btn-sell-all" style="flex:1">💰 Продать всё (${items.length})</button><button class="btn btn-ghost" onclick="navigate('withdraw')" style="flex:1">📤 Вывод и сток</button></div>` : ''}
     <div class="inventory-grid">${tiles}</div>
   `;
 
   root.querySelectorAll('.filter-chip').forEach((el) => el.addEventListener('click', () => { inventoryFilter = el.dataset.r; paintInventory(root, items); }));
+  const afterWithdraw = async () => paintInventory(root, await api('/api/inventory?limit=200'));
+  root.querySelectorAll('[data-wd]').forEach((el) => el.addEventListener('click', () => openWithdrawSheet(Number(el.dataset.wd), false, afterWithdraw)));
+  root.querySelectorAll('[data-ex]').forEach((el) => el.addEventListener('click', () => openWithdrawSheet(Number(el.dataset.ex), true, afterWithdraw)));
   root.querySelectorAll('.sort-pill').forEach((el) => el.addEventListener('click', () => { inventorySort = el.dataset.sort; paintInventory(root, items); }));
   root.querySelectorAll('[data-sell]').forEach((el) => el.addEventListener('click', async (e) => {
     e.stopPropagation();
@@ -1231,6 +1265,10 @@ async function renderProfileScreen(root) {
     <div class="btn-row" style="margin-top:14px">
       <button class="btn btn-ghost" onclick="navigate('inventory')">🎒 Инвентарь</button>
       <button class="btn btn-primary" onclick="navigate('home')">Открыть кейс</button>
+    </div>
+    <div class="btn-row">
+      <button class="btn btn-ghost" onclick="navigate('withdraw')">📤 Вывести</button>
+      <button class="btn btn-ghost" onclick="withdrawMode='exchange';navigate('withdraw')">🔁 Обменять</button>
     </div>
     <div id="my-cases"></div>
     ${me.partner_code ? `
@@ -1438,10 +1476,10 @@ async function bindAdminPanel(root) {
     const list = await api('/api/admin/withdrawals').catch(() => []);
     wdBox.innerHTML = list.map((r) => `
       <div class="admin-dep">
-        <div class="admin-dep-head"><b>#${r.id}</b><span>${escapeHtml(r.player)}</span><span class="dep-status">ник ${escapeHtml(r.nickname)}</span></div>
+        <div class="admin-dep-head"><b>${r.queue_position}.</b><b>#${r.id}</b><span>${escapeHtml(r.player)}</span><span class="dep-status">ник ${escapeHtml(r.nickname)}</span></div>
         <div class="admin-dep-items">${escapeHtml(r.item.name)} (${fmt(r.item.value)} B) → <b>${r.payout.map((p) => `${escapeHtml(p.name)} ×${p.qty}`).join(', ')}</b>${r.topup_b ? ` + ${fmt(r.topup_b)} B` : ''}</div>
         <div class="admin-dep-foot"><span></span><span class="admin-dep-actions">
-          <button class="btn-chip" data-wd="${r.id}" data-act="done">Выдано</button>
+          ${r.queue_position === 1 ? `<button class="btn-chip" data-wd="${r.id}" data-act="done">Выдано</button>` : '<span class="muted">ждёт очереди</span>'}
           <button class="btn-chip ghost" data-wd="${r.id}" data-act="cancel">Отменить</button>
         </span></div>
       </div>`).join('') || '<div class="muted">Заявок на вывод нет</div>';

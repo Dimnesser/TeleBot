@@ -24,7 +24,14 @@ from bot.services.deposit_service import cart_total, get_buff
 from bot.services.notify import notify_admins_new_request
 from bot.services.partner_service import deposit_bonus
 from bot.services.referral_service import credit_referral_commission
-from bot.utils.texts import DEPOSIT_QUEUE_PROMOTED_TEXT, USER_DEPOSIT_APPROVED, USER_DEPOSIT_REJECTED
+from bot.utils.texts import (
+    QUEUE_CANCELLED_TEXT,
+    QUEUE_FIRST_TEXT,
+    QUEUE_TURN_TEXT,
+    QUEUE_WAIT_TEXT,
+    USER_DEPOSIT_APPROVED,
+    USER_DEPOSIT_REJECTED,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -128,6 +135,27 @@ async def resolve_deposit(
     return Decision(request=request, credited=credited)
 
 
+async def notify_submitted(bot: Bot, user: User, request: DepositRequest, position: int) -> None:
+    """Игроку в чат: «ты 1-й, уже в работе» или «ты N-й в очереди»."""
+    kind = "Заявка на пополнение"
+    text = (QUEUE_FIRST_TEXT.format(kind=kind, request_id=request.id, nickname=request.game_nickname) if position == 1
+            else QUEUE_WAIT_TEXT.format(kind=kind, request_id=request.id, position=position))
+    await _safe_send(bot, user.tg_id, text)
+
+
+async def cancel_by_user(session: AsyncSession, bot: Bot, user: User, request_id: int) -> DepositRequest:
+    """Игрок отменяет свою заявку, пока её не зачислили."""
+    request = await requests_repo.get_request(session, request_id)
+    if request is None or request.user_id != user.id or request.status not in OPEN_STATUSES:
+        raise DepositAlreadyResolved
+    was_pending = request.status == DepositRequestStatus.PENDING
+    await requests_repo.resolve_request(session, request, DepositRequestStatus.CANCELLED, user.tg_id)
+    await _safe_send(bot, user.tg_id, QUEUE_CANCELLED_TEXT.format(kind="Заявка на пополнение", request_id=request.id))
+    if was_pending:
+        await _promote_next(session, bot)
+    return request
+
+
 async def _promote_next(session: AsyncSession, bot: Bot) -> None:
     promoted = await requests_repo.get_oldest_queued(session)
     if promoted is None:
@@ -139,7 +167,8 @@ async def _promote_next(session: AsyncSession, bot: Bot) -> None:
         item = await items_repo.get_item(session, int(item_id))
         if item is not None:
             items_by_id[item.id] = item
-    await _safe_send(bot, promoted_user.tg_id, DEPOSIT_QUEUE_PROMOTED_TEXT.format(request_id=promoted.id))
+    await _safe_send(bot, promoted_user.tg_id, QUEUE_TURN_TEXT.format(
+        kind="Заявка на пополнение", request_id=promoted.id, nickname=promoted.game_nickname))
     await notify_admins_new_request(bot, promoted, promoted_user, promoted.category, items_by_id)
 
 

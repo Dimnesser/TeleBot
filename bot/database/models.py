@@ -33,6 +33,7 @@ class DepositRequestStatus(str, enum.Enum):
     PENDING = "pending"
     APPROVED = "approved"
     REJECTED = "rejected"
+    CANCELLED = "cancelled"  # игрок сам отменил, пока ждал
 
 
 class User(Base):
@@ -374,7 +375,8 @@ class WithdrawStock(Base):
 
 
 class WithdrawStatus(str, enum.Enum):
-    PENDING = "pending"  # ждёт трейда от админа
+    QUEUED = "queued"  # ждёт своей очереди
+    PENDING = "pending"  # в работе: админ кидает трейд
     DONE = "done"  # выдано (доплата зачислена)
     CANCELLED = "cancelled"  # отменено: брейнрот вернулся в инвентарь, сток — обратно
 

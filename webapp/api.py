@@ -69,7 +69,6 @@ from bot.database.repo import staking as staking_repo
 from bot.database.repo.known_items import list_known_items
 from bot.database.repo.users import add_balance, count_referrals, find_user
 from bot.services import deposit_moderation, partner_service, quest_service, settings_service, stars_service, withdraw_service
-from bot.services.notify import notify_admins_text
 from bot.services.deposit_service import cart_is_valid
 from bot.services.battle_service import run_battle
 from bot.services.cases_service import REEL_REVEAL_INDEX, build_reel, draw_items, total_cost
@@ -349,6 +348,7 @@ DEPOSIT_STATUS_LABEL = {
     DepositRequestStatus.QUEUED: "В очереди",
     DepositRequestStatus.APPROVED: "Зачислено",
     DepositRequestStatus.REJECTED: "Отклонено",
+    DepositRequestStatus.CANCELLED: "Отменено",
 }
 
 
@@ -410,7 +410,19 @@ async def post_deposit_request(request: web.Request) -> web.Response:
             "error": "already_open", "request_id": exc.request.id,
             "message": f"У тебя уже есть заявка #{exc.request.id} в очереди — дождись её",
         }, status=400)
+    await deposit_moderation.notify_submitted(request.app["bot"], user, deposit, position)
     return web.json_response({"request": _deposit_request_json(deposit, {i.id: i for i in items}, position), "queue_position": position})
+
+
+@routes.post("/api/deposit/requests/{request_id}/cancel")
+async def post_deposit_cancel(request: web.Request) -> web.Response:
+    try:
+        r = await deposit_moderation.cancel_by_user(
+            request["session"], request.app["bot"], request["user"], int(request.match_info["request_id"])
+        )
+    except deposit_moderation.DepositAlreadyResolved:
+        return web.json_response({"error": "already_resolved", "message": "Заявку уже нельзя отменить"}, status=400)
+    return web.json_response({"id": r.id, "status": r.status.value})
 
 
 def _deposit_request_json(req: DepositRequest, items_by_id: dict, position: int | None = None) -> dict:
@@ -510,7 +522,12 @@ async def post_deposit_stars(request: web.Request) -> web.Response:
 # Вывод брейнротов через сток админа (bot/services/withdraw_service.py).
 
 
-def _withdraw_request_json(r: WithdrawRequest, owner: User | None = None) -> dict:
+def _withdraw_request_json(r: WithdrawRequest, owner: User | None = None, position: int | None = None) -> dict:
+    label = {"queued": "В очереди", "pending": "Ждёт трейда", "done": "Выдано", "cancelled": "Отменено"}[r.status.value]
+    if position == 1:
+        label = "Твоя очередь — жди трейд"
+    elif position:
+        label = f"В очереди: {position}-й"
     data = {
         "id": r.id,
         "item": _brainrot_json(r.item_name, r.item_value, r.item_rarity),
@@ -518,7 +535,8 @@ def _withdraw_request_json(r: WithdrawRequest, owner: User | None = None) -> dic
         "topup_b": r.topup_b,
         "nickname": r.game_nickname,
         "status": r.status.value,
-        "status_label": {"pending": "Ждёт трейда", "done": "Выдано", "cancelled": "Отменено"}[r.status.value],
+        "status_label": label,
+        "queue_position": position,
     }
     if owner is not None:
         data["player"] = f"@{owner.username}" if owner.username else (owner.first_name or str(owner.tg_id))
@@ -538,7 +556,8 @@ async def get_withdraw_options(request: web.Request) -> web.Response:
     item = await inventory_repo.get_by_id(session, int(request.match_info["item_id"]))
     if item is None or item.user_id != user.id:
         return web.json_response({"error": "item_gone", "message": "Этого брейнрота уже нет в инвентаре"}, status=404)
-    options = withdraw_service.options_for(item.item_name, item.value, await withdraw_service.stock(session))
+    exchange = request.query.get("exchange") == "1"
+    options = withdraw_service.options_for(item.item_name, item.value, await withdraw_service.stock(session), exchange=exchange)
     return web.json_response({
         "item": _brainrot_json(item.item_name, item.value, item.rarity),
         "options": [{
@@ -562,15 +581,25 @@ async def post_withdraw(request: web.Request) -> web.Response:
     if item is None:
         return web.json_response({"error": "item_gone", "message": "Этого брейнрота уже нет в инвентаре"}, status=404)
     try:
-        req = await withdraw_service.create_request(session, user, item, str(body.get("option_key") or ""), nickname)
+        req, position = await withdraw_service.create_request(
+            session, request.app["bot"], user, item, str(body.get("option_key") or ""), nickname,
+            exchange=bool(body.get("exchange")),
+        )
     except withdraw_service.WithdrawError as exc:
         return web.json_response({"error": exc.code, "message": exc.message}, status=400)
-    await notify_admins_text(request.app["bot"], (
-        f"📤 Вывод №{req.id} от {('@' + user.username) if user.username else user.tg_id} (ник {nickname}): "
-        + ", ".join(f"{p['name']} ×{p['qty']}" for p in req.payout)
-        + (f" + {req.topup_b} B доплаты" if req.topup_b else "")
-    ))
-    return web.json_response(_withdraw_request_json(req))
+    return web.json_response(_withdraw_request_json(req, position=position))
+
+
+@routes.post("/api/withdraw/{request_id}/cancel")
+async def post_withdraw_cancel(request: web.Request) -> web.Response:
+    try:
+        r = await withdraw_service.resolve(
+            request["session"], request.app["bot"], int(request.match_info["request_id"]),
+            done=False, admin_tg_id=request["user"].tg_id, by_user=request["user"],
+        )
+    except withdraw_service.WithdrawError as exc:
+        return web.json_response({"error": exc.code, "message": exc.message}, status=400)
+    return web.json_response(_withdraw_request_json(r))
 
 
 @routes.get("/api/withdraw/requests")
@@ -579,7 +608,11 @@ async def get_withdraw_requests(request: web.Request) -> web.Response:
     rows = (await session.execute(
         select(WithdrawRequest).where(WithdrawRequest.user_id == user.id).order_by(WithdrawRequest.id.desc()).limit(10)
     )).scalars().all()
-    return web.json_response([_withdraw_request_json(r) for r in rows])
+    result = []
+    for r in rows:
+        pos = await withdraw_service.queue_position(session, r) if r.status in withdraw_service.OPEN else None
+        result.append(_withdraw_request_json(r, position=pos))
+    return web.json_response(result)
 
 
 @routes.get("/api/admin/stock")
@@ -615,9 +648,12 @@ async def get_admin_withdrawals(request: web.Request) -> web.Response:
         return denied
     session = request["session"]
     rows = (await session.execute(
-        select(WithdrawRequest).where(WithdrawRequest.status == WithdrawStatus.PENDING).order_by(WithdrawRequest.id)
+        select(WithdrawRequest).where(WithdrawRequest.status.in_(withdraw_service.OPEN)).order_by(WithdrawRequest.id)
     )).scalars().all()
-    return web.json_response([_withdraw_request_json(r, await session.get(User, r.user_id)) for r in rows])
+    return web.json_response([
+        _withdraw_request_json(r, await session.get(User, r.user_id), await withdraw_service.queue_position(session, r))
+        for r in rows
+    ])
 
 
 @routes.post("/api/admin/withdrawals/{request_id}")

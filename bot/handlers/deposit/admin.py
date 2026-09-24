@@ -7,7 +7,8 @@ from aiogram.types import CallbackQuery
 
 from bot.config import is_admin
 from bot.database.engine import async_session
-from bot.keyboards.callbacks import DepositAdminCB
+from bot.keyboards.callbacks import DepositAdminCB, WithdrawAdminCB
+from bot.services import withdraw_service
 from bot.services.deposit_moderation import DepositAlreadyResolved, resolve_deposit
 from bot.utils.texts import ADMIN_REQUEST_ALREADY_RESOLVED, ADMIN_REQUEST_APPROVED, ADMIN_REQUEST_REJECTED
 
@@ -32,4 +33,20 @@ async def handle_admin_decision(callback: CallbackQuery, callback_data: DepositA
             return
     template = ADMIN_REQUEST_APPROVED if approve else ADMIN_REQUEST_REJECTED
     await callback.message.edit_text(template.format(request_id=decision.request.id))
+    await callback.answer()
+
+
+@router.callback_query(WithdrawAdminCB.filter(), IsAdmin())
+async def handle_withdraw_decision(callback: CallbackQuery, callback_data: WithdrawAdminCB) -> None:
+    done = callback_data.action == "done"
+    async with async_session() as session:
+        try:
+            request = await withdraw_service.resolve(
+                session, callback.bot, callback_data.request_id, done=done, admin_tg_id=callback.from_user.id
+            )
+        except withdraw_service.WithdrawError as exc:
+            await callback.answer(exc.message, show_alert=True)
+            return
+    verdict = "✅ Выдано" if done else "↩️ Отменено"
+    await callback.message.edit_text(f"{callback.message.html_text}\n\n<b>{verdict}</b> (вывод №{request.id})")
     await callback.answer()

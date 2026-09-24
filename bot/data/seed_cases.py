@@ -12,7 +12,7 @@ bot.data.brainrot_roster; в бесплатных кейсах ещё и мон�
   * шанс предмета ∝ 1 / ценность^0.8 — дорогие реже, но выпадают заметно
     (bot.services.cases_service.item_weight);
   * цена кейса = средний дроп / TARGET_RTP, округлённая вверх — кейс
-    возвращает в среднем 92% своей цены, окупается в 13–40% открытий.
+    возвращает в среднем 94% своей цены, окупается в 13–50% открытий.
 """
 from __future__ import annotations
 
@@ -24,9 +24,9 @@ from bot.data.coins import COIN_RARITY, coin_name
 from bot.database.models import CaseCategory
 from bot.services.cases_service import CASE_WEIGHT_EXPONENT
 
-CASES_CONTENT_VERSION = "20-better-odds"
+CASES_CONTENT_VERSION = "21-more-cases"
 
-TARGET_RTP = 0.92
+TARGET_RTP = 0.94
 
 
 @dataclass(frozen=True)
@@ -129,6 +129,21 @@ SEED_CASES: list[SeedCase] = [
          "Orcaledon"],
     ),
     # ------------------------------------------------------------ КЕЙСЫ
+    _case(K, "mini", "Мини", 0, CaseTheme("coins", "dust", ("#6f7c8f", "#2a3240"), "#c9d6e8"),
+          ["Ketupat Kepat", "Tang Tang Keletang", "Nuclearo Dinossauro", "Money Money Puggy", "Los Combinasionas",
+           "La Grande Combinasion", "67"]),
+    _case(K, "kopeika", "Копейка", 0, CaseTheme("coins", "sparkle", ("#b98b3a", "#5a3f12"), "#ffd24d"),
+          ["Cash or Card", "Ventoliero Pavonero", "Garama and Madundung", "Nuclearo Dinossauro", "Money Money Puggy",
+           "Los Combinasionas", "La Grande Combinasion", "67"]),
+    _case(K, "washer", "Стирка", 0, CaseTheme("water", "bubbles", ("#e8eef5", "#8497ad"), "#8fd8ff"),
+          ["Noodle Noodle Poodle", "Lavadorito Spinito", "Orcaledon", "Ketupat Kepat", "Tang Tang Keletang",
+           "Nuclearo Dinossauro", "La Grande Combinasion", "67"]),
+    _case(K, "sauce", "Соус", 0, CaseTheme("food", "fire", ("#d8b43a", "#8a2a12"), "#ff5a3a"),
+          ["Popcuru and Fizzuru", "Pizza and Ranch", "Burguro And Fryuro", "Ketchuru and Musturu", "Noodle Noodle Poodle",
+           "Cash or Card", "Garama and Madundung", "Tang Tang Keletang", "La Grande Combinasion", "67"]),
+    _case(K, "lasecret", "Ла Сикрет", 0, CaseTheme("bills", "lightning", ("#2a2a33", "#0b0b10"), "#f2f2f7"),
+          ["La Secret Combinasion", "Ketchuru and Musturu", "Ventoliero Pavonero", "Lavadorito Spinito",
+           "Tang Tang Keletang", "Nuclearo Dinossauro", "La Grande Combinasion"]),
     _case(K, "tirili", "Тирили", 1, CaseTheme("coins", "lightning", ("#2f74dc", "#163a7e"), "#ffe14d"),
           ["Tirilikalika Tirilikalako", "Capitano Moby", "Burguro And Fryuro"] + CHEAP),
     _case(K, "capitano", "Капитан", 2, CaseTheme("water", "bubbles", ("#2a92a6", "#0e3c48"), "#6ff4ff"),
@@ -160,7 +175,13 @@ SEED_CASES: list[SeedCase] = [
     _case(K, "legend", "Легенда", 10, CaseTheme("embers", "fire", ("#8e1d1d", "#2a0606"), "#ff3b2f"),
           ["Antonio", "Dragon Gingerini", "Kalika Bros", "Fishino Clownino", "La Supreme Combinasion", "Hydra Bunny",
            "Dragon Cannelloni", "La Casa Boo", "Rico Dinero", "Los Sekolahs"]),
+    _case(K, "kraken", "Океан", 0, CaseTheme("water", "bubbles", ("#1c6f8a", "#08283a"), "#5dfff0"),
+          ["Dragon Aquanini", "Kalika Bros", "Kraken", "Fishino Clownino", "La Supreme Combinasion", "Digi Narwhal",
+           "Ginger Gerat", "Hydra Bunny", "Tirilikalika Tirilikalako", "Moby Bros"]),
     # ------------------------------------------------------------ ALL-IN
+    _case(A, "antonio", "Любовь", 0, CaseTheme("embers", "fire", ("#3a3a44", "#111116"), "#ffb13b"),
+          ["Love Love Bear", "Griffin", "Antonio", "Dragon Gingerini", "Dragon Aquanini", "Kalika Bros", "Kraken",
+           "Fishino Clownino", "La Supreme Combinasion"]),
     _case(A, "frigo", "Фриго", 1, CaseTheme("snow", "snow", ("#a3d6f2", "#3a6f8f"), "#e8f8ff"),
           ["Elefanto Frigo", "Arcadragon", "Love Love Bear", "Antonio", "Dragon Gingerini", "Fishino Clownino",
            "La Supreme Combinasion", "Ginger Gerat", "Dragon Cannelloni"]),
@@ -170,6 +191,16 @@ SEED_CASES: list[SeedCase] = [
     _case(A, "strawberry", "Клубничный", 3, CaseTheme("strawberries", "leaves", ("#e8384a", "#7a0f1c"), "#ff9aa8"),
           ["Strawberry Elephant", "Signore Carapace", "John Pork", "Meowl", "Skibidi Toilet", "Elefanto Frigo",
            "Antonio", "Kalika Bros", "Dragon Aquanini"]),
+    _case(A, "arca", "Мяу", 0, CaseTheme("crystals", "crystal", ("#7a4dff", "#2a1266"), "#d8c8ff"),
+          ["Meowl", "John Pork", "Skibidi Toilet", "Elefanto Frigo", "Arcadragon", "Love Love Bear", "Griffin", "Antonio"]),
+    _case(A, "crown", "Корона", 0, CaseTheme("coins", "sparkle", ("#e9c24a", "#6b4c00"), "#fff2a8"),
+          ["Strawberry Elephant", "Signore Carapace", "Meowl", "John Pork", "Skibidi Toilet", "Elefanto Frigo", "Arcadragon"]),
 ]
+
+# Внутри раздела кейсы идут лестницей цен — sort_order по возрастанию цены.
+for _cat in {c.category for c in SEED_CASES}:
+    _ordered = sorted((c for c in SEED_CASES if c.category == _cat), key=lambda c: (c.price_tokens or 0, c.code))
+    for _n, _c in enumerate(_ordered, start=1):
+        object.__setattr__(_c, "sort_order", _n)
 
 SEED_CASES_BY_CODE: dict[str, SeedCase] = {c.code: c for c in SEED_CASES}

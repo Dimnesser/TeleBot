@@ -28,7 +28,7 @@ def test_market_snapshot_only_for_roster():
 
 
 def test_paid_cases_form_a_price_ladder_and_all_in_is_top():
-    main = [c for c in SEED_CASES if c.category == CaseCategory.STARTER]
+    main = sorted((c for c in SEED_CASES if c.category == CaseCategory.STARTER), key=lambda c: c.sort_order)
     all_in = [c for c in SEED_CASES if c.category == CaseCategory.APEX]
     assert [c.price_tokens for c in main] == sorted(c.price_tokens for c in main)
     assert min(c.price_tokens for c in all_in) > max(c.price_tokens for c in main)

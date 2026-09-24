@@ -212,3 +212,8 @@ class GiveawayJoinCB(CallbackData, prefix="gjoin"):
 
 class FaqHomeCB(CallbackData, prefix="fhome"):
     pass
+
+
+class WithdrawAdminCB(CallbackData, prefix="wadmin"):
+    request_id: int
+    action: str  # done | cancel

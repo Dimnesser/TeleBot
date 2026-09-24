@@ -664,7 +664,9 @@ async def test_deposit_queue_one_by_one(client, auth_headers, admin_headers) -> 
     assert mine[0]["status"] == "pending" and mine[0]["queue_position"] == 1
     sent = client.server.app["bot"].sent
     assert any(chat == 999111 and "Начислено 3077 B" in t for chat, t in sent)
-    assert any(chat == 555777 and "Место освободилось" in t for chat, t in sent)
+    assert any(chat == 555777 and "Твоя очередь настала" in t for chat, t in sent)
+    assert any(chat == 555777 and "2-й в очереди" in t for chat, t in sent)
+    assert any(chat == 999111 and "1-й в очереди" in t for chat, t in sent)
 
     r = await client.post(f"/api/admin/deposits/{waiting['request']['id']}", headers=admin_headers, json={"action": "reject"})
     assert (await r.json())["status"] == "rejected"
@@ -819,3 +821,55 @@ async def test_deposit_request_with_code_bonus(client, auth_headers, admin_heade
     r = await client.post(f"/api/admin/deposits/{req['id']}", headers=admin_headers, json={"action": "approve"})
     assert (await r.json())["credited"] == 3077 + 307
     assert (await (await client.get("/api/me", headers=auth_headers)).json())["balance"] == before + 3384
+
+
+async def test_withdraw_queue_cancel_and_exchange(client, auth_headers, admin_headers, in_memory_db) -> None:
+    from bot.database.models import User
+    from bot.database.repo import inventory as inventory_repo
+    from sqlalchemy import select
+
+    second = {"Authorization": "tma " + _init_data(565656, username="two")}
+    await client.get("/api/me", headers=second)
+    async with in_memory_db() as session:
+        for tg in (999111, 565656):
+            u = (await session.execute(select(User).where(User.tg_id == tg))).scalar_one()
+            await inventory_repo.add_items(session, u, "test", [("Kraken", 3077)])
+    await client.post("/api/admin/stock", headers=admin_headers, json={"name": "Kraken", "delta": 2})
+    await client.post("/api/admin/stock", headers=admin_headers, json={"name": "Garama and Madundung", "delta": 50})
+
+    k1 = next(i for i in await (await client.get("/api/inventory", headers=auth_headers)).json() if i["name"] == "Kraken")
+    # обмен вместо прямого вывода, даже если Kraken в стоке
+    ex = (await (await client.get(f"/api/withdraw/options/{k1['id']}?exchange=1", headers=auth_headers)).json())["options"]
+    assert ex and all(b["name"] != "Kraken" for o in ex for b in o["items"])
+    direct = (await (await client.get(f"/api/withdraw/options/{k1['id']}", headers=auth_headers)).json())["options"][0]
+    first = await (await client.post("/api/withdraw", headers=auth_headers,
+                                     json={"item_id": k1["id"], "option_key": direct["key"], "nickname": "dimon"})).json()
+    assert first["queue_position"] == 1
+
+    k2 = next(i for i in await (await client.get("/api/inventory", headers=second)).json() if i["name"] == "Kraken")
+    opt2 = (await (await client.get(f"/api/withdraw/options/{k2['id']}", headers=second)).json())["options"][0]
+    wait = await (await client.post("/api/withdraw", headers=second,
+                                    json={"item_id": k2["id"], "option_key": opt2["key"], "nickname": "two_sab"})).json()
+    assert wait["queue_position"] == 2 and wait["status"] == "queued"
+
+    # второго нельзя выдать раньше первого; первый отменяет сам — второй в работе
+    r = await client.post(f"/api/admin/withdrawals/{wait['id']}", headers=admin_headers, json={"action": "done"})
+    assert (await r.json())["error"] == "not_your_turn"
+    assert (await client.post(f"/api/withdraw/{first['id']}/cancel", headers=second)).status == 400  # чужую нельзя
+    r = await client.post(f"/api/withdraw/{first['id']}/cancel", headers=auth_headers)
+    assert (await r.json())["status"] == "cancelled"
+    assert any(i["name"] == "Kraken" for i in await (await client.get("/api/inventory", headers=auth_headers)).json())
+    mine = await (await client.get("/api/withdraw/requests", headers=second)).json()
+    assert mine[0]["status"] == "pending" and mine[0]["queue_position"] == 1
+    sent = client.server.app["bot"].sent
+    assert any(chat == 565656 and "Твоя очередь настала" in t for chat, t in sent)
+
+
+async def test_player_cancels_deposit_request(client, auth_headers) -> None:
+    catalog = await (await client.get("/api/deposit/catalog", headers=auth_headers)).json()
+    kraken = next(i for i in catalog["brainrot"] if i["name"] == "Kraken")
+    req = (await (await client.post("/api/deposit/request", headers=auth_headers,
+                                    json={"category": "brainrot", "items": {kraken["id"]: 1}, "nickname": "dimon"})).json())["request"]
+    r = await client.post(f"/api/deposit/requests/{req['id']}/cancel", headers=auth_headers)
+    assert (await r.json())["status"] == "cancelled"
+    assert (await client.post(f"/api/deposit/requests/{req['id']}/cancel", headers=auth_headers)).status == 400
