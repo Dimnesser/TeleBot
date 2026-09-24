@@ -5,6 +5,7 @@ bot/app.py) — оба используют один и тот же async_sessio
 """
 from __future__ import annotations
 
+import hashlib
 import logging
 import subprocess
 from pathlib import Path
@@ -29,17 +30,27 @@ def _build_version() -> str:
     Telegram WebView кэширует HTML/JS/CSS мини-аппа по URL очень агрессивно
     (сильнее обычного мобильного браузера) — без версии в URL пользователь
     после редеплоя продолжает видеть старый JS/CSS, пока сам не почистит
-    кэш Telegram. git-хэш меняется на каждый коммит, что и нужно."""
+    кэш Telegram. git-хэш меняется на каждый коммит, что и нужно. Если
+    git недоступен (код выложен без .git), версия — хэш содержимого JS/CSS:
+    иначе она была бы константой «0» и кэш не сбрасывался бы никогда."""
     try:
-        return subprocess.run(
+        version = subprocess.run(
             ["git", "rev-parse", "--short", "HEAD"],
             cwd=Path(__file__).resolve().parent.parent,
             capture_output=True,
             text=True,
             timeout=5,
-        ).stdout.strip() or "0"
+        ).stdout.strip()
     except Exception:
-        return "0"
+        version = ""
+    return version or _static_content_hash()
+
+
+def _static_content_hash() -> str:
+    digest = hashlib.sha1()
+    for path in sorted([*STATIC_DIR.glob("js/*.js"), *STATIC_DIR.glob("css/*.css")]):
+        digest.update(path.read_bytes())
+    return digest.hexdigest()[:10]
 
 
 BUILD_VERSION = _build_version()
