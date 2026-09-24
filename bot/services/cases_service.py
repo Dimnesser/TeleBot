@@ -6,10 +6,10 @@ import random
 from bot.database.models import Case, CaseItem
 
 
-# Вес предмета ∝ 1/ценность^k. При k > 1 дорогие брейнроты выпадают заметно
-# реже, чем «пропорционально цене» — кейс тяжело окупить. Та же степень
-# используется при расчёте цены кейса (bot.data.seed_cases.price_for).
-CASE_WEIGHT_EXPONENT = 1.5
+# Вес предмета ∝ 1/ценность^k. k = 1 — шанс обратно пропорционален цене:
+# дорогие брейнроты реже, но не «никогда» (при 1.5 топ кейса выпадал раз на
+# ~10 000 открытий). Та же степень — в расчёте цены (seed_cases.price_for).
+CASE_WEIGHT_EXPONENT = 1.0
 
 
 def item_weight(item: CaseItem) -> float:

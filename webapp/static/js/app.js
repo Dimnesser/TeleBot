@@ -76,6 +76,13 @@ function glowVars(b) {
   const [, c1, c2] = valueBand(b.value || 0);
   return `--rc:${c1};--rca:${c2}`;
 }
+/* Цвет плитки дропа относительно цены кейса: серый — дешевле половины
+ * цены, синий — почти окуп, фиолетовый — окуп, красный — ×3, золото — ×10. */
+const REL_BANDS = [[10, '#ffc93c'], [3, '#ff4d6d'], [1, '#a66bff'], [0.5, '#3d8bff'], [0, '#5d6a86']];
+function relColor(value, price) {
+  const k = value / Math.max(price, 5);
+  return REL_BANDS.find(([min]) => k >= min)[1];
+}
 
 /** Официальный рендер брейнрота (из вики, см. webapp/static/assets/brainrots).
  * Если ассета нет — честный плейсхолдер, никакой подменной картинки. */
@@ -317,6 +324,7 @@ function caseFootRight(c) {
 function caseCard(c, idx) {
   return `
     <button class="case-card fade-in-up" style="${caseThemeVars(c)};animation-delay:${Math.min(idx * 30, 300)}ms" data-case-id="${c.id}" data-name="${escapeHtml(c.name.toLowerCase())}">
+      <div class="case-card-glow"></div>
       <div class="case-card-art">${CaseArt.artifact(c)}</div>
       <div class="case-card-name">${escapeHtml(c.name)}</div>
       <div class="case-card-foot">
@@ -327,7 +335,7 @@ function caseCard(c, idx) {
 }
 
 async function renderCasesScreen(root) {
-  const [data] = await Promise.all([api('/api/cases'), refreshMe()]);
+  const [data, , wins] = await Promise.all([api('/api/cases'), refreshMe(), api('/api/recent-wins?limit=16').catch(() => [])]);
   freeReadyAt = Date.now() + (data.free_wait_seconds || 0) * 1000;
   const all = data.collections.flatMap((col) => col.cases);
   const freeCase = all.find((c) => c.category === 'free');
@@ -351,8 +359,20 @@ async function renderCasesScreen(root) {
       <div class="case-grid">${col.cases.map(caseCard).join('')}</div>
     </section>`).join('');
 
+  const live = wins.length ? `
+    <section class="live">
+      <div class="live-head"><span class="live-dot"></span>Последние выигрыши</div>
+      <div class="live-row">${wins.map((w) => `
+        <div class="live-card" style="--rc:${valueBand(w.value)[1]}">
+          <div class="live-img">${dropImg(w)}</div>
+          <div class="live-player">${escapeHtml(w.player)}</div>
+          <div class="live-value">${fmt(w.value)}${coinIcon()}</div>
+        </div>`).join('')}</div>
+    </section>` : '';
+
   root.innerHTML = `
     ${banner}
+    ${live}
     <div class="case-tools">
       <div class="case-tools-label">Быстрый фильтр</div>
       <input id="case-search" type="search" placeholder="Поиск кейса" autocomplete="off">
@@ -429,10 +449,19 @@ function renderDepositPlaceholder(root) {
  * молния (быстрое открытие без ленты), ниже панель «ЧТО МОЖЕТ ВЫПАСТЬ».
  * Результат решает сервер ДО анимации; лента только показывает его. */
 
+const AURA_PARTICLES = { fire: 'embers', bubbles: 'bubbles', confetti: 'confetti', smoke: 'wisps', snow: 'dust', leaves: 'dust', none: 'dust', dust: 'dust', sparkle: 'prism', crystal: 'prism', stars: 'prism', lightning: 'prism' };
+
+function stageFlash(stage, color) {
+  const el = stage.querySelector('.stage-flash');
+  el.style.background = `radial-gradient(circle at 50% 30%, ${color}, transparent 65%)`;
+  el.classList.remove('on'); void el.offsetWidth; el.classList.add('on');
+}
+
 function closeStage() {
   const el = document.getElementById('case-stage');
   if (!el) return;
   clearTimeout(el._freeTick);
+  if (el._fx) { el._fx.stop(); el._fx = null; }
   el.classList.add('leaving');
   setTimeout(() => el.remove(), 200);
   document.body.classList.remove('stage-open');
@@ -445,9 +474,9 @@ function dropImg(b) {
     : '<span class="drop-missing">нет ассета</span>';
 }
 
-function dropTile(b, cls = '', attrs = '') {
+function dropTile(b, cls = '', attrs = '', price = 0) {
   return `
-    <div class="drop-tile ${cls}" ${attrs}>
+    <div class="drop-tile ${cls}" style="--rc:${relColor(b.value, price)}" ${attrs}>
       <div class="drop-img">${dropImg(b)}<span class="drop-value">${fmt(b.value)}${coinIcon()}</span></div>
       <div class="drop-name">${escapeHtml(b.coins ? 'Монеты' : b.name)}</div>
     </div>`;
@@ -465,6 +494,8 @@ async function openCaseStage(caseId, qty = 1) {
   document.body.classList.add('stage-open');
   const topValue = Math.max(...c.items.map((i) => i.value));
   stage.innerHTML = `
+    <canvas class="stage-fx"></canvas>
+    <div class="stage-flash"></div>
     <div class="stage-scroll">
       <header class="stage-top">
         <button class="stage-close" aria-label="Назад">‹</button>
@@ -473,16 +504,18 @@ async function openCaseStage(caseId, qty = 1) {
       <div class="stage-view" id="stage-view">
         <div class="stage-art">${CaseArt.artifact(c)}</div>
       </div>
+      <div class="stage-glow"></div>
       <h1 class="stage-name">${escapeHtml(c.name)}</h1>
       <div class="stage-controls" id="stage-controls"></div>
       <section class="drops-panel">
         <div class="drops-title">Что может выпасть</div>
         <div class="drops-grid">
-          ${c.items.map((i, idx) => dropTile(i, i.value === topValue ? 'is-top' : '', `data-item="${idx}"`)).join('')}
+          ${c.items.map((i, idx) => dropTile(i, i.value === topValue ? 'is-top' : '', `data-item="${idx}"`, c.price_tokens)).join('')}
         </div>
       </section>
     </div>`;
 
+  stage._fx = CaseArt.particles(stage.querySelector('.stage-fx'), AURA_PARTICLES[c.theme && c.theme.aura] || 'dust', c.theme ? c.theme.colors : ['#fff', '#fff']);
   stage.querySelector('.stage-close').addEventListener('click', () => { closeStage(); navigate('home'); });
   stage.querySelectorAll('[data-item]').forEach((el) =>
     el.addEventListener('click', () => { const it = c.items[Number(el.dataset.item)]; if (!it.coins) openBrainrotSheet(it); })
@@ -565,9 +598,10 @@ async function runOpening(stage, c, qty, fast = false) {
     const multi = res.reels.length > 1;
     view.innerHTML = `<div class="reels ${multi ? 'multi' : ''}">${res.reels.map((reel) => `
       <div class="reel">
-        <div class="reel-track">${reel.map((i) => dropTile(i, 'reel-tile')).join('')}</div>
+        <div class="reel-track">${reel.map((i) => dropTile(i, 'reel-tile', '', c.price_tokens)).join('')}</div>
         <div class="reel-marker"></div>
       </div>`).join('')}</div>`;
+    controls.classList.remove('busy'); // иначе pointer-events: none глушит «Пропустить»
     controls.innerHTML = '<button class="skip-btn" id="btn-skip">Пропустить</button>';
     const spins = [...view.querySelectorAll('.reel')].map((el, r) =>
       spinReel(el, res.reveal_index, (multi ? 4300 : 5600) + r * 260)
@@ -575,7 +609,12 @@ async function runOpening(stage, c, qty, fast = false) {
     controls.querySelector('#btn-skip').addEventListener('click', () => spins.forEach((sp) => sp.skip()));
     await Promise.all(spins.map((sp) => sp.done));
     haptic.success();
-    await sleep(700);
+    const best = res.won.reduce((a, b) => (b.value > a.value ? b : a));
+    const color = relColor(best.value, c.price_tokens);
+    stageFlash(stage, color);
+    const vr = view.getBoundingClientRect();
+    if (stage._fx) stage._fx.burst(vr.left + vr.width / 2, vr.top + vr.height / 2, color, best.value >= c.price_tokens * 3 ? 2 : best.value >= c.price_tokens ? 1.3 : 0.6);
+    await sleep(750);
   }
   showReveal(stage, c, qty, res.won);
 }
@@ -637,14 +676,20 @@ function showReveal(stage, c, qty, won) {
   const payoutTotal = sellable.reduce((sum, w) => sum + w.sell_payout, 0);
   const again = (c.category !== 'free' && c.category !== 'referral') || caseCreditsLeft(c) >= qty;
 
+  const cost = Math.max(c.price_tokens * qty, 1);
+  const mult = total / cost;
+  const bestColor = relColor(Math.max(...won.map((w) => w.value)), c.price_tokens);
   view.innerHTML = `
-    <div class="result">
-      <div class="drops-title">${won.length > 1 ? `Ваш дроп · ${fmt(total)}${coinIcon()}` : 'Ваш дроп'}</div>
+    <div class="result" style="--rc:${bestColor}">
+      <div class="result-rays"></div>
+      <div class="drops-title">${won.length > 1 ? `Ваш дроп · <span data-count="${total}">0</span>${coinIcon()}` : 'Ваш дроп'}</div>
       <div class="result-grid n${won.length}">
-        ${won.map((w, i) => dropTile(w, 'result-tile', `data-won="${i}" style="animation-delay:${i * 80}ms"`)).join('')}
+        ${won.map((w, i) => dropTile(w, `result-tile ${w.value >= Math.max(c.price_tokens, 5) ? 'is-win' : ''}`, `data-won="${i}"`, c.price_tokens)).join('')}
       </div>
+      ${c.price_tokens ? `<div class="result-mult ${mult >= 1 ? 'up' : 'down'}">×${mult.toFixed(mult >= 10 ? 0 : 1)} к цене кейса</div>` : ''}
       ${won.length === 1 ? gameInfoHtml(won[0]) : ''}
     </div>`;
+  countUp(view);
   controls.classList.remove('busy');
   controls.innerHTML = `
     <div class="result-actions ${sellable.length ? '' : 'single'}">
@@ -681,6 +726,20 @@ function showReveal(stage, c, qty, won) {
     }
     runOpening(stage, c, qty);
   });
+}
+
+/** Цифры результата «набегают» от 0 — момент выигрыша читается лучше. */
+function countUp(root) {
+  const els = [...root.querySelectorAll('[data-count]')];
+  root.querySelectorAll('.result-tile .drop-value').forEach((el) => {
+    const n = el.firstChild; if (n && n.nodeType === 3) { const span = document.createElement('span'); span.dataset.count = n.textContent.replace(/\D/g, ''); el.replaceChild(span, n); els.push(span); }
+  });
+  const start = performance.now(), dur = CaseArt.REDUCED ? 1 : 700;
+  (function tick(now) {
+    const t = Math.min(1, (now - start) / dur), k = 1 - Math.pow(1 - t, 3);
+    els.forEach((el) => { el.textContent = fmt(Math.round(Number(el.dataset.count) * k)); });
+    if (t < 1) requestAnimationFrame(tick);
+  })(start);
 }
 
 function resetStage(stage, c, qty) {
