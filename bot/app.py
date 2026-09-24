@@ -13,6 +13,7 @@ from aiogram.types import ErrorEvent, MenuButtonWebApp, WebAppInfo
 from bot.config import config
 from bot.database.engine import init_db
 from bot.env_loader import load_dotenv
+from bot import support_bot
 from bot.handlers import routers
 from webapp.server import run_webapp
 
@@ -78,4 +79,5 @@ async def main() -> None:
 
     await bot.delete_webhook(drop_pending_updates=True)
     await run_webapp(bot)
+    await support_bot.start_from_settings()
     await dp.start_polling(bot)

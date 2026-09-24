@@ -1,14 +1,18 @@
-"""Поддержка в боте: игрок пишет — админы получают, админ отвечает реплаем.
+"""Поддержка: игрок пишет — админы получают, админ отвечает реплаем.
 
-Вход: кнопка «🆘 Поддержка» под приветствием, /support, ссылка
-t.me/<бот>?start=support (из Mini App) или просто любое сообщение боту.
+Работает в двух местах одним кодом (make_router):
+  * отдельный бот поддержки (standalone=True, токен задаёт админ в Mini App,
+    см. bot.support_bot): игрок пишет туда, обращения приходят админам в
+    личку этого бота, ответ — реплаем там же;
+  * основной бот (запасной вариант, пока отдельного нет): кнопка
+    «🆘 Поддержка», /support, t.me/<бот>?start=support или любое сообщение.
 """
 from __future__ import annotations
 
 import time
 
 from aiogram import F, Router
-from aiogram.filters import Command, StateFilter
+from aiogram.filters import Command, CommandStart, StateFilter
 from aiogram.fsm.context import FSMContext
 from aiogram.types import CallbackQuery, Message
 
@@ -21,6 +25,7 @@ from bot.services import support_service
 from bot.states.support import Support
 from bot.utils.texts import (
     FAQ_ENTRIES,
+    SUPPORT_ADMIN_HELLO,
     SUPPORT_CLOSED,
     SUPPORT_FAILED,
     SUPPORT_SENT,
@@ -28,9 +33,7 @@ from bot.utils.texts import (
     SUPPORT_WELCOME,
 )
 
-router = Router(name="support")
-
-MIN_INTERVAL = 1.5  # не чаще раза в полторы секунды — от флуда в админ-чат
+MIN_INTERVAL = 1.5  # не чаще раза в полторы секунды — от флуда админам
 _last_sent: dict[int, float] = {}
 
 
@@ -39,18 +42,11 @@ async def open_support(message: Message, state: FSMContext) -> None:
     await message.answer(SUPPORT_WELCOME, reply_markup=support_keyboard())
 
 
-@router.message(Command("support"))
-async def cmd_support(message: Message, state: FSMContext) -> None:
-    await open_support(message, state)
-
-
-@router.callback_query(SupportCB.filter(F.action == "open"))
 async def cb_open(callback: CallbackQuery, state: FSMContext) -> None:
     await open_support(callback.message, state)
     await callback.answer()
 
 
-@router.callback_query(SupportCB.filter(F.action == "faq"))
 async def cb_faq(callback: CallbackQuery, callback_data: SupportCB) -> None:
     if not 0 <= callback_data.idx < len(FAQ_ENTRIES):
         await callback.answer()
@@ -60,21 +56,19 @@ async def cb_faq(callback: CallbackQuery, callback_data: SupportCB) -> None:
     await callback.answer()
 
 
-@router.callback_query(SupportCB.filter(F.action == "close"))
 async def cb_close(callback: CallbackQuery, state: FSMContext) -> None:
     await state.clear()
     await callback.message.answer(SUPPORT_CLOSED)
     await callback.answer()
 
 
-# --- ответ админа: реплай на обращение (в админ-чате или в личке админа)
-@router.message(F.reply_to_message, ~F.text.startswith("/"))
-async def admin_reply(message: Message, state: FSMContext) -> None:
+async def admin_reply(message: Message, state: FSMContext, standalone: bool = False) -> None:
+    """Реплай админа на обращение → ответ игроку. Иначе — обычное сообщение."""
     async with async_session() as session:
         user_tg_id = await support_service.user_for_reply(session, message)
     if user_tg_id is None:
         if message.chat.type == "private" and not is_admin(message.from_user.id):
-            await player_message(message, state)  # игрок ответил реплаем на что-то в своём чате
+            await player_message(message, state, standalone)  # игрок ответил реплаем в своём чате
         return
     try:
         await support_service.send_answer(message.bot, user_tg_id, message)
@@ -84,12 +78,9 @@ async def admin_reply(message: Message, state: FSMContext) -> None:
     await message.reply("✅ Ответ отправлен игроку")
 
 
-# --- сообщение игрока: в режиме поддержки или просто любое сообщение боту
-@router.message(F.chat.type == "private", StateFilter(Support.chatting, None), ~F.text.startswith("/"),
-                ~F.successful_payment, ~F.web_app_data)
-async def player_message(message: Message, state: FSMContext) -> None:
-    if is_admin(message.from_user.id) and await state.get_state() is None:
-        return  # у админов личка с ботом — рабочая, не шлём их сообщения самим себе
+async def player_message(message: Message, state: FSMContext, standalone: bool = False) -> None:
+    if is_admin(message.from_user.id) and (standalone or await state.get_state() is None):
+        return  # сообщения админов самим себе не пересылаем
     now = time.monotonic()
     if now - _last_sent.get(message.from_user.id, 0) < MIN_INTERVAL:
         await message.answer(SUPPORT_SLOW_DOWN)
@@ -97,6 +88,39 @@ async def player_message(message: Message, state: FSMContext) -> None:
     _last_sent[message.from_user.id] = now
     async with async_session() as session:
         user = await get_user_by_tg_id(session, message.from_user.id)
-        delivered = await support_service.relay_to_admins(session, message.bot, message, user)
+        delivered = await support_service.relay_to_admins(session, message.bot, message, user, standalone=standalone)
     await state.set_state(Support.chatting)
     await message.answer(SUPPORT_SENT if delivered else SUPPORT_FAILED)
+
+
+def make_router(*, standalone: bool) -> Router:
+    router = Router(name="support_bot" if standalone else "support")
+    if standalone:
+        @router.message(CommandStart())
+        async def start(message: Message, state: FSMContext) -> None:
+            if is_admin(message.from_user.id):
+                await message.answer(SUPPORT_ADMIN_HELLO)
+                return
+            await open_support(message, state)
+
+    router.message(Command("support"))(open_support)
+    router.callback_query(SupportCB.filter(F.action == "open"))(cb_open)
+    router.callback_query(SupportCB.filter(F.action == "faq"))(cb_faq)
+    router.callback_query(SupportCB.filter(F.action == "close"))(cb_close)
+
+    @router.message(F.reply_to_message, ~F.text.startswith("/"))
+    async def on_reply(message: Message, state: FSMContext) -> None:
+        await admin_reply(message, state, standalone)
+
+    # в боте поддержки любое сообщение — обращение; в основном — в режиме
+    # поддержки или без другого активного сценария
+    states = (StateFilter("*"),) if standalone else (StateFilter(Support.chatting, None),)
+
+    @router.message(F.chat.type == "private", *states, ~F.text.startswith("/"), ~F.successful_payment)
+    async def on_message(message: Message, state: FSMContext) -> None:
+        await player_message(message, state, standalone)
+
+    return router
+
+
+router = make_router(standalone=False)

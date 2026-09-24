@@ -18,6 +18,8 @@ from bot.database.models import AppMeta
 REQUIRED_CHANNEL = "required_channel"
 FREE_CASE_COOLDOWN_HOURS = "free_case_cooldown_hours"
 SUPPORT_URL = "support_url"
+SUPPORT_BOT_TOKEN = "support_bot_token"
+SUPPORT_BOT_USERNAME = "support_bot_username"
 DEFAULT_FREE_CASE_COOLDOWN_HOURS = 12
 
 # Статусы getChatMember, при которых пользователь считается подписанным.

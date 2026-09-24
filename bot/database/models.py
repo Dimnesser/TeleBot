@@ -409,10 +409,10 @@ class SupportMessage(Base):
     """Сообщение поддержки у админов: по реплаю админа на него бот понимает,
     какому игроку отправить ответ."""
 
-    __tablename__ = "support_messages"
-    __table_args__ = (UniqueConstraint("chat_id", "message_id"),)
+    __tablename__ = "support_links"  # старая support_messages (с unique chat+message) не используется
 
     id: Mapped[int] = mapped_column(primary_key=True)
+    bot_id: Mapped[int | None] = mapped_column(BigInteger, nullable=True)  # какой бот переслал (основной / поддержки)
     chat_id: Mapped[int] = mapped_column(BigInteger)
     message_id: Mapped[int] = mapped_column(BigInteger)
     user_tg_id: Mapped[int] = mapped_column(BigInteger)

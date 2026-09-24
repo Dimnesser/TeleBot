@@ -18,6 +18,8 @@ def _patch_config(monkeypatch) -> None:
 
 
 class FakeBot:
+    id = 1
+
     def __init__(self):
         self.sent: list[tuple[int, str]] = []
         self._id = 100
@@ -105,3 +107,25 @@ async def test_flood_guard_and_admin_private_ignored(in_memory_db, monkeypatch) 
     admin = FakeMessage(bot, 42, 42, "привет")
     await support_module.player_message(admin, FakeState())
     assert admin.copies == [] and admin.answers == []
+
+
+async def test_standalone_support_bot_goes_to_admin_dms(in_memory_db, monkeypatch) -> None:
+    """Отдельный бот поддержки шлёт обращения админам в личку, даже если есть админ-чат."""
+    monkeypatch.setattr(support_module, "async_session", in_memory_db)
+    _patch_config(monkeypatch)
+    support_module._last_sent.clear()
+    bot = FakeBot()
+    bot.id = 2
+    msg = FakeMessage(bot, 777, 777, "помогите")
+    await support_module.player_message(msg, FakeState(), standalone=True)
+    assert msg.copies == [42]
+    # реплай админа в личке бота поддержки доходит игроку
+    reply = FakeMessage(bot, 42, 42, "уже смотрим", reply_to=SimpleNamespace(message_id=101))
+    await support_module.admin_reply(reply, FakeState(), standalone=True)
+    assert bot.sent[-1] == (777, "💬 <b>Поддержка:</b>\nуже смотрим")
+    # тот же message_id у другого бота — не наш реплай
+    other_bot = FakeBot()
+    stray = FakeMessage(other_bot, 42, 42, "?", reply_to=SimpleNamespace(message_id=101))
+    await support_module.admin_reply(stray, FakeState())
+    assert other_bot.sent == [] and stray.replies == []
+

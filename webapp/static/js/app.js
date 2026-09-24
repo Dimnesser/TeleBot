@@ -1374,6 +1374,13 @@ function adminPanelHtml() {
       </form>
       <div class="muted admin-hint" id="s-status"></div>
 
+      <div class="admin-sub">Бот поддержки</div>
+      <form class="inline-form" id="admin-support-bot" autocomplete="off">
+        <input class="field" id="sb-token" type="password" placeholder="Токен из @BotFather" />
+        <button class="btn-chip" type="submit">Подключить</button>
+      </form>
+      <div class="muted admin-hint" id="sb-status"></div>
+
       <form class="inline-form" id="admin-find" autocomplete="off">
         <input class="field" id="admin-q" placeholder="@username или Telegram ID" />
         <button class="btn-chip" type="submit">Найти</button>
@@ -1540,7 +1547,26 @@ async function bindAdminPanel(root) {
       ? `Подписка на ${st.required_channel} обязательна · кейс раз в ${st.free_case_cooldown_hours} ч`
       : `Без обязательной подписки · кейс раз в ${st.free_case_cooldown_hours} ч`;
     panel.querySelector('#s-status').textContent += ` · 1 ⭐ = ${st.stars_rate} B, код +${st.stars_code_bonus_percent}%`;
+    const sb = panel.querySelector('#sb-status');
+    sb.innerHTML = st.support_bot
+      ? `✅ Подключён <b>@${escapeHtml(st.support_bot)}</b> — игроки пишут туда, обращения приходят тебе в этот бот, отвечай реплаем. Нажми в нём /start. <button class="btn-chip ghost danger" id="sb-off">Отключить</button>`
+      : 'Создай бота в @BotFather (/newbot) и вставь его токен. Пока не подключён — поддержка работает в основном боте.';
+    const off = sb.querySelector('#sb-off');
+    if (off) off.addEventListener('click', () => saveSupportBot(''));
   };
+  const saveSupportBot = async (token) => {
+    try {
+      paintSettings(await api('/api/admin/settings', { method: 'POST', body: JSON.stringify({ support_bot_token: token }) }));
+      panel.querySelector('#sb-token').value = '';
+      toast(token ? 'Бот поддержки подключён' : 'Бот поддержки отключён', 'success');
+    } catch (err) { toast(err.message, 'error'); }
+  };
+  panel.querySelector('#admin-support-bot').addEventListener('submit', (e) => {
+    e.preventDefault();
+    const token = panel.querySelector('#sb-token').value.trim();
+    if (!token) { toast('Вставь токен бота', 'error'); return; }
+    saveSupportBot(token);
+  });
   api('/api/admin/settings').then(paintSettings).catch(() => {});
   settingsForm.addEventListener('submit', async (e) => {
     e.preventDefault();

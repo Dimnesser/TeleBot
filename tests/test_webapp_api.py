@@ -814,6 +814,13 @@ async def test_support_link(client, auth_headers) -> None:
     assert body["url"].startswith("https://t.me/") and body["url"].endswith("?start=support")
 
 
+async def test_support_bot_token_validation(client, admin_headers) -> None:
+    r = await client.post("/api/admin/settings", headers=admin_headers, json={"support_bot_token": "nonsense"})
+    assert r.status == 400 and (await r.json())["error"] == "bad_token"
+    r = await client.post("/api/admin/settings", headers=admin_headers, json={"support_bot_token": ""})
+    assert r.status == 200 and (await r.json())["support_bot"] is None
+
+
 async def test_stars_no_upper_limit(client, auth_headers) -> None:
     r = await client.post("/api/deposit/stars/quote", headers=auth_headers, json={"amount": 5_000_000})
     assert r.status == 200 and (await r.json())["credited"] == 8_750_000

@@ -15,6 +15,7 @@ from aiohttp import web
 from sqlalchemy import select
 
 from bot.config import config, is_admin
+from bot import support_bot
 from bot.data.brainrot_roster import (
     RARITY_COLOR,
     RARITY_LABEL,
@@ -1249,7 +1250,11 @@ _bot_username: str | None = None
 
 @routes.get("/api/support")
 async def get_support(request: web.Request) -> web.Response:
-    """Ссылка на чат поддержки в боте (t.me/<бот>?start=support)."""
+    """Ссылка на поддержку: отдельный бот, если подключён, иначе
+    чат поддержки в основном боте (t.me/<бот>?start=support)."""
+    support_bot = await settings_service.get_setting(request["session"], settings_service.SUPPORT_BOT_USERNAME)
+    if support_bot:
+        return web.json_response({"url": f"https://t.me/{support_bot}?start=support"})
     global _bot_username
     if _bot_username is None:
         _bot_username = (await request.app["bot"].get_me()).username
@@ -1394,6 +1399,7 @@ async def get_admin_settings(request: web.Request) -> web.Response:
         "required_channel": await settings_service.required_channel(session),
         "free_case_cooldown_hours": await settings_service.free_case_cooldown_hours(session),
         "support_url": await settings_service.get_setting(session, settings_service.SUPPORT_URL),
+        "support_bot": await settings_service.get_setting(session, settings_service.SUPPORT_BOT_USERNAME),
         "stars_rate": await stars_service.rate(session),
         "stars_code_bonus_percent": await stars_service.code_bonus(session),
     })
@@ -1435,6 +1441,22 @@ async def post_admin_settings(request: web.Request) -> web.Response:
         except ValueError:
             return web.json_response({"error": "bad_link", "message": "Поддержка: @username или https-ссылка"}, status=400)
         await settings_service.set_setting(session, settings_service.SUPPORT_URL, support)
+    if "support_bot_token" in body:
+        token = str(body.get("support_bot_token") or "").strip()
+        if token:
+            try:
+                username = await support_bot.check_token(token)
+            except support_bot.BadToken:
+                return web.json_response({"error": "bad_token", "message": "Токен не подошёл — скопируй его из @BotFather целиком"}, status=400)
+            if token == config.bot_token:
+                return web.json_response({"error": "bad_token", "message": "Это токен основного бота — нужен токен нового бота поддержки"}, status=400)
+            await settings_service.set_setting(session, settings_service.SUPPORT_BOT_TOKEN, token)
+            await settings_service.set_setting(session, settings_service.SUPPORT_BOT_USERNAME, username)
+            await support_bot.start(token)
+        else:  # пусто — отключить отдельного бота, поддержка снова в основном
+            await settings_service.set_setting(session, settings_service.SUPPORT_BOT_TOKEN, None)
+            await settings_service.set_setting(session, settings_service.SUPPORT_BOT_USERNAME, None)
+            await support_bot.stop()
     if "free_case_cooldown_hours" in body:
         hours = _num(body.get("free_case_cooldown_hours"))
         if hours is None or not 0 < hours <= 24 * 7:

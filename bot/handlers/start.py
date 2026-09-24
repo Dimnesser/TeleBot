@@ -49,9 +49,10 @@ async def handle_start(message: Message, state: FSMContext) -> None:
             except PartnerError:
                 pass
         news_url = settings_service.channel_url(await settings_service.required_channel(session))
+        support_bot = await settings_service.get_setting(session, settings_service.SUPPORT_BOT_USERNAME)
 
     await message.answer_photo(
         FSInputFile(WELCOME_BANNER),
         caption=START_CAPTION + partner_note,
-        reply_markup=welcome_keyboard(news_url),
+        reply_markup=welcome_keyboard(news_url, support_bot),
     )
