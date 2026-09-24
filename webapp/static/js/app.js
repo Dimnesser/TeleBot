@@ -1148,7 +1148,7 @@ function paintInventory(root, items) {
       ${brainrotArt(i)}
       <div class="inv-name">${escapeHtml(i.name)}</div>
       <div class="inv-value">${fmt(i.value)}${coinIcon()}</div>
-      <button class="inv-sell-btn" data-sell="${i.id}" data-payout="${Math.round(i.value * 0.9)}">Продать · ${Math.round(i.value * 0.9)}${coinIcon()}</button>
+      <button class="inv-sell-btn" data-sell="${i.id}" data-payout="${i.value}">Продать · ${i.value}${coinIcon()}</button>
       <div class="inv-actions">
         <button class="inv-act" data-wd="${i.id}">Вывести</button>
         <button class="inv-act" data-ex="${i.id}">Обменять</button>

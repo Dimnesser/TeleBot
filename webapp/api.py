@@ -288,7 +288,7 @@ async def get_inventory(request: web.Request) -> web.Response:
     return web.json_response([_inventory_item_json(i) for i in items[:limit]])
 
 
-SELL_RATE = 0.9  # 10% комиссии — иначе открыть кейс и тут же продать дроп было бы безрисковым арбитражем
+SELL_RATE = 1.0  # без комиссии: продажа по полной цене (кейсы и так с RTP < 100%)
 
 
 @routes.post("/api/inventory/{item_id}/sell")

@@ -157,7 +157,7 @@ async def test_inventory_sell(client, auth_headers) -> None:
     assert r.status == 200
     body = await r.json()
     assert body["sold_name"] == won["name"]
-    assert body["payout"] == round(won["value"] * 0.9)
+    assert body["payout"] == won["value"]
     assert body["balance"] == tokens_before + body["payout"]
 
     r = await client.get("/api/inventory", headers=auth_headers)
