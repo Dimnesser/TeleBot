@@ -50,10 +50,7 @@ from bot.services.giveaway_service import resolve_all_expired
 from bot.services.staking_service import MIN_STAKE_AMOUNT, STAKE_TIERS, is_matured, payout_amount, tier_by_term
 from bot.services.upgrader_service import chance_percent, roll_success
 from bot.utils.texts import FAQ_ENTRIES
-from webapp.crash_runtime import cashout as crash_cashout
-from webapp.crash_runtime import history_label as crash_history_label
-from webapp.crash_runtime import poll_state as crash_poll_state
-from webapp.crash_runtime import start_round as crash_start_round
+from webapp import crash_runtime as crash_rt
 
 routes = web.RouteTableDef()
 
@@ -369,12 +366,15 @@ async def get_upgrader_targets(request: web.Request) -> web.Response:
     items = await list_known_items(session)
     # Только брейнроты ростера: в «известных предметах» есть ещё гирсы из
     # обменника (Santas Sleigh и т.п.) — они не персонажи и без картинок.
-    # Цели — только брейнроты ростера с честным шансом не ниже порога
-    # (по умолчанию 75%): цель стоит не дороже вклад / 0.75.
-    max_value = min_value * 100 / config.upgrader_min_target_chance_percent if min_value else float("inf")
+    # Цели — брейнроты ростера с честным шансом от 75% вниз до 1%:
+    # цель дороже вклада минимум в 100/75 раза и максимум в 100 раз.
+    if min_value:
+        low, high = min_value * 100 / config.upgrader_max_target_chance_percent, min_value * 100
+    else:
+        low, high = 0, float("inf")
     eligible = [
         i for i in items
-        if min_value < i.value <= max_value and i.name != exclude_name and i.name in ROSTER_BY_NAME
+        if i.value > min_value and low <= i.value <= high and i.name != exclude_name and i.name in ROSTER_BY_NAME
     ]
     payload = []
     for i in eligible:
@@ -402,8 +402,9 @@ async def post_upgrader_spin(request: web.Request) -> web.Response:
     known = {i.name: i.value for i in await list_known_items(session) if i.name in ROSTER_BY_NAME}
     if target_name not in known or known[target_name] <= item.value:
         return web.json_response({"error": "invalid_target"}, status=400)
-    if item.value * 100 < known[target_name] * config.upgrader_min_target_chance_percent:
-        return web.json_response({"error": "target_too_expensive"}, status=400)
+    raw_chance = item.value * 100 / known[target_name]
+    if not 1 <= raw_chance <= config.upgrader_max_target_chance_percent:
+        return web.json_response({"error": "target_out_of_range"}, status=400)
     target_value = known[target_name]
 
     chance = chance_percent(item.value, target_value)
@@ -434,35 +435,38 @@ async def post_upgrader_spin(request: web.Request) -> web.Response:
 # ------------------------------------------------------------------------ краш
 
 
+def _crash_payload(round_) -> dict:
+    """Состояние краша для клиента. Точка взрыва раскрывается только после
+    того, как раунд завершился."""
+    payload = {
+        "history": crash_rt.history(),
+        "growth_per_sec": crash_rt.growth_per_sec(),
+        "max_multiplier": config.crash_max_multiplier,
+        "active": False,
+    }
+    if round_ is None:
+        return payload
+    payload["stake"] = _brainrot_json(round_.item_name, round_.item_value)
+    payload["ladder"] = [
+        {**_brainrot_json(step["name"], step["value"]), "at": step["at"]}
+        for step in crash_rt.prize_ladder(round_.item_name, round_.item_value)
+    ]
+    if round_.outcome is None:
+        payload["active"] = True
+        payload["elapsed"] = round(round_.elapsed, 3)
+    else:
+        payload["result"] = {
+            "outcome": round_.outcome,
+            "multiplier": round_.final_multiplier,
+            "crash_point": round_.crash_point,
+            "prize": _brainrot_json(*round_.prize) if round_.prize else None,
+        }
+    return payload
+
+
 @routes.get("/api/crash/state")
 async def get_crash_state(request: web.Request) -> web.Response:
-    user = request["user"]
-    state = crash_poll_state(user.tg_id)
-    if state is None:
-        return web.json_response({"active": False, "history": crash_history_label()})
-
-    round_, mult, crashed = state
-    return web.json_response(
-        {
-            "active": not crashed,
-            "crashed": crashed,
-            "multiplier": mult,
-            "stake": _brainrot_json(round_.item_name, round_.item_value),
-            "history": crash_history_label(),
-            **_crash_curve(round_),
-        }
-    )
-
-
-def _crash_curve(round_) -> dict:
-    """Параметры кривой множителя — клиент рисует её плавно по той же
-    формуле, что и сервер (bot.services.crash_service.multiplier_at)."""
-    return {
-        "elapsed": round(time.monotonic() - round_.start_time, 3),
-        "tick_seconds": config.crash_tick_seconds,
-        "growth_rate": config.crash_growth_rate,
-        "max_multiplier": config.crash_max_multiplier,
-    }
+    return web.json_response(_crash_payload(crash_rt.poll(request["user"].tg_id)))
 
 
 @routes.post("/api/crash/start")
@@ -472,8 +476,7 @@ async def post_crash_start(request: web.Request) -> web.Response:
     item_id = body.get("item_id")
     if not item_id:
         return web.json_response({"error": "missing_item"}, status=400)
-
-    if crash_poll_state(user.tg_id) is not None:
+    if crash_rt.is_flying(user.tg_id):
         return web.json_response({"error": "already_running"}, status=400)
 
     item = await inventory_repo.get_by_id(session, int(item_id))
@@ -482,25 +485,21 @@ async def post_crash_start(request: web.Request) -> web.Response:
 
     item_name, item_value = item.item_name, item.value
     await inventory_repo.delete(session, item)
-    round_ = crash_start_round(user.tg_id, item_name, item_value)
-
-    return web.json_response(
-        {"active": True, "multiplier": 1.0, "stake": _brainrot_json(item_name, item_value), **_crash_curve(round_)}
-    )
+    round_ = crash_rt.start_round(user.tg_id, item_name, item_value)
+    return web.json_response(_crash_payload(round_))
 
 
 @routes.post("/api/crash/cashout")
 async def post_crash_cashout(request: web.Request) -> web.Response:
     session, user = request["session"], request["user"]
-    result = crash_cashout(user.tg_id)
-    if result is None:
-        return web.json_response({"error": "no_active_round_or_crashed"}, status=400)
-
-    round_, mult = result
-    winnings = round(round_.item_value * mult)
-    await inventory_repo.add_items(session, user, "Краш", [(round_.item_name, winnings)])
-
-    return web.json_response({"multiplier": mult, "won_item": _brainrot_json(round_.item_name, winnings)})
+    round_ = crash_rt.cashout(user.tg_id)
+    if round_ is None:
+        return web.json_response(
+            {"error": "no_active_round_or_crashed", **_crash_payload(crash_rt.poll(user.tg_id))}, status=400
+        )
+    prize_name, prize_value = round_.prize
+    await inventory_repo.add_items(session, user, "Краш", [(prize_name, prize_value)])
+    return web.json_response(_crash_payload(round_))
 
 
 # ----------------------------------------------------------------------- дайсы

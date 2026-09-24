@@ -235,14 +235,24 @@ async def test_crash_start_state_cashout(client, auth_headers) -> None:
 
     r = await client.get("/api/crash/state", headers=auth_headers)
     state = await r.json()
-    assert state["active"] or state["crashed"]
+    assert state["active"] or state["result"]["outcome"] == "crashed"
+    assert state["stake"]["name"] == item["name"]
 
     if state["active"]:
         r = await client.post("/api/crash/cashout", headers=auth_headers)
         assert r.status == 200
+        body = await r.json()
+        assert body["result"]["outcome"] == "cashed"
+        prize = body["result"]["prize"]
+        assert prize["value"] >= item["value"]  # приз не хуже ставки
+        inventory = await (await client.get("/api/inventory", headers=auth_headers)).json()
+        assert inventory[0]["name"] == prize["name"]
 
-    r = await client.get("/api/crash/state", headers=auth_headers)
-    assert (await r.json())["active"] is False
+    # итог раунда не теряется между опросами
+    for _ in range(2):
+        r = await client.get("/api/crash/state", headers=auth_headers)
+        again = await r.json()
+        assert again["active"] is False and again["result"]["outcome"] in ("crashed", "cashed")
 
 
 async def test_dice_roll(client, auth_headers) -> None:
@@ -348,10 +358,10 @@ async def test_upgrader_rejects_unknown_target(client, auth_headers) -> None:
     assert len(await (await client.get("/api/inventory", headers=auth_headers)).json()) == 1
 
 
-async def test_upgrader_targets_only_with_chance_at_least_75(client, auth_headers) -> None:
+async def test_upgrader_targets_chance_between_75_and_1(client, auth_headers) -> None:
     r = await client.get("/api/upgrader/targets?min_value=300", headers=auth_headers)
     targets = await r.json()
-    assert targets, "в ростере есть брейнроты в диапазоне 300..400"
+    assert targets
     for t in targets:
-        assert 300 < t["value"] <= 400
-        assert t["chance_percent"] >= 75
+        assert 400 <= t["value"] <= 30000
+        assert 1 <= t["chance_percent"] <= 75

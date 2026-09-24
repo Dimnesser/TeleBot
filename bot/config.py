@@ -26,8 +26,8 @@ class Config:
     # Апгрейдер: шанс всегда режется в этот диапазон, чтобы не было 0%/100% исходов.
     upgrader_min_chance_percent: int = int(os.getenv("UPGRADER_MIN_CHANCE_PERCENT", "1"))
     # Mini App: в список целей апгрейдера попадают только брейнроты, для
-    # которых честный шанс (вклад / цель) не ниже этого порога.
-    upgrader_min_target_chance_percent: int = int(os.getenv("UPGRADER_MIN_TARGET_CHANCE_PERCENT", "75"))
+    # которых честный шанс (вклад / цель) — от этого порога вниз до 1%.
+    upgrader_max_target_chance_percent: int = int(os.getenv("UPGRADER_MAX_TARGET_CHANCE_PERCENT", "75"))
     upgrader_max_chance_percent: int = int(os.getenv("UPGRADER_MAX_CHANCE_PERCENT", "95"))
     # Краш: интервал тика анимации, скорость роста множителя, safety-cap по времени.
     crash_tick_seconds: float = float(os.getenv("CRASH_TICK_SECONDS", "1.2"))
@@ -35,6 +35,8 @@ class Config:
     crash_max_duration_seconds: float = float(os.getenv("CRASH_MAX_DURATION_SECONDS", "30"))
     crash_house_edge: float = float(os.getenv("CRASH_HOUSE_EDGE", "0.97"))
     crash_max_multiplier: float = float(os.getenv("CRASH_MAX_MULTIPLIER", "100"))
+    # Краш в Mini App: множитель = e^(k·t); k=0.1 → ×2 за ~7с, ×10 за ~23с.
+    webapp_crash_growth_per_sec: float = float(os.getenv("WEBAPP_CRASH_GROWTH_PER_SEC", "0.1"))
     # Дайсы: шанс отдельного бонус-события (rainbow) поверх таблицы совпадений.
     dice_bonus_chance_percent: float = float(os.getenv("DICE_BONUS_CHANCE_PERCENT", "3"))
     dice_bonus_multiplier: float = float(os.getenv("DICE_BONUS_MULTIPLIER", "10"))

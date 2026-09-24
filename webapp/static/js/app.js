@@ -894,7 +894,7 @@ async function renderUpgraderScreen(root) {
       <div class="upg-slots">
         ${slot(contribution, 'Твой брейнрот', 'slot-contribution')}
         <div class="upg-arrow">➜</div>
-        ${slot(target, 'Цель · шанс от 75%', 'slot-target')}
+        ${slot(target, 'Цель · шанс 75%…1%', 'slot-target')}
       </div>
     </div>
     <div id="upg-actions">
@@ -911,13 +911,13 @@ async function renderUpgraderScreen(root) {
   root.querySelector('#slot-contribution').addEventListener('click', async () => {
     if (upgraderSpinning) return;
     const [items, all] = await Promise.all([api('/api/inventory?limit=200'), api('/api/upgrader/targets?min_value=0')]);
-    // Вклад без хотя бы одной цели с шансом от 75% выбрать нельзя — иначе
+    // Вклад без хотя бы одной цели с шансом 1–75% выбрать нельзя — иначе
     // игрок упрётся в пустой список целей.
-    const hasTarget = (v) => all.some((t) => t.value > v && v * 100 >= t.value * 75);
+    const hasTarget = (v) => all.some((t) => t.value * 75 >= v * 100 && t.value <= v * 100);
     openBrainrotPicker('Твой брейнрот', items.slice().sort((a, b) => b.value - a.value),
       'Инвентарь пуст — сначала открой кейс.',
       (item) => { upgraderState = { contribution: item, target: null }; renderUpgraderScreen(root); },
-      (b) => (hasTarget(b.value) ? null : 'нет целей 75%+'));
+      (b) => (hasTarget(b.value) ? null : 'нет целей'));
   });
   root.querySelector('#slot-target').addEventListener('click', async () => {
     if (upgraderSpinning) return;
@@ -925,7 +925,7 @@ async function renderUpgraderScreen(root) {
     if (!c) { toast('Сначала выбери своего брейнрота', 'error'); return; }
     const targets = await api(`/api/upgrader/targets?min_value=${c.value}&exclude_name=${encodeURIComponent(c.name)}`);
     openBrainrotPicker('Во что прокачать', targets,
-      'Для этого брейнрота нет целей с шансом от 75% — выбери другого.',
+      'Для этого брейнрота нет целей с шансом 75%…1% — выбери другого.',
       (t) => { upgraderState.target = t; renderUpgraderScreen(root); });
   });
   root.querySelector('#btn-reset').addEventListener('click', () => {
@@ -1047,122 +1047,235 @@ function openTargetPicker(targets, onPick) {
 }
 
 // =================================================================== КРАШ
+//
+// Вся сцена — один <canvas> (звёзды, сетка, кривая, ракета), поверх — DOM с
+// множителем. Кривая e^(k·t) считается на клиенте по той же формуле, что на
+// сервере; сервер опрашивается только ради момента взрыва. Отображаемое
+// время отстаёт от реального на CRASH_DISPLAY_LAG — к моменту, когда график
+// доходит до точки взрыва, ответ сервера о взрыве обычно уже получен, и
+// множитель не «перескакивает» назад.
 
-let crashPollTimer = null;
-let crashRaf = 0;
-let crashFx = null;
+const CRASH_DISPLAY_LAG = 0.3;
+const CRASH_POLL_MS = 250;
+let crashLoop = null;
 
 function stopCrashLoops() {
-  clearInterval(crashPollTimer);
-  cancelAnimationFrame(crashRaf);
-  if (crashFx) { crashFx.stop(); crashFx = null; }
+  if (crashLoop) { crashLoop.stop(); crashLoop = null; }
 }
 
-function crashMultiplierAt(curve, seconds) {
-  return Math.min(Math.pow(1 + curve.growth_rate, seconds / curve.tick_seconds), curve.max_multiplier);
+function crashMult(state, t) {
+  return Math.min(Math.exp(state.growth_per_sec * Math.max(0, t)), state.max_multiplier);
 }
 
-const ROCKET_SVG = `
-  <svg viewBox="0 0 64 64" class="rocket-svg" aria-hidden="true">
-    <g class="rocket-flame"><path d="M8 32 Q-6 26 -14 32 Q-6 38 8 32Z" fill="#ffb02e"/><path d="M8 32 Q0 29 -6 32 Q0 35 8 32Z" fill="#fff6c4"/></g>
-    <path d="M10 24 L30 24 Q50 24 58 32 Q50 40 30 40 L10 40 Z" fill="#eef1f8"/>
-    <path d="M30 24 Q50 24 58 32 L44 32 Q40 26 30 24Z" fill="#fff" opacity=".7"/>
-    <circle cx="38" cy="32" r="5" fill="#1a1d2b" stroke="#c6ff3d" stroke-width="2.4"/>
-    <path d="M14 24 L6 14 L20 24Z M14 40 L6 50 L20 40Z" fill="#c6ff3d"/>
-    <rect x="8" y="27" width="4" height="10" rx="1.5" fill="#9aa3b8"/>
-  </svg>`;
+function currentPrize(state, mult) {
+  // Лучшая ступень лестницы, доступная при этом множителе (иначе — сама ставка).
+  let prize = state.stake, next = null;
+  for (const step of state.ladder || []) {
+    if (step.at <= mult) prize = step;
+    else { next = step; break; }
+  }
+  return { prize, next };
+}
 
 async function renderCrashScreen(root) {
   stopCrashLoops();
   const state = await api('/api/crash/state');
-  const history = (state.history || '').split(',').map((h) => h.trim()).filter((h) => /\d/.test(h));
   root.innerHTML = `
     <div class="section-title">КРАШ</div>
-    <div class="crash-history">
-      <span class="crash-history-label">Прошлые</span>
-      ${history.slice(-12).reverse().map((h) => {
-        const v = parseFloat(h);
-        return `<span class="crash-chip ${v >= 3 ? 'hi' : v >= 1.5 ? 'mid' : 'lo'}">${v.toFixed(2)}×</span>`;
-      }).join('') || '<span class="crash-chip">—</span>'}
-    </div>
+    <div class="crash-history" id="crash-history"></div>
     <div class="crash-board" id="crash-board">
-      <div class="crash-stars s1"></div><div class="crash-stars s2"></div>
-      <div class="crash-yaxis" id="crash-yaxis"></div>
-      <svg class="crash-graph" id="crash-graph" viewBox="0 0 300 180" preserveAspectRatio="none">
-        <defs>
-          <linearGradient id="crashStroke" x1="0" y1="1" x2="1" y2="0"><stop offset="0" stop-color="#5dffb0"/><stop offset=".6" stop-color="#c6ff3d"/><stop offset="1" stop-color="#ffd24d"/></linearGradient>
-          <linearGradient id="crashFill" x1="0" y1="0" x2="0" y2="1"><stop offset="0" stop-color="#c6ff3d" stop-opacity=".28"/><stop offset="1" stop-color="#c6ff3d" stop-opacity="0"/></linearGradient>
-        </defs>
-        <path id="crash-area" fill="url(#crashFill)" d=""/>
-        <path id="crash-line" class="crash-line" d=""/>
-      </svg>
-      <div class="crash-rocket" id="crash-rocket">${ROCKET_SVG}</div>
+      <canvas class="crash-canvas" id="crash-canvas"></canvas>
       <canvas class="crash-fx" id="crash-fx"></canvas>
       <div class="crash-readout">
         <div class="crash-mult" id="crash-mult">1.00×</div>
         <div class="crash-status" id="crash-status">ГОТОВ К СТАРТУ</div>
       </div>
     </div>
-    <div id="crash-stake"></div>
+    <div id="crash-prize"></div>
     <div id="crash-actions"></div>
   `;
-  crashFx = CaseArt.particles(root.querySelector('#crash-fx'), 'none', ['#ff4d6d', '#ffb02e']);
-  placeRocketIdle(root);
-  paintCrashControls(root, state);
+  paintCrashHistory(root, state.history);
+  crashLoop = createCrashScene(root);
   if (state.active) runCrashRound(root, state);
+  else paintCrashIdle(root, state);
 }
 
-function placeRocketIdle(root) {
-  const rocket = root.querySelector('#crash-rocket');
-  rocket.style.left = '14%'; rocket.style.top = '80%';
-  rocket.style.transform = 'translate(-50%,-50%) rotate(-12deg)';
-  rocket.classList.add('idle');
+function paintCrashHistory(root, history) {
+  const el = root.querySelector('#crash-history');
+  if (!el) return;
+  el.innerHTML = `<span class="crash-history-label">Прошлые</span>` + ((history || []).slice().reverse().map((v) =>
+    `<span class="crash-chip ${v >= 3 ? 'hi' : v >= 1.5 ? 'mid' : 'lo'}">${Number(v).toFixed(2)}×</span>`).join('') || '<span class="crash-chip">—</span>');
 }
 
-function paintCrashControls(root, state, pickedItem = null) {
-  const stake = state.active ? state.stake : pickedItem;
-  root.querySelector('#crash-stake').innerHTML = stake ? `
-    <div class="stake-card" style="${glowVars(stake)}">
-      ${brainrotArt(stake)}
-      <div><div class="stake-name">${escapeHtml(stake.name)}</div><div class="stake-value">Ставка · ${fmt(stake.value)} 🎫</div></div>
+/** Канвас-сцена: звёзды летят со скоростью от множителя, кривая и ракета. */
+function createCrashScene(root) {
+  const canvas = root.querySelector('#crash-canvas');
+  const ctx = canvas.getContext('2d');
+  const fx = CaseArt.particles(root.querySelector('#crash-fx'), 'none', ['#fff', '#fff']);
+  const dpr = Math.min(window.devicePixelRatio || 1, 2);
+  let w = 0, h = 0, raf = 0, running = true;
+  const stars = Array.from({ length: 70 }, () => ({ x: Math.random(), y: Math.random(), z: 0.3 + Math.random() * 0.7 }));
+  const scene = { mode: 'idle', mult: 1, t: 0, state: null, color: '#c6ff3d' };
+
+  function resize() {
+    const r = canvas.getBoundingClientRect();
+    w = r.width; h = r.height;
+    canvas.width = Math.round(w * dpr); canvas.height = Math.round(h * dpr);
+    ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
+  }
+  resize();
+  const ro = window.ResizeObserver ? new ResizeObserver(resize) : null;
+  if (ro) ro.observe(canvas);
+
+  const pad = { l: 44, r: 18, t: 20, b: 22 };
+  let last = performance.now();
+
+  function frame(now) {
+    if (!running) return;
+    const dt = Math.min(0.05, (now - last) / 1000); last = now;
+    ctx.clearRect(0, 0, w, h);
+
+    // звёзды
+    const speed = scene.mode === 'flying' ? 0.04 + Math.min(0.5, (scene.mult - 1) * 0.06) : 0.01;
+    for (const s of stars) {
+      s.x -= speed * s.z * dt * 3; s.y += speed * s.z * dt * 1.5;
+      if (s.x < 0) s.x += 1; if (s.y > 1) s.y -= 1;
+      ctx.globalAlpha = 0.25 + s.z * 0.55;
+      ctx.fillStyle = '#dfe4ff';
+      ctx.fillRect(s.x * w, s.y * h, s.z * 1.6, s.z * 1.6);
+    }
+    ctx.globalAlpha = 1;
+
+    const gw = w - pad.l - pad.r, gh = h - pad.t - pad.b;
+    const t = scene.t;
+    const spanT = Math.max(10, t * 1.12);
+    const top = Math.max(2, 1 + (scene.mult - 1) * 1.3);
+    const X = (tt) => pad.l + (tt / spanT) * gw;
+    const Y = (m) => pad.t + gh - ((m - 1) / (top - 1)) * gh;
+
+    // сетка и шкала
+    ctx.strokeStyle = 'rgba(255,255,255,.06)'; ctx.lineWidth = 1;
+    ctx.fillStyle = 'rgba(255,255,255,.35)'; ctx.font = '600 10px Manrope, sans-serif'; ctx.textAlign = 'right'; ctx.textBaseline = 'middle';
+    for (let i = 0; i <= 4; i++) {
+      const m = 1 + ((top - 1) * i) / 4, y = Y(m);
+      ctx.beginPath(); ctx.moveTo(pad.l, y); ctx.lineTo(w - pad.r, y); ctx.stroke();
+      ctx.fillText(m.toFixed(m < 10 ? 1 : 0) + '×', pad.l - 8, y);
+    }
+
+    if (scene.state && scene.mode !== 'idle') {
+      // кривая
+      const pts = [];
+      const n = 60;
+      for (let i = 0; i <= n; i++) { const tt = (t * i) / n; pts.push([X(tt), Y(crashMult(scene.state, tt))]); }
+      const grad = ctx.createLinearGradient(pad.l, h, w, 0);
+      if (scene.mode === 'crashed') { grad.addColorStop(0, '#ff4d6d'); grad.addColorStop(1, '#ff8a5c'); }
+      else { grad.addColorStop(0, '#5dffb0'); grad.addColorStop(0.6, '#c6ff3d'); grad.addColorStop(1, '#ffd24d'); }
+      ctx.beginPath(); ctx.moveTo(pts[0][0], pad.t + gh);
+      pts.forEach(([x, y]) => ctx.lineTo(x, y));
+      ctx.lineTo(pts[n][0], pad.t + gh); ctx.closePath();
+      const fill = ctx.createLinearGradient(0, pad.t, 0, pad.t + gh);
+      fill.addColorStop(0, scene.mode === 'crashed' ? 'rgba(255,77,109,.22)' : 'rgba(198,255,61,.22)'); fill.addColorStop(1, 'rgba(0,0,0,0)');
+      ctx.fillStyle = fill; ctx.fill();
+      ctx.beginPath(); pts.forEach(([x, y], i) => (i ? ctx.lineTo(x, y) : ctx.moveTo(x, y)));
+      ctx.strokeStyle = grad; ctx.lineWidth = 3.5; ctx.lineCap = 'round'; ctx.lineJoin = 'round';
+      ctx.shadowColor = scene.mode === 'crashed' ? '#ff4d6d' : '#c6ff3d'; ctx.shadowBlur = 12; ctx.stroke(); ctx.shadowBlur = 0;
+
+      // ракета на кончике, по касательной
+      if (scene.mode !== 'crashed') {
+        const [x1, y1] = pts[n - 3], [x2, y2] = pts[n];
+        const ang = Math.max(-1.2, Math.min(0, Math.atan2(y2 - y1, x2 - x1)));
+        drawRocket(ctx, x2, y2, ang, now, scene.mode === 'flying');
+      }
+      scene.tip = pts[n];
+    } else {
+      // ракета ждёт на старте
+      const bob = Math.sin(now / 400) * 3;
+      drawRocket(ctx, pad.l + 18, pad.t + gh - 10 + bob, -0.35, now, false);
+      scene.tip = [pad.l + 18, pad.t + gh - 10];
+    }
+    raf = requestAnimationFrame(frame);
+  }
+  raf = requestAnimationFrame(frame);
+
+  return {
+    scene,
+    burst(color, power) { if (scene.tip) fx.burst(scene.tip[0], scene.tip[1], color, power); },
+    stop() { running = false; cancelAnimationFrame(raf); if (ro) ro.disconnect(); fx.stop(); if (scene.poll) clearInterval(scene.poll); },
+  };
+}
+
+function drawRocket(ctx, x, y, ang, now, burning) {
+  ctx.save();
+  ctx.translate(x, y); ctx.rotate(ang);
+  // пламя
+  const f = burning ? 1 + Math.sin(now / 45) * 0.25 : 0.45;
+  const flame = ctx.createLinearGradient(-34 * f, 0, -8, 0);
+  flame.addColorStop(0, 'rgba(255,90,40,0)'); flame.addColorStop(0.5, '#ff8a2e'); flame.addColorStop(1, '#fff3b0');
+  ctx.fillStyle = flame;
+  ctx.beginPath(); ctx.moveTo(-8, -5); ctx.quadraticCurveTo(-34 * f, 0, -8, 5); ctx.closePath(); ctx.fill();
+  // корпус
+  ctx.fillStyle = '#eef1f8';
+  ctx.beginPath(); ctx.moveTo(-10, -7); ctx.lineTo(8, -7); ctx.quadraticCurveTo(22, -6, 26, 0); ctx.quadraticCurveTo(22, 6, 8, 7); ctx.lineTo(-10, 7); ctx.closePath(); ctx.fill();
+  ctx.fillStyle = '#c6ff3d';
+  ctx.beginPath(); ctx.moveTo(-6, -7); ctx.lineTo(-13, -15); ctx.lineTo(1, -7); ctx.closePath(); ctx.fill();
+  ctx.beginPath(); ctx.moveTo(-6, 7); ctx.lineTo(-13, 15); ctx.lineTo(1, 7); ctx.closePath(); ctx.fill();
+  ctx.fillStyle = '#1a1d2b'; ctx.strokeStyle = '#c6ff3d'; ctx.lineWidth = 2;
+  ctx.beginPath(); ctx.arc(10, 0, 3.6, 0, Math.PI * 2); ctx.fill(); ctx.stroke();
+  ctx.restore();
+}
+
+function prizeCardHtml(label, b, extra = '') {
+  return `
+    <div class="prize-card" style="${glowVars(b)}">
+      ${brainrotArt(b)}
+      <div class="prize-body">
+        <div class="prize-label">${label}</div>
+        <div class="prize-name">${escapeHtml(b.name)}</div>
+        <div class="prize-value">${fmt(b.value)} 🎫</div>
+        ${extra}
+      </div>
+    </div>`;
+}
+
+function paintCrashIdle(root, state, picked = null) {
+  const scene = crashLoop.scene;
+  scene.mode = 'idle'; scene.t = 0; scene.mult = 1; scene.state = null;
+  root.querySelector('#crash-board').className = 'crash-board';
+  root.querySelector('#crash-mult').textContent = '1.00×';
+  root.querySelector('#crash-status').textContent = 'ГОТОВ К СТАРТУ';
+  root.querySelector('#crash-prize').innerHTML = picked ? `
+    <div class="ladder-preview">
+      <div class="ladder-title">Чем выше ×, тем лучше брейнрот</div>
+      <div class="ladder-row">${(picked.ladder || []).slice(0, 12).map((s) => `
+        <div class="ladder-step" style="${glowVars(s)}">${brainrotArt(s)}<span>×${s.at.toFixed(2)}</span></div>`).join('') || '<span class="muted">Это уже самый дорогой брейнрот — забирай его назад на любом ×</span>'}</div>
     </div>` : '';
   const actions = root.querySelector('#crash-actions');
-  if (state.active) {
-    actions.innerHTML = `<button class="open-btn" id="btn-crash-cashout" style="--c1:#ffd24d;--c2:#ff9d2e"><span class="open-btn-shine"></span><span class="open-btn-label">Забрать</span><span class="open-btn-price" id="crash-cash-value">—</span></button>`;
-    actions.querySelector('#btn-crash-cashout').addEventListener('click', async (e) => {
-      const btn = e.currentTarget;
-      btn.disabled = true;
-      try {
-        const res = await api('/api/crash/cashout', { method: 'POST' });
-        endCrashRound(root, 'cashed', res.multiplier, res.won_item);
-      } catch (err) {
-        toast('Не успел — ракета уже взорвалась', 'error');
-      }
-    });
-    return;
-  }
   actions.innerHTML = `
-    <button class="stake-card stake-pick" id="btn-crash-pick" style="${pickedItem ? glowVars(pickedItem) : ''}">
-      ${pickedItem ? `${brainrotArt(pickedItem)}<div><div class="stake-name">${escapeHtml(pickedItem.name)}</div><div class="stake-value">Ставка · ${fmt(pickedItem.value)} 🎫</div></div><span class="stake-change">Сменить</span>`
-                   : `<div class="upg-slot-plus">+</div><div><div class="stake-name">Выбери брейнрота</div><div class="stake-value">Он полетит на ракете</div></div>`}
+    <button class="stake-card stake-pick" id="btn-crash-pick" style="${picked ? glowVars(picked) : ''}">
+      ${picked ? `${brainrotArt(picked)}<div><div class="stake-name">${escapeHtml(picked.name)}</div><div class="stake-value">Ставка · ${fmt(picked.value)} 🎫</div></div><span class="stake-change">Сменить</span>`
+               : `<div class="upg-slot-plus">+</div><div><div class="stake-name">Выбери брейнрота</div><div class="stake-value">Он полетит на ракете</div></div>`}
     </button>
-    <button class="open-btn" id="btn-crash-start" ${pickedItem ? '' : 'disabled'} style="--c1:#c6ff3d;--c2:#5dffb0">
-      <span class="open-btn-shine"></span><span class="open-btn-label">Взлёт</span><span class="open-btn-price">${pickedItem ? fmt(pickedItem.value) + ' 🎫' : '—'}</span>
+    <button class="open-btn" id="btn-crash-start" ${picked ? '' : 'disabled'} style="--c1:#c6ff3d;--c2:#5dffb0">
+      <span class="open-btn-shine"></span><span class="open-btn-label">Взлёт</span><span class="open-btn-price">${picked ? fmt(picked.value) + ' 🎫' : '—'}</span>
     </button>`;
-  root.querySelector('#crash-stake').innerHTML = '';
   actions.querySelector('#btn-crash-pick').addEventListener('click', async () => {
-    const items = await api('/api/inventory?limit=200');
-    openItemPicker(items, (item) => paintCrashControls(root, state, item));
+    const [items, all] = await Promise.all([api('/api/inventory?limit=200'), api('/api/upgrader/targets?min_value=0')]);
+    openItemPicker(items, (item) => {
+      // лестница для превью — те же правила, что на сервере (crash_runtime.prize_ladder)
+      item.ladder = all.filter((t) => t.value > item.value && t.value <= item.value * state.max_multiplier)
+        .sort((a, b) => a.value - b.value).map((t) => ({ ...t, at: Math.round((t.value / item.value) * 100) / 100 }));
+      paintCrashIdle(root, state, item);
+    });
   });
   const startBtn = actions.querySelector('#btn-crash-start');
   startBtn.addEventListener('click', async () => {
-    if (!pickedItem) return;
+    if (!picked) return;
     startBtn.disabled = true;
     try {
-      const res = await api('/api/crash/start', { method: 'POST', body: JSON.stringify({ item_id: pickedItem.id }) });
+      const res = await api('/api/crash/start', { method: 'POST', body: JSON.stringify({ item_id: picked.id }) });
       haptic.impact('heavy');
-      paintCrashControls(root, res);
-      runCrashRound(root, res);
+      if (res.active) runCrashRound(root, res);
+      else finishCrash(root, res); // взрыв на 1.00×
     } catch (err) {
       toast('Ошибка: ' + err.message, 'error');
       startBtn.disabled = false;
@@ -1170,87 +1283,105 @@ function paintCrashControls(root, state, pickedItem = null) {
   });
 }
 
-/** Кривая рисуется локально по формуле сервера; сервер опрашивается только
- * чтобы узнать момент взрыва (точку краша знает он один). */
 function runCrashRound(root, state) {
-  cancelAnimationFrame(crashRaf); clearInterval(crashPollTimer);
-  const t0 = performance.now() - state.elapsed * 1000;
-  const q = (s) => root.querySelector(s);
-  const line = q('#crash-line'), area = q('#crash-area'), rocket = q('#crash-rocket');
-  const multEl = q('#crash-mult'), statusEl = q('#crash-status'), board = q('#crash-board'), yaxis = q('#crash-yaxis');
-  board.classList.remove('crashed', 'cashed');
-  board.classList.add('flying');
-  rocket.classList.remove('idle');
+  const scene = crashLoop.scene;
+  const board = root.querySelector('#crash-board');
+  const multEl = root.querySelector('#crash-mult');
+  const statusEl = root.querySelector('#crash-status');
+  const prizeEl = root.querySelector('#crash-prize');
+  const actions = root.querySelector('#crash-actions');
+  scene.state = state; scene.mode = 'flying';
+  board.className = 'crash-board flying';
   statusEl.textContent = 'В ПОЛЁТЕ';
-  let lastAxisTop = 0;
-  root._crashState = state;
+  const t0 = performance.now() - state.elapsed * 1000;
+  let shownPrize = null, done = false;
 
-  function draw(now) {
-    const secs = Math.max(0, (now - t0) / 1000);
-    const m = crashMultiplierAt(state, secs);
-    const span = Math.max(8, secs * 1.18);
-    const top = Math.max(2, 1 + (m - 1) * 1.35);
-    const pts = [];
-    for (let i = 0; i <= 48; i++) {
-      const s = (secs * i) / 48;
-      pts.push([(s / span) * 300, 180 - ((crashMultiplierAt(state, s) - 1) / (top - 1)) * 165]);
+  actions.innerHTML = `<button class="open-btn cashout-btn" id="btn-crash-cashout" style="--c1:#ffd24d;--c2:#ff9d2e"><span class="open-btn-shine"></span><span class="open-btn-label">Забрать</span><span class="open-btn-price" id="cash-mult">1.00×</span></button>`;
+  const cashBtn = actions.querySelector('#btn-crash-cashout');
+  cashBtn.addEventListener('click', async () => {
+    if (done) return;
+    cashBtn.disabled = true;
+    try {
+      const res = await api('/api/crash/cashout', { method: 'POST' });
+      finishCrash(root, res);
+    } catch (err) {
+      // уже взорвалась — итог придёт следующим опросом
     }
-    const d = 'M' + pts.map(([x, y]) => `${x.toFixed(1)},${y.toFixed(1)}`).join(' L');
-    line.setAttribute('d', d);
-    const [lx, ly] = pts[pts.length - 1];
-    area.setAttribute('d', `${d} L${lx.toFixed(1)},180 L0,180 Z`);
-    // Ракета на кончике кривой, повёрнута по касательной.
-    const [px, py] = pts[pts.length - 2];
-    const angle = Math.atan2((ly - py) * 0.6, lx - px) * 180 / Math.PI;
-    rocket.style.left = `calc(16px + (100% - 32px) * ${(lx / 300).toFixed(4)})`;
-    rocket.style.top = `calc(16px + (100% - 32px) * ${(ly / 180).toFixed(4)})`;
-    rocket.style.transform = `translate(-50%,-50%) rotate(${Math.max(-70, Math.min(0, angle))}deg)`;
+  });
+
+  function tick() {
+    if (done || !crashLoop || crashLoop.scene !== scene) return;
+    const t = Math.max(0, (performance.now() - t0) / 1000 - CRASH_DISPLAY_LAG);
+    const m = crashMult(state, t);
+    scene.t = t; scene.mult = m;
     multEl.textContent = m.toFixed(2) + '×';
-    board.style.setProperty('--speed', Math.min(4, 0.6 + (m - 1) * 0.5).toFixed(2));
-    if (top - lastAxisTop > 0.05 || !lastAxisTop) {
-      lastAxisTop = top;
-      yaxis.innerHTML = [0.25, 0.5, 0.75, 1].map((f) => `<span style="bottom:${f * 91.6}%">${(1 + (top - 1) * f).toFixed(1)}×</span>`).join('');
+    const cm = root.querySelector('#cash-mult'); if (cm) cm.textContent = m.toFixed(2) + '×';
+    const { prize, next } = currentPrize(state, m);
+    if (!shownPrize || shownPrize.name !== prize.name) {
+      if (shownPrize) haptic.tick();
+      shownPrize = prize;
+      prizeEl.innerHTML = prizeCardHtml('Заберёшь сейчас', prize, '<div class="prize-next" id="prize-next"></div>');
+      prizeEl.firstElementChild.classList.add('bump');
     }
-    const cash = q('#crash-cash-value');
-    if (cash && state.stake) cash.textContent = fmt(Math.round(state.stake.value * m)) + ' 🎫';
-    crashRaf = requestAnimationFrame(draw);
+    const nextEl = root.querySelector('#prize-next');
+    if (nextEl) {
+      nextEl.innerHTML = next
+        ? `<div class="prize-next-row"><span>Дальше: <b>${escapeHtml(next.name)}</b></span><span>×${next.at.toFixed(2)}</span></div>
+           <div class="prize-bar"><i style="width:${Math.min(100, ((m - 1) / (next.at - 1)) * 100).toFixed(1)}%"></i></div>`
+        : '<div class="prize-next-row"><span>Это лучший брейнрот для этой ставки</span></div>';
+    }
+    requestAnimationFrame(tick);
   }
-  crashRaf = requestAnimationFrame(draw);
+  requestAnimationFrame(tick);
 
-  crashPollTimer = setInterval(async () => {
+  scene.poll = setInterval(async () => {
     try {
       const s = await api('/api/crash/state');
-      if (s.active) return;
-      endCrashRound(root, 'crashed', s.multiplier || parseFloat(multEl.textContent) || 1);
+      if (!s.active && s.result) { clearInterval(scene.poll); finishCrash(root, s); }
     } catch (e) { /* сеть моргнула — следующий опрос */ }
-  }, 450);
+  }, CRASH_POLL_MS);
+
+  scene.finish = () => { done = true; clearInterval(scene.poll); };
 }
 
-function endCrashRound(root, outcome, mult, wonItem = null) {
-  cancelAnimationFrame(crashRaf); clearInterval(crashPollTimer);
+function finishCrash(root, s) {
+  if (!crashLoop) return;
+  const scene = crashLoop.scene;
+  if (scene.mode === 'crashed' || scene.mode === 'cashed') return;
+  if (scene.finish) scene.finish();
+  const r = s.result;
   const board = root.querySelector('#crash-board');
-  if (!board || board.classList.contains('crashed') || board.classList.contains('cashed')) return;
-  const rocket = root.querySelector('#crash-rocket');
-  board.classList.remove('flying');
-  board.classList.add(outcome);
-  root.querySelector('#crash-mult').textContent = mult.toFixed(2) + '×';
-  const actions = root.querySelector('#crash-actions');
-  if (outcome === 'crashed') {
-    root.querySelector('#crash-status').textContent = 'ВЗРЫВ';
-    const br = board.getBoundingClientRect(), rr = rocket.getBoundingClientRect();
-    if (crashFx) crashFx.burst(rr.left - br.left + rr.width / 2, rr.top - br.top + rr.height / 2, '#ff6a3d', 1.6);
-    rocket.classList.add('boom');
+  const multEl = root.querySelector('#crash-mult');
+  const statusEl = root.querySelector('#crash-status');
+  scene.state = scene.state || s;
+  if (r.outcome === 'crashed') {
+    // Досчитываем кривую ровно до точки взрыва.
+    scene.t = Math.log(r.crash_point) / s.growth_per_sec;
+    scene.mult = r.crash_point;
+    scene.mode = 'crashed';
+    board.className = 'crash-board crashed';
+    multEl.textContent = r.crash_point.toFixed(2) + '×';
+    statusEl.textContent = 'ВЗРЫВ';
+    crashLoop.burst('#ff6a3d', 1.6);
     haptic.impact('heavy');
-    actions.innerHTML = `<button class="open-btn" id="btn-crash-again" style="--c1:#ff4d6d;--c2:#ff8a5c"><span class="open-btn-label">Ставка сгорела</span><span class="open-btn-price">Ещё раз</span></button>`;
+    root.querySelector('#crash-prize').innerHTML = prizeCardHtml('Сгорело', s.stake);
+    root.querySelector('#crash-prize .prize-card').classList.add('lost');
   } else {
-    root.querySelector('#crash-status').textContent = `ЗАБРАНО · +${fmt(wonItem.value)} 🎫`;
+    scene.mode = 'cashed';
+    scene.mult = r.multiplier;
+    board.className = 'crash-board cashed';
+    multEl.textContent = r.multiplier.toFixed(2) + '×';
+    statusEl.textContent = 'ЗАБРАНО';
+    crashLoop.burst('#ffd24d', 1.1);
     haptic.success();
-    const br = board.getBoundingClientRect(), rr = rocket.getBoundingClientRect();
-    if (crashFx) crashFx.burst(rr.left - br.left + rr.width / 2, rr.top - br.top + rr.height / 2, '#ffd24d', 1);
-    actions.innerHTML = `<button class="open-btn" id="btn-crash-again" style="--c1:#ffd24d;--c2:#c6ff3d"><span class="open-btn-shine"></span><span class="open-btn-label">Забрано ×${mult.toFixed(2)}</span><span class="open-btn-price">Ещё раз</span></button>`;
+    root.querySelector('#crash-prize').innerHTML = prizeCardHtml('Получено — уже в инвентаре', r.prize);
+    root.querySelector('#crash-prize .prize-card').classList.add('won');
   }
+  paintCrashHistory(root, s.history);
   refreshMe().catch(() => {});
-  actions.querySelector('#btn-crash-again').addEventListener('click', () => renderCrashScreen(root));
+  const actions = root.querySelector('#crash-actions');
+  actions.innerHTML = `<button class="open-btn" id="btn-crash-again" style="--c1:#c6ff3d;--c2:#5dffb0"><span class="open-btn-shine"></span><span class="open-btn-label">Новый полёт</span><span class="open-btn-price">↻</span></button>`;
+  actions.querySelector('#btn-crash-again').addEventListener('click', () => paintCrashIdle(root, s));
 }
 
 // =================================================================== ДАЙСЫ
