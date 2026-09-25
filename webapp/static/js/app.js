@@ -141,13 +141,31 @@ function popNumber(el) {
   el.classList.add('num-pop');
 }
 
-/* Дизайн задаёт админ: v2 (новый) или classic (прошлый). Запоминаем, чтобы
-   при следующем запуске не мигал другой дизайн до ответа /api/me. */
+/* Дизайн задаёт админ: v3 (по умолчанию), v2 «Neon Glass» или classic
+   (самый первый). v3 — слой поверх v2. Запоминаем, чтобы при следующем
+   запуске не мигал другой дизайн до ответа /api/me. */
 function applyDesign(design) {
-  const v2 = design !== 'classic';
-  document.documentElement.classList.toggle('ui-v2', v2);
-  try { localStorage.setItem('bb_design', v2 ? 'v2' : 'classic'); } catch (e) {}
+  const d = ['v3', 'v2', 'classic'].includes(design) ? design : 'v3';
+  document.documentElement.classList.toggle('ui-v2', d !== 'classic');
+  document.documentElement.classList.toggle('ui-v3', d === 'v3');
+  try { localStorage.setItem('bb_design', d); } catch (e) {}
 }
+
+/* v3: карточки кейсов наклоняются за пальцем/курсором (3D), блик следует за ним. */
+document.addEventListener('pointermove', (e) => {
+  if (!document.documentElement.classList.contains('ui-v3')) return;
+  const card = e.target.closest && e.target.closest('.case-card, .free-banner');
+  document.querySelectorAll('.case-card.tilt, .free-banner.tilt').forEach((el) => { if (el !== card) { el.classList.remove('tilt'); el.style.removeProperty('--rx'); el.style.removeProperty('--ry'); } });
+  if (!card) return;
+  const r = card.getBoundingClientRect();
+  const x = (e.clientX - r.left) / r.width, y = (e.clientY - r.top) / r.height;
+  card.classList.add('tilt');
+  card.style.setProperty('--rx', `${(0.5 - y) * 10}deg`);
+  card.style.setProperty('--ry', `${(x - 0.5) * 12}deg`);
+  card.style.setProperty('--mx', `${x * 100}%`);
+  card.style.setProperty('--my', `${y * 100}%`);
+}, { passive: true });
+document.addEventListener('pointerleave', () => document.querySelectorAll('.tilt').forEach((el) => el.classList.remove('tilt')));
 
 async function refreshMe() {
   const prevTokens = ME ? ME.balance : null;
@@ -424,7 +442,32 @@ async function renderCasesScreen(root) {
         </div>`).join('')}</div>
     </section>` : '';
 
+  const topWin = wins.reduce((m, w) => Math.max(m, w.value || 0), 0);
+  const hero = `
+    <section class="hero v3-only">
+      <div class="hero-text">
+        <div class="hero-eyebrow"><span class="live-dot"></span>Steal a Brainrot · кейсы</div>
+        <h1 class="hero-title">Выбивай <em>Secret</em><br>и <em class="og">OG</em> брейнротов</h1>
+        <p class="hero-sub">Реальные брейнроты из игры · вывод трейдом · бесплатный кейс каждые ${fmt(data.free_cooldown_hours)} ч</p>
+        <div class="hero-cta">
+          <button class="hero-btn" id="hero-go">Открыть кейс</button>
+          <button class="hero-btn ghost" onclick="navigate('upgrader')">Апгрейдер</button>
+        </div>
+      </div>
+      <div class="hero-art" aria-hidden="true">
+        <img class="h1" src="/static/assets/brainrots/kraken.webp" alt="">
+        <img class="h2" src="/static/assets/brainrots/meowl.webp" alt="">
+        <img class="h3" src="/static/assets/brainrots/strawberry-elephant.webp" alt="">
+      </div>
+      <div class="hero-stats">
+        <div><b>${all.length}</b><span>кейсов</span></div>
+        <div><b>${topWin ? fmt(topWin) : '—'}</b><span>топ дроп, B</span></div>
+        <div><b>${fmt(data.free_cooldown_hours)} ч</b><span>free кейс</span></div>
+      </div>
+    </section>`;
+
   root.innerHTML = `
+    ${hero}
     ${banner}
     ${live}
     <div class="case-tools">
@@ -437,6 +480,9 @@ async function renderCasesScreen(root) {
   root.querySelectorAll('[data-case-id]').forEach((el) =>
     el.addEventListener('click', () => openCaseStage(Number(el.dataset.caseId)))
   );
+  root.querySelector('#hero-go')?.addEventListener('click', () => {
+    root.querySelector('.collection')?.scrollIntoView({ behavior: 'smooth', block: 'start' });
+  });
   root.querySelector('#case-search').addEventListener('input', (e) => {
     const q = e.target.value.trim().toLowerCase();
     let shown = 0;
@@ -1398,7 +1444,8 @@ function adminPanelHtml() {
 
       <div class="admin-sub">Дизайн</div>
       <div class="pill-row" id="admin-design">
-        <button class="pill" data-design="v2">✨ Новый</button>
+        <button class="pill" data-design="v3">💎 v3 Holo</button>
+        <button class="pill" data-design="v2">✨ v2 Neon</button>
         <button class="pill" data-design="classic">Классический</button>
       </div>
 
@@ -1592,7 +1639,7 @@ async function bindAdminPanel(root) {
     try {
       const st = await api('/api/admin/settings', { method: 'POST', body: JSON.stringify({ design: b.dataset.design }) });
       paintSettings(st); applyDesign(st.design);
-      toast(st.design === 'classic' ? 'Включён классический дизайн — у всех игроков' : 'Включён новый дизайн — у всех игроков', 'success');
+      toast(`Дизайн «${{ v3: 'v3 Holo', v2: 'v2 Neon', classic: 'Классический' }[st.design]}» включён у всех игроков`, 'success');
     } catch (err) { toast(err.message, 'error'); }
   }));
   const saveSupportBot = async (token) => {
@@ -2528,74 +2575,108 @@ function showDiceVerdict(root, rules, res) {
 
 // =================================================================== БАТЛ
 
+let battleQty = 1; // сколько кейсов на сторону: 1 / 3 / 5
+
 async function renderBattleScreen(root) {
-  const [cases, me] = await Promise.all([api('/api/battle/cases'), refreshMe()]);
+  const [cases] = await Promise.all([api('/api/battle/cases'), refreshMe()]);
   root.innerHTML = `
     <div class="section-title">БАТЛ</div>
+    <div class="battle-qty">
+      <div class="battle-qty-label">Кейсов на сторону</div>
+      <div class="qty-switch">${[1, 3, 5].map((n) => `<button class="qty-opt ${n === battleQty ? 'active' : ''}" data-bq="${n}">${n}</button>`).join('')}</div>
+      <div class="battle-qty-hint">У кого сумма дропа больше — забирает всё: ${battleQty * 2} брейнрот${battleQty === 1 ? 'а' : 'ов'}</div>
+    </div>
     <div class="case-grid battle-grid">
       ${cases.map((c, idx) => `
         <button class="case-card battle-card fade-in-up" style="${caseThemeVars(c)};animation-delay:${Math.min(idx * 40, 320)}ms" data-id="${c.id}">
           <div class="case-card-art">${CaseArt.artifact(c, 'artifact-sm')}</div>
           <div class="case-card-name">${escapeHtml(c.name)}</div>
-          <div class="case-card-foot"><span class="case-card-count">${c.item_count_label} предм.</span>${priceHtml(c.price_tokens)}</div>
+          <div class="case-card-foot"><span class="case-card-count">${battleQty > 1 ? `${battleQty} × ${fmt(c.price_tokens)}` : `${c.item_count_label} предм.`}</span>${priceHtml(c.price_tokens * battleQty)}</div>
         </button>`).join('') || '<div class="empty-state">Нет доступных кейсов для батла.</div>'}
     </div>`;
+  root.querySelectorAll('[data-bq]').forEach((el) => el.addEventListener('click', () => {
+    battleQty = Number(el.dataset.bq); haptic.tick(); renderBattleScreen(root);
+  }));
   root.querySelectorAll('[data-id]').forEach((el) =>
     el.addEventListener('click', () => startBattle(root, cases.find((c) => c.id === Number(el.dataset.id))))
   );
 }
 
 async function startBattle(root, c) {
-  if (ME && ME.balance < c.price_tokens) { toast(`Нужно ${fmt(c.price_tokens)} B`, 'error'); return; }
+  const qty = battleQty;
+  const cost = c.price_tokens * qty;
+  if (ME && ME.balance < cost) { toast(`Нужно ${fmt(cost)} B`, 'error'); return; }
   const detail = await api(`/api/cases/${c.id}`);
   const pool = detail.items.filter((i) => i.image_url);
   const me = ME || {};
+  const side = (id, who) => `
+    <div class="duel-side" id="${id}">${who}
+      <div class="duel-slot"></div>
+      <div class="duel-value">…</div>
+      ${qty > 1 ? `<div class="duel-list" style="grid-template-columns:repeat(${qty},minmax(0,1fr))">${Array(qty).fill('<div class="duel-mini"></div>').join('')}</div>` : ''}
+    </div>`;
   const overlay = openModal(`
     <div class="duel" style="${caseThemeVars(c)}">
-      <div class="duel-title">${escapeHtml(c.name)}</div>
+      <div class="duel-title">${escapeHtml(c.name)}${qty > 1 ? ` <span class="duel-round" id="duel-round">1/${qty}</span>` : ''}</div>
       <div class="duel-row">
-        <div class="duel-side" id="duel-me"><div class="duel-who">${avatarHtml(me)}<span>Ты</span></div><div class="duel-slot"></div><div class="duel-value">…</div></div>
+        ${side('duel-me', `<div class="duel-who">${avatarHtml(me)}<span>Ты</span></div>`)}
         <div class="duel-vs">VS</div>
-        <div class="duel-side" id="duel-bot"><div class="duel-who"><div class="avatar"><span>B</span></div><span>Соперник</span></div><div class="duel-slot"></div><div class="duel-value">…</div></div>
+        ${side('duel-bot', '<div class="duel-who"><div class="avatar"><span>B</span></div><span>Соперник</span></div>')}
       </div>
       <div class="duel-verdict" id="duel-verdict">Открываем…</div>
       <button class="btn btn-primary hidden" id="duel-done">Готово</button>
     </div>`);
   overlay.onclick = null;
 
-  // Карусель картинок из реального пула кейса, пока ждём ответ сервера.
+  // Карусель картинок из реального пула кейса, пока идёт раунд.
   const slots = [...overlay.querySelectorAll('.duel-slot')];
-  let k = 0;
-  const shuffle = setInterval(() => {
-    slots.forEach((s, j) => { const b = pool[(k + j * 3) % pool.length]; s.innerHTML = brainrotArt(b); s.style.cssText = glowVars(b); });
-    k += 1; haptic.tick();
-  }, 90);
+  let k = 0, shuffle = null;
+  const spin = () => {
+    shuffle = setInterval(() => {
+      slots.forEach((s, j) => { const b = pool[(k + j * 3) % pool.length]; s.innerHTML = brainrotArt(b); s.style.cssText = glowVars(b); });
+      k += 1; haptic.tick();
+    }, 90);
+  };
+  spin();
 
   let res;
   try {
     [res] = await Promise.all([
-      api('/api/battle/start', { method: 'POST', body: JSON.stringify({ case_id: c.id }) }),
-      sleep(CaseArt.REDUCED ? 100 : 1600),
+      api('/api/battle/start', { method: 'POST', body: JSON.stringify({ case_id: c.id, qty }) }),
+      sleep(CaseArt.REDUCED ? 100 : (qty > 1 ? 1100 : 1600)),
     ]);
   } catch (err) {
     clearInterval(shuffle); closeModal(); toast('Ошибка: ' + err.message, 'error'); return;
   }
   clearInterval(shuffle);
-  const put = (id, b) => {
-    const side = overlay.querySelector(id);
-    side.querySelector('.duel-slot').innerHTML = brainrotArt(b);
-    side.querySelector('.duel-slot').style.cssText = glowVars(b);
-    side.querySelector('.duel-value').innerHTML = `<b>${escapeHtml(b.name)}</b><span>${fmt(b.value)}${coinIcon()}</span>`;
-    side.classList.add('landed');
-  };
-  put('#duel-me', res.player_item);
-  await sleep(350);
-  put('#duel-bot', res.bot_item);
-  await sleep(450);
   const meSide = overlay.querySelector('#duel-me'), botSide = overlay.querySelector('#duel-bot');
+  const totals = { me: 0, bot: 0 };
+  const put = (sideEl, b, total, round) => {
+    const slot = sideEl.querySelector('.duel-slot');
+    slot.innerHTML = brainrotArt(b); slot.style.cssText = glowVars(b);
+    sideEl.querySelector('.duel-value').innerHTML = qty > 1
+      ? `<b>${escapeHtml(b.name)}</b><span>Σ ${fmt(total)}${coinIcon()}</span>`
+      : `<b>${escapeHtml(b.name)}</b><span>${fmt(b.value)}${coinIcon()}</span>`;
+    const mini = sideEl.querySelectorAll('.duel-mini')[round];
+    if (mini) { mini.innerHTML = brainrotArt(b); mini.style.cssText = glowVars(b); mini.classList.add('on'); }
+    sideEl.classList.remove('landed'); void sideEl.offsetWidth; sideEl.classList.add('landed');
+  };
+  const players = res.player_items || [res.player_item];
+  const bots = res.bot_items || [res.bot_item];
+  for (let i = 0; i < players.length; i += 1) {
+    if (i > 0) {
+      const r = overlay.querySelector('#duel-round'); if (r) r.textContent = `${i + 1}/${players.length}`;
+      spin(); await sleep(CaseArt.REDUCED ? 60 : 650); clearInterval(shuffle);
+    }
+    totals.me += players[i].value; put(meSide, players[i], totals.me, i);
+    await sleep(CaseArt.REDUCED ? 60 : 300);
+    totals.bot += bots[i].value; put(botSide, bots[i], totals.bot, i);
+    await sleep(CaseArt.REDUCED ? 60 : 380);
+  }
   const verdict = overlay.querySelector('#duel-verdict');
-  if (res.winner === 'player') { meSide.classList.add('win'); botSide.classList.add('lose'); verdict.innerHTML = `<span class="v-win">Победа · +${fmt(res.player_item.value + res.bot_item.value)}${coinIcon()}</span>`; haptic.success(); }
-  else if (res.winner === 'bot') { botSide.classList.add('win'); meSide.classList.add('lose'); verdict.innerHTML = '<span class="v-lose">Поражение</span>'; haptic.impact('rigid'); }
+  const pot = totals.me + totals.bot;
+  if (res.winner === 'player') { meSide.classList.add('win'); botSide.classList.add('lose'); verdict.innerHTML = `<span class="v-win">Победа · +${fmt(pot)}${coinIcon()}</span>${qty > 1 ? `<div class="v-sub">${players.length * 2} брейнротов в инвентарь</div>` : ''}`; haptic.success(); }
+  else if (res.winner === 'bot') { botSide.classList.add('win'); meSide.classList.add('lose'); verdict.innerHTML = `<span class="v-lose">Поражение</span>${qty > 1 ? `<div class="v-sub">${fmt(totals.me)} против ${fmt(totals.bot)}</div>` : ''}`; haptic.impact('rigid'); }
   else { verdict.innerHTML = '<span class="v-sub">Ничья — ставка возвращена</span>'; }
   refreshMe().catch(() => {});
   const done = overlay.querySelector('#duel-done');

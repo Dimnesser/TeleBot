@@ -73,7 +73,7 @@ from bot.database.repo.users import get_user_by_tg_id
 from bot.database.repo.users import add_balance, count_referrals, find_user
 from bot.services import deposit_moderation, partner_service, quest_service, settings_service, stars_service, withdraw_service
 from bot.services.deposit_service import cart_is_valid
-from bot.services.battle_service import run_battle
+from bot.services.battle_service import BATTLE_QTYS, run_battle
 from bot.services.cases_service import REEL_REVEAL_INDEX, build_reel, draw_items, total_cost
 from bot.services.dice_service import COLORS, MATCH_PAYOUT_TABLE, resolve_roll
 from bot.services.giveaway_service import resolve_all_expired
@@ -1038,15 +1038,22 @@ async def get_battle_cases(request: web.Request) -> web.Response:
 
 @routes.post("/api/battle/start")
 async def post_battle_start(request: web.Request) -> web.Response:
+    """Батл 1/3/5 кейсов на сторону: победитель забирает весь дроп обеих сторон."""
     session, user = request["session"], request["user"]
     body = await request.json()
     case_id = body.get("case_id")
+    try:
+        qty = int(body.get("qty") or 1)
+    except (TypeError, ValueError):
+        qty = 0
+    if qty not in BATTLE_QTYS:
+        return web.json_response({"error": "bad_qty", "message": "Батл: 1, 3 или 5 кейсов"}, status=400)
 
     case = await cases_repo.get_case(session, int(case_id) if case_id else 0)
     if case is None or not case.is_openable or case.price_tokens is None:
         return web.json_response({"error": "case_unavailable"}, status=400)
 
-    cost = case.price_tokens
+    cost = case.price_tokens * qty
     if user.balance < cost:
         return web.json_response({"error": "not_enough_tokens", "message": f"Нужно {cost} B, у тебя {user.balance} B", "cost": cost, "balance": user.balance}, status=400)
 
@@ -1055,14 +1062,14 @@ async def post_battle_start(request: web.Request) -> web.Response:
     await session.refresh(user)
 
     items = await cases_repo.list_case_items(session, case.id)
-    result = run_battle(items, luck=user.luck, case_price=case.price_tokens)
+    result = run_battle(items, qty=qty, luck=user.luck, case_price=case.price_tokens)
 
     if result.winner == "player":
         await inventory_repo.add_items(
             session,
             user,
             f"Батл: {case.name}",
-            [(result.player_item.name, result.player_item.value), (result.bot_item.name, result.bot_item.value)],
+            [(i.name, i.value) for i in (*result.player_items, *result.bot_items)],
             case_id=case.id,
         )
     elif result.winner == "tie":
@@ -1071,8 +1078,14 @@ async def post_battle_start(request: web.Request) -> web.Response:
     return web.json_response(
         {
             "winner": result.winner,
+            "qty": qty,
+            "cost": cost,
             "player_item": _case_item_json(result.player_item),
             "bot_item": _case_item_json(result.bot_item),
+            "player_items": [_case_item_json(i) for i in result.player_items],
+            "bot_items": [_case_item_json(i) for i in result.bot_items],
+            "player_total": result.player_total,
+            "bot_total": result.bot_total,
             "balance": user.balance,
         }
     )
@@ -1448,7 +1461,7 @@ async def post_admin_settings(request: web.Request) -> web.Response:
         await settings_service.set_setting(session, settings_service.SUPPORT_URL, support)
     if "design" in body:
         if body.get("design") not in settings_service.UI_DESIGNS:
-            return web.json_response({"error": "bad_design", "message": "Дизайн: v2 или classic"}, status=400)
+            return web.json_response({"error": "bad_design", "message": "Дизайн: v3, v2 или classic"}, status=400)
         await settings_service.set_setting(session, settings_service.UI_DESIGN, body["design"])
     if "support_bot_token" in body:
         token = str(body.get("support_bot_token") or "").strip()

@@ -103,6 +103,8 @@ def create_app(bot: Bot) -> web.Application:
     index_html = index_html.replace(
         'href="/static/css/app.css"', f'href="/static/css/app.css?v={BUILD_VERSION}"'
     ).replace(
+        'href="/static/css/app-v3.css"', f'href="/static/css/app-v3.css?v={BUILD_VERSION}"'
+    ).replace(
         'href="/static/css/app-v2.css"', f'href="/static/css/app-v2.css?v={BUILD_VERSION}"'
     ).replace(
         'src="/static/js/case-themes.js"',

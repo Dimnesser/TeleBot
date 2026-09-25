@@ -856,12 +856,33 @@ async def test_owner_grants_and_revokes_admin(client, auth_headers, admin_header
 
 
 async def test_design_switch(client, auth_headers, admin_headers) -> None:
-    assert (await (await client.get("/api/me", headers=auth_headers)).json())["design"] == "v2"
+    assert (await (await client.get("/api/me", headers=auth_headers)).json())["design"] == "v3"
     r = await client.post("/api/admin/settings", headers=admin_headers, json={"design": "classic"})
     assert (await r.json())["design"] == "classic"
     assert (await (await client.get("/api/me", headers=auth_headers)).json())["design"] == "classic"
     assert (await client.post("/api/admin/settings", headers=admin_headers, json={"design": "neon"})).status == 400
     assert (await client.post("/api/admin/settings", headers=auth_headers, json={"design": "v2"})).status == 403
+
+
+async def test_battle_three_and_five_cases(client, auth_headers, admin_headers) -> None:
+    await client.get("/api/me", headers=auth_headers)
+    await client.post("/api/admin/grant", headers=admin_headers, json={"user": "999111", "kind": "balance", "amount": 100000})
+    case = (await (await client.get("/api/battle/cases", headers=auth_headers)).json())[0]
+    assert (await client.post("/api/battle/start", headers=auth_headers, json={"case_id": case["id"], "qty": 2})).status == 400
+    for qty in (3, 5):
+        before = (await (await client.get("/api/me", headers=auth_headers)).json())["balance"]
+        inv_before = len(await (await client.get("/api/inventory?limit=500", headers=auth_headers)).json())
+        body = await (await client.post("/api/battle/start", headers=auth_headers, json={"case_id": case["id"], "qty": qty})).json()
+        assert body["qty"] == qty and body["cost"] == case["price_tokens"] * qty
+        assert len(body["player_items"]) == qty and len(body["bot_items"]) == qty
+        assert body["player_total"] == sum(i["value"] for i in body["player_items"])
+        inv_after = len(await (await client.get("/api/inventory?limit=500", headers=auth_headers)).json())
+        if body["winner"] == "player":
+            assert inv_after - inv_before == qty * 2 and body["player_total"] > body["bot_total"]
+        elif body["winner"] == "bot":
+            assert inv_after == inv_before and body["balance"] == before - body["cost"]
+        else:
+            assert body["balance"] == before
 
 
 async def test_stars_no_upper_limit(client, auth_headers) -> None:
