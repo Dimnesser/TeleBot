@@ -23,6 +23,7 @@
 from __future__ import annotations
 
 import math
+import json
 import time
 from contextvars import ContextVar
 from dataclasses import dataclass
@@ -61,6 +62,9 @@ MAX_MINUTES = 60 * 24 * 7
 
 _active: dict[str, tuple[float, float]] = {}  # код → (значение, конец unix)
 _started: dict[str, float] = {}  # код → старт unix (для полоски оставшегося времени)
+_by: dict[str, str] = {}  # код → кто запустил («@admin», «🎲 автоивент»)
+LOG_KEY = "event_log"  # журнал запусков/остановок для админки (JSON, последние LOG_LIMIT)
+LOG_LIMIT = 50
 
 # Партнёрские ивенты: id партнёрского кода → тип → (значение, конец, старт)
 _partner: dict[int, dict[str, tuple[float, float, float]]] = {}
@@ -159,6 +163,8 @@ async def load(session: AsyncSession) -> None:
             _active[code] = (float(parts[0]), float(parts[1]))
             if len(parts) > 2:
                 _started[code] = float(parts[2])
+            if len(parts) > 3:
+                _by[code] = parts[3]
         except (ValueError, IndexError):
             continue
     _partner.clear()
@@ -233,7 +239,28 @@ def all_partner_events() -> list[tuple[int, dict]]:
 UNIT_LABEL = {"x": "×", "%": "%", "min": " мин"}
 
 
-async def start(session: AsyncSession, code: str, val: float, minutes: float) -> None:
+def started_by(code: str) -> str | None:
+    return _by.get(code)
+
+
+async def get_log(session: AsyncSession) -> list[dict]:
+    raw = await settings_service.get_setting(session, LOG_KEY)
+    try:
+        return json.loads(raw) if raw else []
+    except ValueError:
+        return []
+
+
+async def log(session: AsyncSession, action: str, code: str, by: str, val: float | None = None,
+              minutes: float | None = None, scope: str | None = None) -> None:
+    """Запись в журнал: action start|stop, scope — «для всех» или партнёрский код."""
+    entries = await get_log(session)
+    entries.insert(0, {"action": action, "type": code, "value": val, "minutes": minutes, "by": by,
+                       "scope": scope, "at": int(time.time())})
+    await settings_service.set_setting(session, LOG_KEY, json.dumps(entries[:LOG_LIMIT], ensure_ascii=False))
+
+
+async def start(session: AsyncSession, code: str, val: float, minutes: float, by: str = "") -> None:
     t = TYPES[code]
     if not t.min_value <= val <= t.max_value:
         raise ValueError(f"{t.title}: от {t.min_value:g} до {t.max_value:g}{UNIT_LABEL[t.unit]}")
@@ -241,14 +268,21 @@ async def start(session: AsyncSession, code: str, val: float, minutes: float) ->
         raise ValueError(f"Длительность: от 1 до {MAX_MINUTES} минут")
     now = time.time()
     ends = now + minutes * 60
-    await settings_service.set_setting(session, _key(code), f"{val:g}|{ends:.0f}|{now:.0f}")
+    by = by.replace("|", "/")
+    await settings_service.set_setting(session, _key(code), f"{val:g}|{ends:.0f}|{now:.0f}|{by}")
     _active[code] = (val, ends)
     _started[code] = now
+    _by[code] = by
+    await log(session, "start", code, by, val, minutes)
 
 
-async def stop(session: AsyncSession, code: str) -> None:
+async def stop(session: AsyncSession, code: str, by: str = "") -> None:
+    was_on = code in active()
     await settings_service.set_setting(session, _key(code), None)
     _active.pop(code, None)
+    _by.pop(code, None)
+    if was_on:
+        await log(session, "stop", code, by)
 
 
 # ---------------------------------------------------------------- эффекты

@@ -343,7 +343,7 @@ function mountEventCards(box, endpoint, partner) {
       return `
         <div class="admin-event ${on ? 'on' : ''} ${wait ? 'cooldown' : ''}" data-ev="${t.type}" style="--evc:${(EVENT_META[t.type] || {}).color || '#c6ff3d'}">
           <div class="admin-event-head"><span class="admin-event-emoji">${t.emoji}</span><span class="admin-event-titles"><b>${t.title}</b><small>${EVENT_SUB[t.type] || ''}</small></span>
-            ${on ? `<span class="admin-event-live">идёт · ${EVENT_TEXT[t.type](on)} · ещё ${eventLeft(on.seconds_left)}</span>` : ''}
+            ${on ? `<span class="admin-event-live">идёт · ${EVENT_TEXT[t.type](on)} · ещё ${eventLeft(on.seconds_left)}${on.by ? ` · запустил ${escapeHtml(on.by)}` : ''}</span>` : ''}
             ${wait ? `<span class="admin-event-wait">снова через ${eventLeft(wait)}</span>` : ''}</div>
           <div class="inline-form">
             <input class="field" data-ev-value type="number" step="${t.unit === 'x' ? 0.1 : 1}" min="${t.min}" max="${t.max}" value="${on ? on.value : t.default}" placeholder="${{ x: '×', '%': '%', min: 'мин' }[t.unit]}" />
@@ -360,8 +360,15 @@ function mountEventCards(box, endpoint, partner) {
         <span>${ev.emoji}</span><b>${EVENT_TEXT[ev.type](ev)}</b><span class="muted">${escapeHtml(ev.partner)} · ${escapeHtml(ev.partner_code)} · ещё ${eventLeft(ev.seconds_left)}</span>
         <button class="btn-chip danger" data-pev-stop="${ev.type}" data-pc="${ev.partner_code_id}">Стоп</button>
       </div></div>`).join('');
+    const logRows = (data.log || []).map((l) => {
+      const what = l.action === 'start' && EVENT_TEXT[l.type] && l.value != null ? `${EVENT_TEXT[l.type]({ value: l.value })} на ${Math.round(l.minutes)} мин` : 'остановил';
+      return `<div class="event-log-row"><span>${(data.types.find((t) => t.type === l.type) || {}).emoji || '✨'}</span>
+        <span><b>${escapeHtml(l.by || '?')}</b> ${l.action === 'start' ? 'запустил' : ''} ${what}${l.scope ? ` <span class="muted">· партнёрка ${escapeHtml(l.scope)}</span>` : ''}</span>
+        <span class="muted">${new Date(l.at * 1000).toLocaleString('ru-RU', { day: '2-digit', month: '2-digit', hour: '2-digit', minute: '2-digit' })}</span></div>`;
+    }).join('');
     box.innerHTML = (partner ? `<div class="muted admin-hint">Действует только на твоих рефералов (сейчас ${data.audience}) · тот же ивент — раз в ${data.cooldown_hours} ч</div>` : '')
-      + cards + (partnerRows ? `<div class="admin-sub">Ивенты партнёров</div>${partnerRows}` : '');
+      + (logRows ? `<details class="event-log-box" open><summary>📜 Журнал: кто запускал ивенты</summary><div class="event-log">${logRows}</div></details>` : '')
+      + (partnerRows ? `<div class="admin-sub">Ивенты партнёров</div>${partnerRows}` : '') + cards;
     box.querySelectorAll('[data-ev]').forEach((card) => {
       const type = card.dataset.ev;
       const send = async (body) => {
@@ -2150,6 +2157,7 @@ async function bindAdminPanel(root) {
         <code>${escapeHtml(p.code)}</code>
         <span>${p.kind !== 'case' ? fmt(p.amount) + coinIcon() : '🎁 ' + p.amount + ' · ' + escapeHtml(((adminCases || []).find((c) => c.code === p.case_code) || {}).name || p.case_code)}</span>
         <span class="muted">${p.uses}/${p.max_uses}</span>
+        <span class="muted promo-by">${p.created_by ? 'от ' + escapeHtml(p.created_by) : ''}</span>
         <button class="btn-chip danger promo-del" data-promo-del="${escapeHtml(p.code)}" title="Удалить">✕</button>
       </div>`).join('') || '<div class="muted">Пока нет</div>';
     panel.querySelectorAll('[data-promo-del]').forEach((b) => b.addEventListener('click', async () => {

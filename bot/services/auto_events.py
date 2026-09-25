@@ -101,7 +101,7 @@ def pick_value(code: str, strength: str) -> float:
     return round(val, 1) if t.unit == "x" else float(round(val))
 
 
-async def fire(session: AsyncSession, bot: Bot, cfg: dict, *, forced: bool = False) -> dict | None:
+async def fire(session: AsyncSession, bot: Bot, cfg: dict, *, forced: bool = False, by: str | None = None) -> dict | None:
     """Запустить случайный ивент сейчас и запланировать следующий."""
     running = set(events_service.active())
     choices = [t for t in cfg["types"] if t not in running] or ([] if not forced else cfg["types"])
@@ -110,10 +110,10 @@ async def fire(session: AsyncSession, bot: Bot, cfg: dict, *, forced: bool = Fal
     code = random.choice(choices)
     val = pick_value(code, cfg["strength"])
     minutes = random.randint(cfg["dur_min"], cfg["dur_max"])
-    await events_service.start(session, code, val, minutes)
+    await events_service.start(session, code, val, minutes, by=by or "🎲 автоивент")
     if cfg["notify"]:
         await broadcast.start(bot, events_service.announcement(code, val, minutes))
-    cfg["last"] = {"type": code, "value": val, "minutes": minutes, "at": int(time.time())}
+    cfg["last"] = {"type": code, "value": val, "minutes": minutes, "at": int(time.time()), "by": by or "🎲 автоивент"}
     if cfg["enabled"]:
         cfg["next_at"] = time.time() + minutes * 60 + random.randint(cfg["gap_min"], cfg["gap_max"]) * 60
     await save_config(session, cfg)

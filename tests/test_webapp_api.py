@@ -1253,3 +1253,21 @@ async def test_partner_code_taken_by_promo_can_be_freed(client, auth_headers, ad
     assert r.status == 200 and (await r.json())["code"] == "SLENG"
     r = await client.post("/api/admin/promos/delete", headers=auth_headers, json={"code": "SLENG"})
     assert r.status == 403
+
+
+async def test_admin_sees_who_started_event_and_created_promo(client, admin_headers) -> None:
+    from bot.services import events_service
+    await client.get("/api/me", headers=admin_headers)
+    try:
+        r = await client.post("/api/admin/events", headers=admin_headers, json={"type": "luck", "value": 1.5, "minutes": 10})
+        data = await r.json()
+        luck = next(e for e in data["active"] if e["type"] == "luck")
+        assert luck["by"]
+        assert data["log"][0]["action"] == "start" and data["log"][0]["by"] == luck["by"]
+        r = await client.post("/api/admin/events", headers=admin_headers, json={"type": "luck", "action": "stop"})
+        assert (await r.json())["log"][0]["action"] == "stop"
+    finally:
+        events_service._active.clear()
+    await client.post("/api/admin/promos", headers=admin_headers, json={"kind": "balance", "amount": 5, "code": "WHO1"})
+    promos = await (await client.get("/api/admin/promos", headers=admin_headers)).json()
+    assert next(p for p in promos if p["code"] == "WHO1")["created_by"]

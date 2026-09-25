@@ -902,7 +902,7 @@ select.field { appearance: none; -webkit-appearance: none; }
 .admin-actions { margin-top: 10px; }
 .admin-actions .btn-chip { flex: 0 0 auto; }
 .promo-list { display: flex; flex-direction: column; gap: 6px; }
-.promo-row { display: grid; grid-template-columns: auto 1fr auto auto; gap: 10px; align-items: center; font-size: 12px; padding: 8px 10px; border-radius: 10px; background: var(--bg-elevated); }
+.promo-row { display: grid; grid-template-columns: auto 1fr auto auto auto; gap: 10px; align-items: center; font-size: 12px; padding: 8px 10px; border-radius: 10px; background: var(--bg-elevated); }
 .promo-row code, .promo-created code { font-family: var(--font-display); letter-spacing: 1px; color: var(--accent); }
 .promo-row .promo-del { padding: 4px 10px; min-height: 0; }
 .promo-created { width: 100%; display: flex; justify-content: space-between; align-items: center; margin-top: 8px; padding: 12px 14px; border-radius: 14px; border: 1px dashed var(--accent); background: rgba(198,255,61,.08); color: var(--text); font-weight: 700; }
@@ -1510,3 +1510,11 @@ html.ev-double .screen .case-card { box-shadow: inset 0 0 0 1px rgba(226,139,255
   background: rgba(255,255,255,.04); box-shadow: inset 0 0 0 1px rgba(255,255,255,.1); color: var(--text-dim); transition: all .2s ease; }
 .auto-type input { display: none; }
 .auto-type.on { color: #fff; background: color-mix(in srgb, var(--evc) 22%, transparent); box-shadow: inset 0 0 0 1px var(--evc), 0 0 14px -6px var(--evc); }
+
+/* Журнал ивентов в админке */
+.event-log { display: grid; gap: 6px; max-height: 220px; overflow-y: auto; margin-top: 8px; }
+.event-log-box { margin-bottom: 12px; }
+.event-log-box summary { cursor: pointer; font-weight: 700; font-size: 13px; padding: 6px 2px; }
+.event-log-row { display: grid; grid-template-columns: auto 1fr auto; gap: 8px; align-items: center; font-size: 12px;
+  padding: 8px 10px; border-radius: 10px; background: var(--bg-elevated); }
+.promo-row .promo-by { font-size: 11px; max-width: 110px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }

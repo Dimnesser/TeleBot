@@ -1396,6 +1396,13 @@ async def get_events(_request: web.Request) -> web.Response:
     return web.json_response(events_service.as_json())
 
 
+def _who(user) -> str:
+    """Подпись пользователя для журналов админки."""
+    if user is None:
+        return "?"
+    return f"@{user.username}" if user.username else f"{user.first_name or 'id'} ({user.tg_id})"
+
+
 @routes.get("/api/admin/events")
 async def get_admin_events(request: web.Request) -> web.Response:
     if (denied := _require_admin(request)) is not None:
@@ -1408,10 +1415,15 @@ async def get_admin_events(request: web.Request) -> web.Response:
         ev["partner_code"] = pc.code if pc else str(pc_id)
         ev["partner_code_id"] = pc_id
         ev["partner"] = (f"@{owner.username}" if owner and owner.username else (owner.first_name if owner else "?"))
+        ev["by"] = ev["partner"]
         partner_events.append(ev)
+    active = [e for e in events_service.as_json() if not e["partner"]]
+    for e in active:
+        e["by"] = events_service.started_by(e["type"])
     return web.json_response({
-        "active": [e for e in events_service.as_json() if not e["partner"]],
+        "active": active,
         "partner_events": partner_events,
+        "log": (await events_service.get_log(session))[:30],
         "types": [{"type": t.code, "title": t.title, "emoji": t.emoji, "unit": t.unit, "min": t.min_value,
                    "max": t.max_value, "default": t.default} for t in events_service.TYPES.values()],
     })
@@ -1427,10 +1439,14 @@ async def post_admin_events(request: web.Request) -> web.Response:
     code = body.get("type")
     if code not in events_service.TYPES:
         return web.json_response({"error": "bad_type", "message": "Неизвестный ивент"}, status=400)
+    me = _who(request["user"])
     if body.get("action") == "stop" and body.get("partner_code_id"):
-        await events_service.stop_partner(session, int(body["partner_code_id"]), code)
+        pc_id = int(body["partner_code_id"])
+        pc = await session.get(PartnerCode, pc_id)
+        await events_service.stop_partner(session, pc_id, code)
+        await events_service.log(session, "stop", code, me, scope=pc.code if pc else str(pc_id))
     elif body.get("action") == "stop":
-        await events_service.stop(session, code)
+        await events_service.stop(session, code, by=me)
     else:
         val = _num(body.get("value"))
         minutes = _num(body.get("minutes"))
@@ -1439,7 +1455,7 @@ async def post_admin_events(request: web.Request) -> web.Response:
         if val is None or minutes is None:
             return web.json_response({"error": "bad_value", "message": "Укажи силу и длительность"}, status=400)
         try:
-            await events_service.start(session, code, val, minutes)
+            await events_service.start(session, code, val, minutes, by=me)
         except ValueError as exc:
             return web.json_response({"error": "bad_value", "message": str(exc)}, status=400)
         if body.get("notify"):
@@ -1483,7 +1499,10 @@ async def post_partner_events(request: web.Request) -> web.Response:
     if code not in events_service.TYPES:
         return web.json_response({"error": "bad_type", "message": "Неизвестный ивент"}, status=400)
     notified = None
+    me = _who(request["user"])
     if body.get("action") == "stop":
+        if code in events_service.partner_active(pc.id):
+            await events_service.log(session, "stop", code, me, scope=pc.code)
         await events_service.stop_partner(session, pc.id, code)
     else:
         val, minutes = _num(body.get("value")), _num(body.get("minutes"))
@@ -1493,6 +1512,7 @@ async def post_partner_events(request: web.Request) -> web.Response:
             await events_service.start_partner(session, pc.id, code, val, minutes)
         except ValueError as exc:
             return web.json_response({"error": "bad_value", "message": str(exc)}, status=400)
+        await events_service.log(session, "start", code, me, val, minutes, scope=pc.code)
         if body.get("notify"):
             who = request["user"]
             name = f"@{who.username}" if who.username else (who.first_name or "партнёра")
@@ -1532,7 +1552,8 @@ async def post_admin_auto_events(request: web.Request) -> web.Response:
         return web.json_response({"error": "bad_value", "message": str(exc)}, status=400)
     await auto_events.save_config(session, cfg)
     if body.get("fire"):
-        fired = await auto_events.fire(session, request.app["bot"], cfg, forced=True)
+        fired = await auto_events.fire(session, request.app["bot"], cfg, forced=True,
+                                       by=f"🎲 {_who(request['user'])}")
         if fired is None:
             return web.json_response({"error": "nothing", "message": "Нет ивентов для запуска"}, status=400)
     return web.json_response(_auto_json(await auto_events.get_config(session)))
@@ -1843,8 +1864,14 @@ async def _code_taken_message(session, code: str, allow_user_id: int | None = No
 async def get_admin_promos(request: web.Request) -> web.Response:
     if (denied := _require_admin(request)) is not None:
         return denied
-    promos = await rewards_repo.list_promos(request["session"])
-    return web.json_response([_promo_json(p) for p in promos])
+    session = request["session"]
+    promos = await rewards_repo.list_promos(session)
+    creators = {}
+    for tg_id in {p.created_by_tg_id for p in promos}:
+        u = await get_user_by_tg_id(session, tg_id)
+        creators[tg_id] = _who(u) if u else str(tg_id)
+    return web.json_response([{**_promo_json(p), "created_by": creators[p.created_by_tg_id],
+                               "created_at": p.created_at.isoformat() if p.created_at else None} for p in promos])
 
 
 @routes.post("/api/admin/promos")
