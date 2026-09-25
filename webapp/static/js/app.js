@@ -2202,8 +2202,8 @@ const UPG_MAX_STAKE = 5;
 let upgraderState = { stake: [], target: null, preset: null };
 // Быстрый выбор цели: шанс или множитель. Шанс = вклад / цель × отдача
 // апгрейдера (ME.upgrader_rtp, ставит админ), поэтому у x2/x5/x10 он считается.
-const upgRtp = () => (ME && ME.upgrader_rtp) || 50;
-const UPG_PRESETS = [['c35', '35%', 35], ['c20', '20%', 20], ['c10', '10%', 10], ['x2', 'x2', 2], ['x5', 'x5', 5], ['x10', 'x10', 10]];
+const upgRtp = () => (ME && ME.upgrader_rtp) || 80;
+const UPG_PRESETS = [['c75', '75%', 75], ['c50', '50%', 50], ['c25', '25%', 25], ['x2', 'x2', 2], ['x5', 'x5', 5], ['x10', 'x10', 10]];
 const stakeValue = (stake) => stake.reduce((sum, b) => sum + b.value, 0);
 let upgraderSpinning = false;
 let upgraderFx = null;
@@ -2283,7 +2283,7 @@ async function renderUpgraderScreen(root) {
     const [items, all] = await Promise.all([api('/api/inventory?limit=200'), api('/api/upgrader/targets?min_value=0')]);
     // Вклад без хотя бы одной цели с шансом 1–75% не подходит — иначе игрок
     // упрётся в пустой список целей.
-    const hasTarget = (v) => all.some((t) => t.value * 75 >= v * 100 && t.value <= v * 100);
+    const hasTarget = (v) => all.some((t) => t.value > v && t.value * 75 >= v * upgRtp() && t.value <= v * upgRtp());
     openStakePicker(items.slice().sort((a, b) => b.value - a.value), upgraderState.stake, hasTarget, (stake) => {
       upgraderState = { stake, target: null, preset: null }; renderUpgraderScreen(root);
     });

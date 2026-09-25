@@ -420,7 +420,7 @@ async def test_upgrader_targets_chance_between_75_and_1(client, auth_headers) ->
     targets = await r.json()
     assert targets
     for t in targets:
-        assert 400 <= t["value"] <= 30000
+        assert 300 < t["value"] <= 300 * 80 and t["value"] >= 300 * 80 / 75
         assert 1 <= t["chance_percent"] <= 75
 
 

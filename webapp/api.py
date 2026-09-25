@@ -837,10 +837,11 @@ async def get_upgrader_targets(request: web.Request) -> web.Response:
     items = await list_known_items(session)
     # Только брейнроты ростера: в «известных предметах» есть ещё гирсы из
     # обменника (Santas Sleigh и т.п.) — они не персонажи и без картинок.
-    # Цели — брейнроты ростера с честным шансом от 75% вниз до 1%:
-    # цель дороже вклада минимум в 100/75 раза и максимум в 100 раз.
+    # Цели — брейнроты ростера дороже вклада, шанс (с отдачей) от 75% до 1%.
     if min_value:
-        low, high = min_value * 100 / config.upgrader_max_target_chance_percent, min_value * 100
+        # Шанс считается с отдачей апгрейдера: вклад / цель × отдача.
+        rtp = upgrader_service.RTP_PERCENT
+        low, high = min_value * rtp / config.upgrader_max_target_chance_percent, min_value * rtp
     else:
         low, high = 0, float("inf")
     eligible = [
@@ -885,7 +886,7 @@ async def post_upgrader_spin(request: web.Request) -> web.Response:
     known = {i.name: i.value for i in await list_known_items(session) if i.name in ROSTER_BY_NAME}
     if target_name not in known or known[target_name] <= stake_value:
         return web.json_response({"error": "invalid_target"}, status=400)
-    raw_chance = stake_value * 100 / known[target_name]
+    raw_chance = stake_value * upgrader_service.RTP_PERCENT / known[target_name]
     if not 1 <= raw_chance <= config.upgrader_max_target_chance_percent:
         return web.json_response({"error": "target_out_of_range"}, status=400)
     target_value = known[target_name]

@@ -16,9 +16,9 @@ from bot.database.repo.known_items import KnownItem
 
 
 # Отдача апгрейдера, %: шанс = вклад / цель × отдача. 100 — честно 1:1,
-# 50 — шанс вдвое ниже (x2 даёт 25%). Меняется в админке, хранится в app_meta
+# 80 — x2 даёт 40%, шанс 75% — цель чуть дороже вклада. Меняется в админке, хранится в app_meta
 # (settings_service.UPGRADER_RTP) и подгружается при старте.
-DEFAULT_RTP_PERCENT = 50.0
+DEFAULT_RTP_PERCENT = 80.0
 RTP_PERCENT = DEFAULT_RTP_PERCENT
 
 
