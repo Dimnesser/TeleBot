@@ -11,7 +11,7 @@ from bot.database.repo import cases as cases_repo
 from bot.database.repo.users import add_balance, get_or_create_user
 from bot.keyboards.battle import battle_cases_keyboard, battle_result_keyboard
 from bot.keyboards.callbacks import BattleHomeCB, BattleStartCB
-from bot.services import drops
+from bot.services import drops, events_service
 from bot.services.battle_service import run_battle
 from bot.utils.texts import (
     BATTLE_HOME_DISCLAIMER,
@@ -57,7 +57,7 @@ async def handle_battle_start(callback: CallbackQuery, callback_data: BattleStar
 
         from_user = callback.from_user
         user = await get_or_create_user(session, from_user.id, from_user.username, from_user.first_name)
-        cost = case.price_tokens
+        cost = events_service.price(case.price_tokens)
         if user.balance < cost:
             await callback.answer(
                 BATTLE_NOT_ENOUGH_TOKENS.format(cost=cost, balance=user.balance), show_alert=True
@@ -68,7 +68,7 @@ async def handle_battle_start(callback: CallbackQuery, callback_data: BattleStar
         await session.commit()
 
         items = await cases_repo.list_case_items(session, case.id)
-        result = run_battle(items, luck=user.luck, case_price=case.price_tokens)
+        result = run_battle(items, luck=events_service.effective_luck(user.luck), case_price=case.price_tokens)
 
         if result.winner == "player":
             await drops.grant(

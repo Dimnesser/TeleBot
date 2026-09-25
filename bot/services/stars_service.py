@@ -17,7 +17,7 @@ from sqlalchemy import func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from bot.database.models import PartnerCode, PromoCode, StarsDeposit, User
-from bot.services import settings_service
+from bot.services import events_service, settings_service
 
 STARS_RATE = "stars_rate"
 STARS_CODE_BONUS = "stars_code_bonus_percent"
@@ -76,6 +76,7 @@ async def code_bonus_percent(session: AsyncSession, user: User, raw_code: str | 
 
 async def quote(session: AsyncSession, user: User, stars: int, raw_code: str | None) -> StarsQuote:
     code, bonus = await code_bonus_percent(session, user, raw_code)
+    bonus += events_service.deposit_bonus_percent()  # ивент «Бонус к пополнению»
     r = await rate(session)
     credited = math.floor(stars * r * (1 + bonus / 100))
     return StarsQuote(stars=stars, rate=r, bonus_percent=bonus, code=code, credited=credited)

@@ -11,7 +11,7 @@ from aiogram.types import CallbackQuery
 
 from bot.database.engine import async_session
 from bot.database.repo import inventory as inventory_repo
-from bot.services import drops
+from bot.services import drops, events_service
 from bot.database.repo.known_items import list_known_items
 from bot.database.repo.users import get_or_create_user
 from bot.keyboards.callbacks import (
@@ -240,7 +240,7 @@ async def handle_confirm(callback: CallbackQuery, state: FSMContext) -> None:
             return
 
         chance = chance_percent(contribution_value, target_value)
-        success = roll_success(lucky_chance(chance, user.luck))
+        success = roll_success(lucky_chance(chance, events_service.effective_luck(user.luck)))
 
         await inventory_repo.delete(session, item)
         if success:

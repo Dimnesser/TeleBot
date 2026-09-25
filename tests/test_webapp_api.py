@@ -909,6 +909,43 @@ async def test_admin_clears_recent_wins(client, auth_headers, admin_headers) -> 
     assert len(await (await client.get("/api/inventory", headers=auth_headers)).json()) == 1
 
 
+async def test_admin_events_discount_luck_deposit(client, auth_headers, admin_headers) -> None:
+    from bot.services import events_service
+
+    try:
+        assert (await client.post("/api/admin/events", headers=auth_headers, json={"type": "luck"})).status == 403
+        r = await client.post("/api/admin/events", headers=admin_headers, json={"type": "luck", "value": 50, "hours": 1})
+        assert r.status == 400  # сила вне диапазона
+        r = await client.post("/api/admin/events", headers=admin_headers,
+                              json={"type": "discount", "action": "start", "value": 50, "hours": 2})
+        assert [e["type"] for e in (await r.json())["active"]] == ["discount"]
+        me = await (await client.get("/api/me", headers=auth_headers)).json()
+        assert me["events"][0]["value"] == 50 and me["events"][0]["seconds_left"] > 7000
+
+        cases = (await (await client.get("/api/cases?category=starter", headers=auth_headers)).json())["cases"]
+        party = next(c for c in cases if c["code"] == "party")
+        assert party["price_tokens"] == -(-party["price_full"] // 2)
+        before = me["balance"]
+        body = await (await client.post(f"/api/cases/{party['id']}/open", headers=auth_headers, json={"qty": 1})).json()
+        assert body["cost"] == party["price_tokens"] and body["balance"] == before - party["price_tokens"]
+
+        await client.post("/api/admin/events", headers=admin_headers, json={"type": "deposit", "value": 100, "hours": 1})
+        q = await (await client.post("/api/deposit/stars/quote", headers=auth_headers, json={"amount": 100})).json()
+        assert q["credited"] == 350  # 100 ⭐ × 1.75 × (1 + 100%)
+
+        await client.post("/api/admin/events", headers=admin_headers, json={"type": "luck", "value": 2, "hours": 1})
+        assert events_service.effective_luck(None) == 2 and events_service.effective_luck(3) == 6
+        assert events_service.effective_luck(0) == 0  # личная ×0 сильнее ивента
+
+        for t in ("discount", "deposit", "luck"):
+            await client.post("/api/admin/events", headers=admin_headers, json={"type": t, "action": "stop"})
+        assert await (await client.get("/api/events", headers=auth_headers)).json() == []
+        cases = (await (await client.get("/api/cases?category=starter", headers=auth_headers)).json())["cases"]
+        assert next(c for c in cases if c["code"] == "party")["price_tokens"] == party["price_full"]
+    finally:
+        events_service._active.clear()
+
+
 async def test_stars_no_upper_limit(client, auth_headers) -> None:
     r = await client.post("/api/deposit/stars/quote", headers=auth_headers, json={"amount": 5_000_000})
     assert r.status == 200 and (await r.json())["credited"] == 8_750_000

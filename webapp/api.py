@@ -72,7 +72,7 @@ from bot.database.repo import staking as staking_repo
 from bot.database.repo.known_items import list_known_items
 from bot.database.repo.users import get_user_by_tg_id
 from bot.database.repo.users import add_balance, count_referrals, find_user
-from bot.services import deposit_moderation, drops, partner_service, quest_service, settings_service, stars_service, withdraw_service
+from bot.services import deposit_moderation, drops, events_service, partner_service, quest_service, settings_service, stars_service, withdraw_service
 from bot.services.deposit_service import cart_is_valid
 from bot.services.battle_service import BATTLE_QTYS, run_battle
 from bot.services.cases_service import REEL_REVEAL_INDEX, build_reel, draw_items, total_cost
@@ -138,7 +138,8 @@ def _case_json(case: Case) -> dict:
         "code": case.code,
         "category": case.category.value,
         "name": case.name,
-        "price_tokens": case.price_tokens,
+        "price_tokens": events_service.price(case.price_tokens),  # со скидкой ивента
+        "price_full": case.price_tokens,
         "item_count_label": case.item_count_label,
         "note": case.note,
         "is_openable": case.is_openable,
@@ -264,6 +265,7 @@ async def _user_json(request: web.Request) -> dict:
         "is_admin": is_admin(user.tg_id),
         "is_owner": is_owner(user.tg_id),
         "design": await settings_service.ui_design(session),
+        "events": events_service.as_json(),
         "case_credits": await rewards_repo.case_credits(session, user),
         "partner_percent": user.partner_percent,
         "deposit_bonus_percent": user.deposit_bonus_percent,
@@ -772,7 +774,7 @@ async def post_case_open(request: web.Request) -> web.Response:
     # клиент получает уже готовый won[] и декоративные ленты reels[] (по
     # одной на каждый выигрыш) с результатом на фиксированной позиции
     # REEL_REVEAL_INDEX, см. bot.services.cases_service.build_reel.
-    won = draw_items(items, qty, luck=user.luck, case_price=case.price_tokens)
+    won = draw_items(items, qty, luck=events_service.effective_luck(user.luck), case_price=case.price_tokens)
 
     user.balance -= cost
     await session.commit()
@@ -874,7 +876,7 @@ async def post_upgrader_spin(request: web.Request) -> web.Response:
 
     chance = chance_percent(stake_value, target_value)
     # Подкрутка админа меняет реальный шанс; игроку показывается честный.
-    success = roll_success(lucky_chance(chance, user.luck))
+    success = roll_success(lucky_chance(chance, events_service.effective_luck(user.luck)))
     # Точка остановки стрелки (0..100): внутри зоны шанса при успехе, вне — при
     # проигрыше. Чисто визуальная, исход уже решён выше.
     roll_point = random.uniform(0, chance) if success else random.uniform(chance, 100)
@@ -1052,7 +1054,7 @@ async def post_battle_start(request: web.Request) -> web.Response:
     if case is None or not case.is_openable or case.price_tokens is None:
         return web.json_response({"error": "case_unavailable"}, status=400)
 
-    cost = case.price_tokens * qty
+    cost = events_service.price(case.price_tokens) * qty
     if user.balance < cost:
         return web.json_response({"error": "not_enough_tokens", "message": f"Нужно {cost} B, у тебя {user.balance} B", "cost": cost, "balance": user.balance}, status=400)
 
@@ -1061,7 +1063,7 @@ async def post_battle_start(request: web.Request) -> web.Response:
     await session.refresh(user)
 
     items = await cases_repo.list_case_items(session, case.id)
-    result = run_battle(items, qty=qty, luck=user.luck, case_price=case.price_tokens)
+    result = run_battle(items, qty=qty, luck=events_service.effective_luck(user.luck), case_price=case.price_tokens)
 
     if result.winner == "player":
         await drops.grant(
@@ -1365,6 +1367,45 @@ async def post_admin_luck(request: web.Request) -> web.Response:
     return web.json_response(await _admin_user_json(session, target))
 
 
+@routes.get("/api/events")
+async def get_events(_request: web.Request) -> web.Response:
+    return web.json_response(events_service.as_json())
+
+
+@routes.get("/api/admin/events")
+async def get_admin_events(request: web.Request) -> web.Response:
+    if (denied := _require_admin(request)) is not None:
+        return denied
+    return web.json_response({
+        "active": events_service.as_json(),
+        "types": [{"type": t.code, "title": t.title, "emoji": t.emoji, "unit": t.unit, "min": t.min_value,
+                   "max": t.max_value, "default": t.default} for t in events_service.TYPES.values()],
+    })
+
+
+@routes.post("/api/admin/events")
+async def post_admin_events(request: web.Request) -> web.Response:
+    """{type, action: start|stop, value, hours} — ивент для всех игроков."""
+    if (denied := _require_admin(request)) is not None:
+        return denied
+    session = request["session"]
+    body = await request.json()
+    code = body.get("type")
+    if code not in events_service.TYPES:
+        return web.json_response({"error": "bad_type", "message": "Неизвестный ивент"}, status=400)
+    if body.get("action") == "stop":
+        await events_service.stop(session, code)
+    else:
+        val, hours = _num(body.get("value")), _num(body.get("hours"))
+        if val is None or hours is None:
+            return web.json_response({"error": "bad_value", "message": "Укажи силу и длительность"}, status=400)
+        try:
+            await events_service.start(session, code, val, hours)
+        except ValueError as exc:
+            return web.json_response({"error": "bad_value", "message": str(exc)}, status=400)
+    return await get_admin_events(request)
+
+
 @routes.post("/api/admin/drops/clear")
 async def post_admin_clear_drops(request: web.Request) -> web.Response:
     """Очистить ленту «Последние выигрыши» (журнал DropLog). Инвентари игроков не трогаются."""
@@ -1425,6 +1466,7 @@ async def get_admin_settings(request: web.Request) -> web.Response:
         "support_url": await settings_service.get_setting(session, settings_service.SUPPORT_URL),
         "support_bot": await settings_service.get_setting(session, settings_service.SUPPORT_BOT_USERNAME),
         "design": await settings_service.ui_design(session),
+        "events": events_service.as_json(),
         "stars_rate": await stars_service.rate(session),
         "stars_code_bonus_percent": await stars_service.code_bonus(session),
     })

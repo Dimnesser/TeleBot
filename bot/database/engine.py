@@ -80,6 +80,10 @@ async def init_db() -> None:
     await _seed_quests_if_empty()
     await load_granted_admins()
     await _backfill_drop_log_once()
+    from bot.services import events_service
+
+    async with async_session() as session:
+        await events_service.load(session)
 
 
 async def _backfill_drop_log_once() -> None:

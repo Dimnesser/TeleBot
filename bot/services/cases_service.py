@@ -21,9 +21,12 @@ def item_weight(item: CaseItem) -> float:
 
 
 def total_cost(case: Case, quantity: int) -> int | None:
+    """Цена открытия quantity кейсов — с учётом ивента скидки."""
+    from bot.services import events_service
+
     if case.price_tokens is None:
         return None
-    return case.price_tokens * quantity
+    return events_service.price(case.price_tokens) * quantity
 
 
 def draw_items(

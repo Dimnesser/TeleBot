@@ -167,6 +167,90 @@ function popNumber(el) {
   el.classList.add('num-pop');
 }
 
+// ------------------------------------------------------------------- ивенты
+/* Глобальные ивенты (включает админ): полоса с таймером под шапкой, классы
+   на <html> для эффектов (ev-luck / ev-discount / ev-deposit) и заставка
+   при первом показе нового ивента. */
+let EVENTS = [];
+let eventTimer = null;
+const EVENT_TEXT = {
+  luck: (e) => `Удача ×${e.value}`,
+  discount: (e) => `Скидка −${e.value}% на кейсы`,
+  deposit: (e) => `+${e.value}% к пополнению`,
+};
+const EVENT_SUB = {
+  luck: 'Шансы на окупающий дроп и апгрейд выше у всех',
+  discount: 'Все платные кейсы и батлы дешевле',
+  deposit: 'Бонус к пополнению брейнротами, гирсами и Stars',
+};
+function eventLeft(sec) {
+  const h = Math.floor(sec / 3600), m = Math.floor((sec % 3600) / 60), s = sec % 60;
+  return h ? `${h}:${String(m).padStart(2, '0')}:${String(s).padStart(2, '0')}` : `${m}:${String(s).padStart(2, '0')}`;
+}
+function applyEvents(list) {
+  const now = Date.now() / 1000;
+  EVENTS = (list || []).filter((e) => e.ends_at > now);
+  const html = document.documentElement;
+  ['luck', 'discount', 'deposit'].forEach((t) => html.classList.toggle('ev-' + t, EVENTS.some((e) => e.type === t)));
+  html.classList.toggle('ev-any', EVENTS.length > 0);
+  const bar = document.getElementById('event-bar');
+  if (!bar) return;
+  bar.classList.toggle('hidden', !EVENTS.length);
+  bar.innerHTML = EVENTS.map((e) => `
+    <div class="event-chip ev-${e.type}">
+      <span class="event-emoji">${e.emoji}</span>
+      <span class="event-name">${EVENT_TEXT[e.type](e)}</span>
+      <span class="event-left" data-ends="${e.ends_at}">${eventLeft(Math.max(0, Math.round(e.ends_at - now)))}</span>
+    </div>`).join('');
+  const fx = document.getElementById('event-fx');
+  if (fx && !fx.childElementCount && EVENTS.length) {
+    fx.innerHTML = Array.from({ length: 14 }, (_, i) => `<i style="--x:${(i * 7.3) % 100}%;--d:${6 + (i % 5)}s;--delay:-${(i * 1.7) % 9}s;--s:${0.6 + (i % 3) * 0.25}"></i>`).join('');
+  } else if (fx && !EVENTS.length) fx.innerHTML = '';
+  clearInterval(eventTimer);
+  if (EVENTS.length) {
+    eventTimer = setInterval(() => {
+      const t = Date.now() / 1000;
+      let expired = false;
+      bar.querySelectorAll('[data-ends]').forEach((el) => {
+        const left = Math.round(Number(el.dataset.ends) - t);
+        if (left <= 0) expired = true;
+        el.textContent = eventLeft(Math.max(0, left));
+      });
+      if (expired) api('/api/events').then(applyEvents).catch(() => {});
+    }, 1000);
+  }
+  // заставка для ивента, который игрок ещё не видел
+  let seen = {};
+  try { seen = JSON.parse(localStorage.getItem('bb_events_seen') || '{}'); } catch (e) {}
+  const fresh = EVENTS.find((e) => seen[e.type] !== e.ends_at);
+  if (fresh) {
+    EVENTS.forEach((e) => { seen[e.type] = e.ends_at; });
+    try { localStorage.setItem('bb_events_seen', JSON.stringify(seen)); } catch (e) {}
+    showEventSplash(fresh);
+  }
+}
+function showEventSplash(e) {
+  const el = document.createElement('div');
+  el.className = `event-splash ev-${e.type}`;
+  el.innerHTML = `
+    <div class="event-splash-rays"></div>
+    <div class="event-splash-card">
+      <div class="event-splash-kicker">ИВЕНТ НАЧАЛСЯ</div>
+      <div class="event-splash-emoji">${e.emoji}</div>
+      <div class="event-splash-title">${EVENT_TEXT[e.type](e)}</div>
+      <div class="event-splash-sub">${EVENT_SUB[e.type]}</div>
+      <div class="event-splash-left">ещё ${eventLeft(e.seconds_left)}</div>
+    </div>
+    ${Array.from({ length: 24 }, (_, i) => `<b class="event-confetti" style="--a:${i * 15}deg;--r:${120 + (i % 4) * 40}px;--c:${['#c6ff3d', '#ffd24d', '#8b5cf6', '#22d3ee', '#f472b6'][i % 5]}"></b>`).join('')}`;
+  document.body.appendChild(el);
+  haptic.success();
+  const close = () => { el.classList.add('leaving'); setTimeout(() => el.remove(), 400); };
+  el.addEventListener('click', close);
+  setTimeout(close, 3200);
+}
+// новые ивенты подхватываются без перезапуска
+setInterval(() => { api('/api/events').then(applyEvents).catch(() => {}); }, 60000);
+
 /* Дизайн задаёт админ: v3 (по умолчанию), v2 «Neon Glass» или classic
    (самый первый). v3 — слой поверх v2. Запоминаем, чтобы при следующем
    запуске не мигал другой дизайн до ответа /api/me. */
@@ -207,6 +291,7 @@ async function refreshMe() {
   const prevTokens = ME ? ME.balance : null;
   ME = await api('/api/me');
   applyDesign(ME.design);
+  applyEvents(ME.events || []);
   document.getElementById('drawer-username').textContent = ME.username ? '@' + ME.username : (ME.first_name || 'игрок');
   const drawerAvatar = document.getElementById('drawer-avatar');
   if (drawerAvatar && !drawerAvatar.dataset.ready) { drawerAvatar.outerHTML = avatarHtml(ME).replace('class="avatar ', 'id="drawer-avatar" data-ready="1" class="avatar '); }
@@ -447,6 +532,9 @@ function caseFootRight(c) {
   if (c.category === 'referral') {
     const n = caseCreditsLeft(c);
     return n ? `<span class="case-status ready">Осталось ${n}</span>` : '<span class="case-status">По коду</span>';
+  }
+  if (c.price_full && c.price_full !== c.price_tokens) {
+    return `<span class="price-wrap"><s class="price-old">${fmt(c.price_full)}</s>${priceHtml(c.price_tokens)}</span>`;
   }
   return priceHtml(c.price_tokens);
 }
@@ -1520,6 +1608,9 @@ function adminPanelHtml() {
       </form>
       <div class="muted admin-hint" id="s-status"></div>
 
+      <div class="admin-sub">Ивенты — для всех игроков</div>
+      <div id="admin-events" class="admin-events"><div class="muted">Загрузка…</div></div>
+
       <div class="admin-sub">Лента выигрышей</div>
       <button class="btn-chip danger" id="admin-clear-drops" style="width:100%;min-height:40px">🧹 Очистить «Последние выигрыши»</button>
       <div class="muted admin-hint">Лента на главной станет пустой и начнёт заполняться заново. Инвентари игроков не трогаются.</div>
@@ -1717,6 +1808,40 @@ async function bindAdminPanel(root) {
     const off = sb.querySelector('#sb-off');
     if (off) off.addEventListener('click', () => saveSupportBot(''));
   };
+  const paintEvents = (data) => {
+    const box = panel.querySelector('#admin-events');
+    box.innerHTML = data.types.map((t) => {
+      const on = data.active.find((a) => a.type === t.type);
+      return `
+        <div class="admin-event ${on ? 'on' : ''}" data-ev="${t.type}">
+          <div class="admin-event-head"><span class="admin-event-emoji">${t.emoji}</span><b>${t.title}</b>
+            ${on ? `<span class="admin-event-live">идёт · ${on.unit === 'x' ? '×' + on.value : on.value + '%'} · ещё ${eventLeft(on.seconds_left)}</span>` : ''}</div>
+          <div class="inline-form">
+            <input class="field" data-ev-value type="number" step="${t.unit === 'x' ? 0.1 : 1}" min="${t.min}" max="${t.max}" value="${on ? on.value : t.default}" placeholder="${t.unit === 'x' ? '×' : '%'}" />
+            <input class="field" data-ev-hours type="number" step="0.5" min="0.5" value="2" placeholder="часов" />
+            <button class="btn-chip" data-ev-start>${on ? 'Обновить' : 'Запустить'}</button>
+            ${on ? '<button class="btn-chip danger" data-ev-stop>Стоп</button>' : ''}
+          </div>
+          <div class="muted admin-hint">${t.unit === 'x' ? `Сила ×${t.min}…×${t.max}` : `${t.min}…${t.max}%`} · длительность в часах</div>
+        </div>`;
+    }).join('');
+    box.querySelectorAll('[data-ev]').forEach((card) => {
+      const type = card.dataset.ev;
+      const send = async (body) => {
+        try {
+          const d = await api('/api/admin/events', { method: 'POST', body: JSON.stringify({ type, ...body }) });
+          paintEvents(d); applyEvents(d.active);
+          toast(body.action === 'stop' ? 'Ивент остановлен' : 'Ивент запущен для всех игроков', 'success'); haptic.success();
+        } catch (err) { toast(err.message, 'error'); }
+      };
+      card.querySelector('[data-ev-start]').addEventListener('click', () => send({
+        action: 'start', value: Number(card.querySelector('[data-ev-value]').value), hours: Number(card.querySelector('[data-ev-hours]').value),
+      }));
+      card.querySelector('[data-ev-stop]')?.addEventListener('click', () => send({ action: 'stop' }));
+    });
+  };
+  api('/api/admin/events').then(paintEvents).catch(() => {});
+
   panel.querySelector('#admin-clear-drops').addEventListener('click', async () => {
     if (!confirm('Очистить ленту «Последние выигрыши» у всех?')) return;
     try {

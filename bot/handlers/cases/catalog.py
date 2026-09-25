@@ -20,7 +20,7 @@ from bot.keyboards.callbacks import (
 )
 from bot.keyboards.cases import case_detail_keyboard, cases_list_keyboard
 from bot.data.coins import coin_amount
-from bot.services import drops, quest_service
+from bot.services import drops, events_service, quest_service
 from bot.data.brainrot_roster import RARITY_LABEL, rarity_for
 from bot.services.cases_service import draw_items, total_cost
 from bot.utils.texts import (
@@ -88,7 +88,7 @@ async def _render_case_detail(callback: CallbackQuery, state: FSMContext, case_i
 
     lines = [CASE_DETAIL_HEADER.format(name=case.name)]
     if case.price_tokens is not None:
-        lines.append(CASE_DETAIL_PRICE_LINE.format(price=case.price_tokens, count=case.item_count_label or "?"))
+        lines.append(CASE_DETAIL_PRICE_LINE.format(price=events_service.price(case.price_tokens), count=case.item_count_label or "?"))
     else:
         lines.append(CASE_DETAIL_PRICE_UNKNOWN_LINE.format(count=case.item_count_label or "?"))
     if case.note:
@@ -150,7 +150,7 @@ async def handle_confirm_open(callback: CallbackQuery, callback_data: CaseConfir
             return
 
         items = await cases_repo.list_case_items(session, case.id)
-        won = draw_items(items, callback_data.qty, luck=user.luck, case_price=case.price_tokens)
+        won = draw_items(items, callback_data.qty, luck=events_service.effective_luck(user.luck), case_price=case.price_tokens)
 
         user.balance -= cost
         await session.commit()
