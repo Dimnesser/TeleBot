@@ -71,7 +71,7 @@ def test_cases_contain_only_roster_brainrots_with_roster_values():
 
 
 def test_paid_cases_are_balanced():
-    """Каждый платный кейс окупается в 25–40% открытий, возвращает ~94%
+    """Каждый платный кейс окупается в 10–40% открытий, возвращает ~90%
     цены, топ выпадает в 0.5–8%; веса — доли, в сумме 1."""
     lo, hi = PAYBACK_BAND
     for case in SEED_CASES:
@@ -83,7 +83,7 @@ def test_paid_cases_are_balanced():
         rtp = sum(i.value * i.weight for i in case.items) / case.price_tokens
         top = max(case.items, key=lambda i: i.value)
         assert lo <= payback <= hi, (case.code, payback)
-        assert 0.88 <= rtp <= TARGET_RTP + 1e-6, (case.code, rtp)
+        assert TARGET_RTP - 0.04 <= rtp <= TARGET_RTP + 1e-6, (case.code, rtp)  # у дешёвых — округление цены вверх
         assert TOP_CHANCE_BAND[0] <= top.weight <= TOP_CHANCE_BAND[1], (case.code, top.weight)
 
 

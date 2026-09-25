@@ -402,7 +402,7 @@ async def test_multi_open_returns_reel_per_win_and_real_game_info(client, auth_h
 
 async def test_upgrader_rejects_unknown_target(client, auth_headers) -> None:
     r = await client.get("/api/cases?category=starter", headers=auth_headers)
-    case = min((await r.json())["cases"], key=lambda c: c["price_tokens"])
+    case = next(c for c in (await r.json())["cases"] if c["code"] == "party")  # без монет — всегда брейнрот
     await client.post(f"/api/cases/{case['id']}/open", headers=auth_headers, json={"qty": 1})
     item = (await (await client.get("/api/inventory", headers=auth_headers)).json())[0]
     r = await client.post(

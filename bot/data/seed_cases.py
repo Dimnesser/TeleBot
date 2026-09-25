@@ -12,11 +12,11 @@ bot.data.brainrot_roster; в бесплатных кейсах ещё и мон�
 Баланс (вся выводится из данных, руками не проставлено ничего):
   * ценность предмета — его ценность в B со скриншотов пользователя
     (brainrot_roster.ROSTER);
-  * платный кейс окупается в PAYBACK_TARGET (~30%, коридор 25–40%)
-    открытий: вероятность делится между «окупающими» (ценность ≥ цены) и
+  * платный кейс окупается в PAYBACK_TARGET (~22%; для раскрута ~32%,
+    жёсткие ~12%) открытий: вероятность делится между «окупающими» (ценность ≥ цены) и
     остальными, внутри групп шанс ∝ 1 / ценность^0.8 — дорогие реже;
   * цена = средний дроп / TARGET_RTP, округлённая вверх — кейс возвращает
-    в среднем 94% цены; топ кейса выпадает в 0.5–8% открытий;
+    в среднем 90% цены; топ кейса выпадает в 0.5–8% открытий;
   * бесплатный кейс — натуральные веса 1/ценность^0.8, в среднем ≈ цене
     самого дешёвого кейса «Старт»: с него реально подняться.
 """
@@ -30,12 +30,13 @@ from bot.data.coins import COIN_RARITY, coin_name
 from bot.database.models import CaseCategory
 from bot.services.cases_service import CASE_WEIGHT_EXPONENT
 
-CASES_CONTENT_VERSION = "25-titan-top"
+CASES_CONTENT_VERSION = "26-harsh"
 
-TARGET_RTP = 0.94
-PAYBACK_TARGET = 0.30
-PAYBACK_BAND = (0.25, 0.40)
-EASY_PAYBACK = 0.38  # кейсы «для раскрута»
+TARGET_RTP = 0.90
+PAYBACK_TARGET = 0.22
+PAYBACK_BAND = (0.10, 0.40)
+EASY_PAYBACK = 0.32  # кейсы «для раскрута»
+HARD_PAYBACK = 0.12  # жёсткие дорогие: окупаются редко, зато ×6–×15
 TOP_CHANCE_BAND = (0.005, 0.08)
 
 
@@ -264,6 +265,18 @@ SEED_CASES: list[SeedCase] = [
     _case(A, "highroller", "Хайроллер", 0, CaseTheme("bills", "lightning", ("#1d1d24", "#050507"), "#ffd84d"),
           ["Kalika Bros", "Antonio", "Love Love Bear", "Elefanto Frigo", "Meowl", "Signore Carapace",
            "Strawberry Elephant"]),
+    # --- жёсткие: окупаются ~в 12% открытий, но топ даёт ×6–×15
+    _case(A, "chaos", "Хаос", 0, CaseTheme("smoke", "lightning", ("#5a2a8f", "#12061f"), "#d08cff"),
+          ["Jelly Moby", "Sammyni Cakini", "Tirilikalika Tirilikalako", "Digi Narwhal", "Kraken", "Dragon Gingerini",
+           "Love Love Bear", "Elefanto Frigo", "John Pork", "Signore Carapace"],
+          payback=HARD_PAYBACK),
+    _case(A, "hell", "Ад", 0, CaseTheme("embers", "fire", ("#b0201a", "#2a0402"), "#ff5a2a"),
+          ["Dragon Cannelloni", "Hydra Dragon Cannelloni", "Moby Bros", "Ginger Gerat", "Fishino Clownino", "Kraken",
+           "Antonio", "Love Love Bear", "Meowl", "Signore Carapace", "Strawberry Elephant"], payback=HARD_PAYBACK),
+    _case(A, "abyss", "Бездна", 0, CaseTheme("water", "smoke", ("#15204a", "#03050f"), "#4d7bff"),
+          ["Kraken", "Kalika Bros", "Dragon Aquanini", "Dragon Gingerini", "Antonio", "Griffin", "Love Love Bear",
+           "Arcadragon", "Skibidi Toilet", "John Pork", "Meowl", "Signore Carapace", "Strawberry Elephant"],
+          payback=HARD_PAYBACK),
     # --- мощные: дорогой вход, топ — Strawberry Elephant; Титан — самый дорогой кейс
     _case(A, "jackpot", "Джекпот", 0, CaseTheme("coins", "fire", ("#f0b429", "#6a3a00"), "#ffe27a"),
           ["Digi Narwhal", "La Supreme Combinasion", "Fishino Clownino", "Kraken", "Kalika Bros", "Dragon Aquanini",
