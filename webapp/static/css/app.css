@@ -1378,3 +1378,11 @@ html.ev-deposit .topbar-balance { animation: ev-wallet 1.8s ease-in-out infinite
 @media (prefers-reduced-motion: reduce) { .event-fx { display: none; } .event-chip, .event-splash-rays { animation: none; } }
 .admin-event-notify { display: flex; align-items: center; gap: 8px; margin-top: 8px; font-size: 13px; font-weight: 700; color: var(--text); cursor: pointer; }
 .admin-event-notify input { width: 18px; height: 18px; accent-color: #5dff8a; }
+.event-chip.ev-sell, .event-splash.ev-sell { --evc: #ffb13b; }
+.event-chip.ev-cashback, .event-splash.ev-cashback { --evc: #ff7aa8; }
+.event-chip.ev-battle, .event-splash.ev-battle { --evc: #ff5a4a; }
+.event-chip.ev-free, .event-splash.ev-free { --evc: #c6ff3d; }
+html.ev-sell .inv-sell-btn { color: #ffb13b; box-shadow: inset 0 0 0 1px rgba(255,177,59,.6), 0 0 14px -4px #ffb13b; }
+html.ev-free .free-banner { box-shadow: inset 0 0 0 1.5px #c6ff3d, 0 0 40px -10px #c6ff3d; }
+html.ev-battle .battle-card { box-shadow: inset 0 0 0 1px rgba(255,90,74,.5), 0 0 26px -12px #ff5a4a; }
+.v-sub.ev-bonus { color: #ff8a4a; font-weight: 800; }

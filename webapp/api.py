@@ -117,7 +117,7 @@ def free_case_wait_seconds(user, cooldown_hours: float) -> int:
 async def _free_case_state(request: web.Request) -> dict:
     """Кулдаун и обязательный канал бесплатного кейса (настраиваются админом)."""
     session = request["session"]
-    hours = await settings_service.free_case_cooldown_hours(session)
+    hours = events_service.free_cooldown_hours(await settings_service.free_case_cooldown_hours(session))
     channel = await settings_service.required_channel(session)
     return {
         "free_wait_seconds": free_case_wait_seconds(request["user"], hours),
@@ -308,7 +308,7 @@ async def post_inventory_sell(request: web.Request) -> web.Response:
     if item is None or item.user_id != user.id:
         return web.json_response({"error": "not_found"}, status=404)
 
-    payout = round(item.value * SELL_RATE)
+    payout = events_service.sell_payout(round(item.value * SELL_RATE))
     name = item.item_name
     await inventory_repo.delete(session, item)
     user = await add_balance(session, user, payout)
@@ -785,6 +785,9 @@ async def post_case_open(request: web.Request) -> web.Response:
     # Монеты — сразу на баланс B; брейнроты — в инвентарь; всё — в ленту.
     entries = await drops.grant(session, user, case.name, [(i.name, i.value) for i in won], case_id=case.id)
     await quest_service.record_progress(session, user, f"open_case:{case.code}")
+    refund = events_service.cashback(cost, sum(i.value for i in won))  # ивент «Кэшбэк»
+    if refund:
+        user = await add_balance(session, user, refund)
 
     won_payload = []
     for item, entry in zip(won, entries):
@@ -793,7 +796,7 @@ async def post_case_open(request: web.Request) -> web.Response:
             data["inventory_id"], data["sell_payout"] = None, 0
         else:
             data["inventory_id"] = entry.id
-            data["sell_payout"] = round(item.value * SELL_RATE)
+            data["sell_payout"] = events_service.sell_payout(round(item.value * SELL_RATE))
         won_payload.append(data)
 
     reels = [[_case_item_json(i) for i in build_reel(items, w)] for w in won]
@@ -806,6 +809,7 @@ async def post_case_open(request: web.Request) -> web.Response:
         "balance": user.balance,
         "reels": reels,
         "reveal_index": REEL_REVEAL_INDEX,
+        "cashback": refund,
     }
     if qty == 1:
         response["reel"] = reels[0]  # старое поле, на него ещё смотрят тесты/старые клиенты
@@ -1074,10 +1078,15 @@ async def post_battle_start(request: web.Request) -> web.Response:
         )
     elif result.winner == "tie":
         await add_balance(session, user, cost)
+    bonus = events_service.battle_bonus(result.player_total + result.bot_total) if result.winner == "player" else 0
+    if bonus:  # ивент «Батл-бонус»
+        await add_balance(session, user, bonus)
+        await session.refresh(user)
 
     return web.json_response(
         {
             "winner": result.winner,
+            "bonus": bonus,
             "qty": qty,
             "cost": cost,
             "player_item": _case_item_json(result.player_item),
@@ -1398,15 +1407,18 @@ async def post_admin_events(request: web.Request) -> web.Response:
     if body.get("action") == "stop":
         await events_service.stop(session, code)
     else:
-        val, hours = _num(body.get("value")), _num(body.get("hours"))
-        if val is None or hours is None:
+        val = _num(body.get("value"))
+        minutes = _num(body.get("minutes"))
+        if minutes is None and _num(body.get("hours")) is not None:
+            minutes = _num(body.get("hours")) * 60  # старые клиенты
+        if val is None or minutes is None:
             return web.json_response({"error": "bad_value", "message": "Укажи силу и длительность"}, status=400)
         try:
-            await events_service.start(session, code, val, hours)
+            await events_service.start(session, code, val, minutes)
         except ValueError as exc:
             return web.json_response({"error": "bad_value", "message": str(exc)}, status=400)
         if body.get("notify"):
-            recipients = await broadcast.start(request.app["bot"], events_service.announcement(code, val, hours))
+            recipients = await broadcast.start(request.app["bot"], events_service.announcement(code, val, minutes))
             response = await get_admin_events(request)
             data = json.loads(response.text)
             data["notified"] = recipients

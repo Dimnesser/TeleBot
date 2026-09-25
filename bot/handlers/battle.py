@@ -78,6 +78,9 @@ async def handle_battle_start(callback: CallbackQuery, callback_data: BattleStar
             )
         elif result.winner == "tie":
             await add_balance(session, user, cost)
+        bonus = events_service.battle_bonus(result.player_total + result.bot_total) if result.winner == "player" else 0
+        if bonus:  # ивент «Батл-бонус»
+            await add_balance(session, user, bonus)
 
         case_name = case.name
 
@@ -89,6 +92,8 @@ async def handle_battle_start(callback: CallbackQuery, callback_data: BattleStar
     ]
     if result.winner == "player":
         lines.append(BATTLE_RESULT_WIN)
+        if bonus:
+            lines.append(f"⚔️ Батл-бонус ивента: +{bonus} B")
     elif result.winner == "bot":
         lines.append(BATTLE_RESULT_LOSS)
     else:

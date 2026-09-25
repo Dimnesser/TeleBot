@@ -177,12 +177,24 @@ const EVENT_TEXT = {
   luck: (e) => `Удача ×${e.value}`,
   discount: (e) => `Скидка −${e.value}% на кейсы`,
   deposit: (e) => `+${e.value}% к пополнению`,
+  sell: (e) => `Продажа +${e.value}%`,
+  cashback: (e) => `Кэшбэк ${e.value}%`,
+  battle: (e) => `Батл-бонус +${e.value}%`,
+  free: (e) => `Free кейс каждые ${e.value} мин`,
 };
 const EVENT_SUB = {
   luck: 'Шансы на окупающий дроп и апгрейд выше у всех',
   discount: 'Все платные кейсы и батлы дешевле',
   deposit: 'Бонус к пополнению брейнротами, гирсами и Stars',
+  sell: 'Брейнроты продаются дороже',
+  cashback: 'Кейс не окупился — часть потерянного вернётся на баланс',
+  battle: 'К каждой победе в батле — бонус сверху',
+  free: 'Бесплатный кейс открывается намного чаще',
 };
+const EVENT_TYPES = Object.keys(EVENT_TEXT);
+const eventValue = (type) => (EVENTS.find((e) => e.type === type) || {}).value || 0;
+/** Выплата за продажу с учётом ивента «Продажа дороже». */
+const sellPayout = (v) => Math.round(v * (1 + eventValue('sell') / 100));
 function eventLeft(sec) {
   const h = Math.floor(sec / 3600), m = Math.floor((sec % 3600) / 60), s = sec % 60;
   return h ? `${h}:${String(m).padStart(2, '0')}:${String(s).padStart(2, '0')}` : `${m}:${String(s).padStart(2, '0')}`;
@@ -191,7 +203,7 @@ function applyEvents(list) {
   const now = Date.now() / 1000;
   EVENTS = (list || []).filter((e) => e.ends_at > now);
   const html = document.documentElement;
-  ['luck', 'discount', 'deposit'].forEach((t) => html.classList.toggle('ev-' + t, EVENTS.some((e) => e.type === t)));
+  EVENT_TYPES.forEach((t) => html.classList.toggle('ev-' + t, EVENTS.some((e) => e.type === t)));
   html.classList.toggle('ev-any', EVENTS.length > 0);
   const bar = document.getElementById('event-bar');
   if (!bar) return;
@@ -1175,6 +1187,7 @@ async function runOpening(stage, c, qty, fast = false) {
     await sleep(750);
   }
   showReveal(stage, c, qty, res.won);
+  if (res.cashback) { toast(`🛟 Кэшбэк ивента: +${fmt(res.cashback)} B`, 'success'); refreshMe().catch(() => {}); }
 }
 
 /** Кривая Безье для ленты (как CSS cubic-bezier): мягкий разгон, длинное
@@ -1389,7 +1402,7 @@ function paintInventory(root, items) {
       ${brainrotArt(i)}
       <div class="inv-name">${escapeHtml(i.name)}</div>
       <div class="inv-value">${fmt(i.value)}${coinIcon()}</div>
-      <button class="inv-sell-btn" data-sell="${i.id}" data-payout="${i.value}">Продать · ${i.value}${coinIcon()}</button>
+      <button class="inv-sell-btn" data-sell="${i.id}" data-payout="${sellPayout(i.value)}">Продать · ${sellPayout(i.value)}${coinIcon()}</button>
       <div class="inv-actions">
         <button class="inv-act" data-wd="${i.id}">Вывод</button>
         <button class="inv-act" data-ex="${i.id}">Обмен</button>
@@ -1815,15 +1828,15 @@ async function bindAdminPanel(root) {
       return `
         <div class="admin-event ${on ? 'on' : ''}" data-ev="${t.type}">
           <div class="admin-event-head"><span class="admin-event-emoji">${t.emoji}</span><b>${t.title}</b>
-            ${on ? `<span class="admin-event-live">идёт · ${on.unit === 'x' ? '×' + on.value : on.value + '%'} · ещё ${eventLeft(on.seconds_left)}</span>` : ''}</div>
+            ${on ? `<span class="admin-event-live">идёт · ${EVENT_TEXT[t.type](on)} · ещё ${eventLeft(on.seconds_left)}</span>` : ''}</div>
           <div class="inline-form">
-            <input class="field" data-ev-value type="number" step="${t.unit === 'x' ? 0.1 : 1}" min="${t.min}" max="${t.max}" value="${on ? on.value : t.default}" placeholder="${t.unit === 'x' ? '×' : '%'}" />
-            <input class="field" data-ev-hours type="number" step="0.5" min="0.5" value="2" placeholder="часов" />
+            <input class="field" data-ev-value type="number" step="${t.unit === 'x' ? 0.1 : 1}" min="${t.min}" max="${t.max}" value="${on ? on.value : t.default}" placeholder="${{ x: '×', '%': '%', min: 'мин' }[t.unit]}" />
+            <input class="field" data-ev-minutes type="number" step="1" min="1" value="60" placeholder="минут" />
             <button class="btn-chip" data-ev-start>${on ? 'Обновить' : 'Запустить'}</button>
             ${on ? '<button class="btn-chip danger" data-ev-stop>Стоп</button>' : ''}
           </div>
           <label class="admin-event-notify"><input type="checkbox" data-ev-notify ${on ? '' : 'checked'} /> 📣 Оповестить всех в боте</label>
-          <div class="muted admin-hint">${t.unit === 'x' ? `Сила ×${t.min}…×${t.max}` : `${t.min}…${t.max}%`} · длительность в часах</div>
+          <div class="muted admin-hint">${t.unit === 'x' ? `Сила ×${t.min}…×${t.max}` : t.unit === 'min' ? `Каждые ${t.min}…${t.max} мин` : `${t.min}…${t.max}%`} · длительность в минутах</div>
         </div>`;
     }).join('');
     box.querySelectorAll('[data-ev]').forEach((card) => {
@@ -1838,7 +1851,7 @@ async function bindAdminPanel(root) {
         } catch (err) { toast(err.message, 'error'); }
       };
       card.querySelector('[data-ev-start]').addEventListener('click', () => send({
-        action: 'start', value: Number(card.querySelector('[data-ev-value]').value), hours: Number(card.querySelector('[data-ev-hours]').value),
+        action: 'start', value: Number(card.querySelector('[data-ev-value]').value), minutes: Number(card.querySelector('[data-ev-minutes]').value),
         notify: card.querySelector('[data-ev-notify]').checked,
       }));
       card.querySelector('[data-ev-stop]')?.addEventListener('click', () => send({ action: 'stop' }));
@@ -2913,7 +2926,7 @@ async function startBattle(root, c) {
   }
   const verdict = overlay.querySelector('#duel-verdict');
   const pot = totals.me + totals.bot;
-  if (res.winner === 'player') { meSide.classList.add('win'); botSide.classList.add('lose'); verdict.innerHTML = `<span class="v-win">Победа · +${fmt(pot)}${coinIcon()}</span>${qty > 1 ? `<div class="v-sub">${players.length * 2} брейнротов в инвентарь</div>` : ''}`; haptic.success(); }
+  if (res.winner === 'player') { meSide.classList.add('win'); botSide.classList.add('lose'); verdict.innerHTML = `<span class="v-win">Победа · +${fmt(pot)}${coinIcon()}</span>${qty > 1 ? `<div class="v-sub">${players.length * 2} брейнротов в инвентарь</div>` : ''}${res.bonus ? `<div class="v-sub ev-bonus">⚔️ Батл-бонус +${fmt(res.bonus)}${coinIcon()}</div>` : ''}`; haptic.success(); }
   else if (res.winner === 'bot') { botSide.classList.add('win'); meSide.classList.add('lose'); verdict.innerHTML = `<span class="v-lose">Поражение</span>${qty > 1 ? `<div class="v-sub">${fmt(totals.me)} против ${fmt(totals.bot)}</div>` : ''}`; haptic.impact('rigid'); }
   else { verdict.innerHTML = '<span class="v-sub">Ничья — ставка возвращена</span>'; }
   refreshMe().catch(() => {});

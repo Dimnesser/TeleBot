@@ -157,6 +157,9 @@ async def handle_confirm_open(callback: CallbackQuery, callback_data: CaseConfir
         await session.refresh(user)
 
         await drops.grant(session, user, case.name, [(item.name, item.value) for item in won], case_id=case.id)
+        refund = events_service.cashback(cost, sum(item.value for item in won))  # ивент «Кэшбэк»
+        if refund:
+            user = await add_balance(session, user, refund)
         await quest_service.record_progress(session, user, f"open_case:{case.code}")
         tokens_after = user.balance
 
@@ -166,6 +169,8 @@ async def handle_confirm_open(callback: CallbackQuery, callback_data: CaseConfir
         CASE_OPEN_RESULT_LINE.format(name=item.name, value=item.value, rarity=RARITY_LABEL[rarity_for(item.name, item.value)])
         for item in won
     )
+    if refund:
+        result_lines.append(f"🛟 Кэшбэк ивента: +{refund} B")
     result_lines.append(CASE_OPEN_RESULT_FOOTER.format(tokens=tokens_after))
 
     await callback.message.edit_text(

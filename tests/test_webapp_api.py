@@ -964,6 +964,50 @@ async def test_event_start_notifies_all_players(client, auth_headers, admin_head
         events_service._active.clear()
 
 
+async def test_more_events_sell_cashback_battle_free(client, auth_headers, admin_headers) -> None:
+    import time
+
+    from bot.services import events_service
+
+    async def start(t, v, minutes=30):
+        r = await client.post("/api/admin/events", headers=admin_headers, json={"type": t, "value": v, "minutes": minutes})
+        assert r.status == 200, await r.text()
+        return await r.json()
+
+    try:
+        data = await start("sell", 50, minutes=15)
+        ev = next(e for e in data["active"] if e["type"] == "sell")
+        assert 14 * 60 <= ev["ends_at"] - time.time() <= 15 * 60  # длительность в минутах
+        assert (await client.post("/api/admin/events", headers=admin_headers,
+                                  json={"type": "sell", "value": 50, "minutes": 0})).status == 400
+
+        cases = (await (await client.get("/api/cases?category=starter", headers=auth_headers)).json())["cases"]
+        party = next(c for c in cases if c["code"] == "party")
+        won = (await (await client.post(f"/api/cases/{party['id']}/open", headers=auth_headers, json={"qty": 1})).json())["won"][0]
+        assert won["sell_payout"] == round(won["value"] * 1.5)
+        sold = await (await client.post(f"/api/inventory/{won['inventory_id']}/sell", headers=auth_headers)).json()
+        assert sold["payout"] == round(won["value"] * 1.5)
+
+        await start("cashback", 50)
+        for _ in range(6):
+            body = await (await client.post(f"/api/cases/{party['id']}/open", headers=auth_headers, json={"qty": 1})).json()
+            dropped = sum(w["value"] for w in body["won"])
+            assert body["cashback"] == (int((body["cost"] - dropped) * 0.5) if dropped < body["cost"] else 0)
+
+        assert events_service.battle_bonus(1000) == 0
+        await start("battle", 100)
+        assert events_service.battle_bonus(1000) == 1000
+
+        before = (await (await client.get("/api/cases", headers=auth_headers)).json())
+        await start("free", 30)
+        assert events_service.free_cooldown_hours(12) == 0.5 and events_service.free_cooldown_hours(0.2) == 0.2
+        assert "Бесплатный кейс каждые 30 мин" in events_service.announcement("free", 30, 90)
+        assert "1 ч 30 мин" in events_service.announcement("free", 30, 90)
+        assert before
+    finally:
+        events_service._active.clear()
+
+
 async def test_stars_no_upper_limit(client, auth_headers) -> None:
     r = await client.post("/api/deposit/stars/quote", headers=auth_headers, json={"amount": 5_000_000})
     assert r.status == 200 and (await r.json())["credited"] == 8_750_000
