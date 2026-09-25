@@ -6,6 +6,7 @@ from aiogram.fsm.context import FSMContext
 from aiogram.types import CallbackQuery
 
 from bot.database.engine import async_session
+from bot.services import events_service
 from bot.database.models import Quest, QuestScope
 from bot.database.repo import quests as quests_repo
 from bot.database.repo.users import add_balance, get_or_create_user
@@ -104,8 +105,8 @@ async def handle_claim(callback: CallbackQuery, callback_data: QuestClaimCB, sta
 
         progress.claimed = True
         await session.commit()
-        await add_balance(session, user, quest.reward_tokens)
-        reward = quest.reward_tokens
+        reward = round(quest.reward_tokens * events_service.quest_multiplier())  # ивент «Квесты ×N»
+        await add_balance(session, user, reward)
 
     await callback.answer(QUEST_CLAIMED_ALERT.format(reward=reward), show_alert=True)
     await open_quests_home(callback, state, answer=False)

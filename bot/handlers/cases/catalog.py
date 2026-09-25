@@ -1,6 +1,8 @@
 """Каталог и открытие кейсов в чате (оплата балансом B)."""
 from __future__ import annotations
 
+import random
+
 from aiogram import Router
 from aiogram.fsm.context import FSMContext
 from aiogram.types import CallbackQuery
@@ -156,6 +158,10 @@ async def handle_confirm_open(callback: CallbackQuery, callback_data: CaseConfir
         await session.commit()
         await session.refresh(user)
 
+        p_double = events_service.double_drop_chance()  # ивент «Двойной дроп»
+        extra = [draw_items(items, 1, luck=events_service.effective_luck(user.luck), case_price=case.price_tokens)[0]
+                 for _ in won if p_double and random.random() < p_double]
+        won = [*won, *extra]
         await drops.grant(session, user, case.name, [(item.name, item.value) for item in won], case_id=case.id)
         refund = events_service.cashback(cost, sum(item.value for item in won))  # ивент «Кэшбэк»
         if refund:
@@ -169,6 +175,8 @@ async def handle_confirm_open(callback: CallbackQuery, callback_data: CaseConfir
         CASE_OPEN_RESULT_LINE.format(name=item.name, value=item.value, rarity=RARITY_LABEL[rarity_for(item.name, item.value)])
         for item in won
     )
+    if extra:
+        result_lines.append(f"✌️ Двойной дроп ивента: +{len(extra)} шт.")
     if refund:
         result_lines.append(f"🛟 Кэшбэк ивента: +{refund} B")
     result_lines.append(CASE_OPEN_RESULT_FOOTER.format(tokens=tokens_after))

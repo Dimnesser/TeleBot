@@ -1062,6 +1062,43 @@ async def test_partner_events_only_for_own_audience(client, auth_headers, admin_
         events_service._partner.clear()
 
 
+async def test_upgrade_double_quest_events(client, auth_headers, admin_headers) -> None:
+    from bot.services import events_service
+
+    async def start(t, v):
+        r = await client.post("/api/admin/events", headers=admin_headers, json={"type": t, "value": v, "minutes": 30})
+        assert r.status == 200, await r.text()
+        return await r.json()
+
+    try:
+        data = await start("upgrade", 10)
+        ev = next(e for e in data["active"] if e["type"] == "upgrade")
+        assert ev["duration"] == 1800  # для полоски оставшегося времени
+        assert events_service.upgrade_chances(40, None) == (50, 50)
+        assert events_service.upgrade_chances(90, None) == (95, 95)
+        assert events_service.upgrade_chances(40, 0) == (50, 0)  # личная ×0 — всё равно не заходит
+        assert events_service.upgrade_chances(40, 2) == (50, 90)
+
+        await start("quest", 3)
+        assert events_service.quest_multiplier() == 3
+
+        await start("double", 50)
+        cases = (await (await client.get("/api/cases?category=starter", headers=auth_headers)).json())["cases"]
+        party = next(c for c in cases if c["code"] == "party")
+        inv0 = len(await (await client.get("/api/inventory?limit=500", headers=auth_headers)).json())
+        extra_total = won_total = 0
+        for _ in range(8):
+            body = await (await client.post(f"/api/cases/{party['id']}/open", headers=auth_headers, json={"qty": 1})).json()
+            won_total += len(body["won"])
+            extra_total += sum(1 for w in body["won"] if w["bonus"])
+            assert len(body["won"]) - sum(1 for w in body["won"] if w["bonus"]) == 1
+        inv1 = len(await (await client.get("/api/inventory?limit=500", headers=auth_headers)).json())
+        assert inv1 - inv0 == won_total and won_total == 8 + extra_total
+    finally:
+        events_service._active.clear()
+        events_service._started.clear()
+
+
 async def test_stars_no_upper_limit(client, auth_headers) -> None:
     r = await client.post("/api/deposit/stars/quote", headers=auth_headers, json={"amount": 5_000_000})
     assert r.status == 200 and (await r.json())["credited"] == 8_750_000

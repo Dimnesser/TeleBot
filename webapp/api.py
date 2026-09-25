@@ -82,7 +82,7 @@ from bot.services.cases_service import REEL_REVEAL_INDEX, build_reel, draw_items
 from bot.services.dice_service import COLORS, MATCH_PAYOUT_TABLE, resolve_roll
 from bot.services.giveaway_service import resolve_all_expired
 from bot.services.staking_service import MIN_STAKE_AMOUNT, STAKE_TIERS, is_matured, payout_amount, tier_by_term
-from bot.services.upgrader_service import chance_percent, lucky_chance, roll_success
+from bot.services.upgrader_service import chance_percent, roll_success
 from bot.utils.texts import FAQ_ENTRIES
 from webapp import crash_runtime as crash_rt
 
@@ -783,16 +783,23 @@ async def post_case_open(request: web.Request) -> web.Response:
     await session.commit()
     await session.refresh(user)
 
+    # Ивент «Двойной дроп»: с шансом X% к каждому открытию — ещё один предмет.
+    p_double = events_service.double_drop_chance()
+    luck = events_service.effective_luck(user.luck)
+    extra = [draw_items(items, 1, luck=luck, case_price=case.price_tokens)[0]
+             for _ in won if p_double and random.random() < p_double]
+
     # Монеты — сразу на баланс B; брейнроты — в инвентарь; всё — в ленту.
-    entries = await drops.grant(session, user, case.name, [(i.name, i.value) for i in won], case_id=case.id)
+    entries = await drops.grant(session, user, case.name, [(i.name, i.value) for i in (*won, *extra)], case_id=case.id)
     await quest_service.record_progress(session, user, f"open_case:{case.code}")
-    refund = events_service.cashback(cost, sum(i.value for i in won))  # ивент «Кэшбэк»
+    refund = events_service.cashback(cost, sum(i.value for i in (*won, *extra)))  # ивент «Кэшбэк»
     if refund:
         user = await add_balance(session, user, refund)
 
     won_payload = []
-    for item, entry in zip(won, entries):
+    for n, (item, entry) in enumerate(zip((*won, *extra), entries)):
         data = _case_item_json(item)
+        data["bonus"] = n >= len(won)  # из «Двойного дропа»
         if entry is None:
             data["inventory_id"], data["sell_payout"] = None, 0
         else:
@@ -882,8 +889,10 @@ async def post_upgrader_spin(request: web.Request) -> web.Response:
     target_value = known[target_name]
 
     chance = chance_percent(stake_value, target_value)
-    # Подкрутка админа меняет реальный шанс; игроку показывается честный.
-    success = roll_success(lucky_chance(chance, events_service.effective_luck(user.luck)))
+    # Подкрутка админа меняет реальный шанс (игроку не видна); ивент
+    # «Апгрейд-буст» прибавляет к шансу и виден игроку.
+    chance, real_chance = events_service.upgrade_chances(chance, user.luck)
+    success = roll_success(real_chance)
     # Точка остановки стрелки (0..100): внутри зоны шанса при успехе, вне — при
     # проигрыше. Чисто визуальная, исход уже решён выше.
     roll_point = random.uniform(0, chance) if success else random.uniform(chance, 100)
@@ -1137,9 +1146,10 @@ async def post_quest_claim(request: web.Request) -> web.Response:
 
     progress.claimed = True
     await session.commit()
-    user = await add_balance(session, user, quest.reward_tokens)
+    reward = round(quest.reward_tokens * events_service.quest_multiplier())  # ивент «Квесты ×N»
+    user = await add_balance(session, user, reward)
 
-    return web.json_response({"reward": quest.reward_tokens, "balance": user.balance})
+    return web.json_response({"reward": reward, "balance": user.balance})
 
 
 # -------------------------------------------------------------------- бонусы
@@ -1452,7 +1462,8 @@ async def get_partner_events(request: web.Request) -> web.Response:
         return web.json_response({"error": "not_partner", "message": "Ивенты доступны только партнёрам"}, status=403)
     audience = len(await events_service.partner_audience_ids(request["session"], pc))
     return web.json_response({
-        "active": [events_service._event_json(c, v, e, True) for c, (v, e) in sorted(events_service.partner_active(pc.id).items())],
+        "active": [events_service._event_json(c, v, e, True, events_service._partner_started(pc.id, c))
+                   for c, (v, e) in sorted(events_service.partner_active(pc.id).items())],
         "types": events_service.partner_types_json(pc.id),
         "audience": audience,
         "cooldown_hours": events_service.PARTNER_COOLDOWN_HOURS,

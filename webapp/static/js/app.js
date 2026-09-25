@@ -173,24 +173,21 @@ function popNumber(el) {
    при первом показе нового ивента. */
 let EVENTS = [];
 let eventTimer = null;
-const EVENT_TEXT = {
-  luck: (e) => `Удача ×${e.value}`,
-  discount: (e) => `Скидка −${e.value}% на кейсы`,
-  deposit: (e) => `+${e.value}% к пополнению`,
-  sell: (e) => `Продажа +${e.value}%`,
-  cashback: (e) => `Кэшбэк ${e.value}%`,
-  battle: (e) => `Батл-бонус +${e.value}%`,
-  free: (e) => `Free кейс каждые ${e.value} мин`,
+/* Всё про внешний вид ивента: текст, подпись, цвет, частицы, куда вести. */
+const EVENT_META = {
+  luck: { text: (e) => `Удача ×${e.value}`, sub: 'Шансы на окупающий дроп и апгрейд выше', color: '#5dff8a', fx: ['🍀', '✨'], go: 'home' },
+  discount: { text: (e) => `Скидка −${e.value}%`, sub: 'Все платные кейсы и батлы дешевле', color: '#ffd24d', fx: ['🏷️', '💸'], go: 'home' },
+  deposit: { text: (e) => `+${e.value}% к пополнению`, sub: 'Брейнроты, гирсы и Stars — с бонусом', color: '#8fd8ff', fx: ['💎', '⭐'], go: 'deposit' },
+  sell: { text: (e) => `Продажа +${e.value}%`, sub: 'Брейнроты продаются дороже', color: '#ffb13b', fx: ['💰', '🪙'], go: 'inventory' },
+  cashback: { text: (e) => `Кэшбэк ${e.value}%`, sub: 'Кейс не окупился — часть вернётся', color: '#ff7aa8', fx: ['🛟', '💖'], go: 'home' },
+  battle: { text: (e) => `Батл-бонус +${e.value}%`, sub: 'К каждой победе в батле — бонус сверху', color: '#ff5a4a', fx: ['⚔️', '🔥'], go: 'battle' },
+  free: { text: (e) => `Free кейс каждые ${e.value} мин`, sub: 'Бесплатный кейс намного чаще', color: '#c6ff3d', fx: ['⏱️', '🎁'], go: 'home' },
+  upgrade: { text: (e) => `Апгрейд +${e.value}%`, sub: 'К каждому шансу в апгрейдере', color: '#7c9bff', fx: ['⬆️', '⚡'], go: 'upgrader' },
+  double: { text: (e) => `Двойной дроп ${e.value}%`, sub: 'Кейс может дать второй брейнрот бесплатно', color: '#e28bff', fx: ['✌️', '🎰'], go: 'home' },
+  quest: { text: (e) => `Квесты ×${e.value}`, sub: 'Награды за квесты умножены', color: '#4fe3c8', fx: ['📋', '🏆'], go: 'quests' },
 };
-const EVENT_SUB = {
-  luck: 'Шансы на окупающий дроп и апгрейд выше у всех',
-  discount: 'Все платные кейсы и батлы дешевле',
-  deposit: 'Бонус к пополнению брейнротами, гирсами и Stars',
-  sell: 'Брейнроты продаются дороже',
-  cashback: 'Кейс не окупился — часть потерянного вернётся на баланс',
-  battle: 'К каждой победе в батле — бонус сверху',
-  free: 'Бесплатный кейс открывается намного чаще',
-};
+const EVENT_TEXT = Object.fromEntries(Object.entries(EVENT_META).map(([k, m]) => [k, m.text]));
+const EVENT_SUB = Object.fromEntries(Object.entries(EVENT_META).map(([k, m]) => [k, m.sub]));
 const EVENT_TYPES = Object.keys(EVENT_TEXT);
 const eventValue = (type) => (EVENTS.find((e) => e.type === type) || {}).value || 0;
 /** Выплата за продажу с учётом ивента «Продажа дороже». */
@@ -208,16 +205,31 @@ function applyEvents(list) {
   const bar = document.getElementById('event-bar');
   if (!bar) return;
   bar.classList.toggle('hidden', !EVENTS.length);
-  bar.innerHTML = EVENTS.map((e) => `
-    <div class="event-chip ev-${e.type}">
-      <span class="event-emoji">${e.emoji}</span>
-      <span class="event-name">${EVENT_TEXT[e.type](e)}${e.partner ? ' <em class="event-partner">🤝 партнёр</em>' : ''}</span>
-      <span class="event-left" data-ends="${e.ends_at}">${eventLeft(Math.max(0, Math.round(e.ends_at - now)))}</span>
-    </div>`).join('');
+  bar.innerHTML = EVENTS.map((e) => {
+    const m = EVENT_META[e.type] || {};
+    const left = Math.max(0, Math.round(e.ends_at - now));
+    const pct = e.duration ? Math.max(0, Math.min(100, (left / e.duration) * 100)) : 100;
+    return `
+    <button class="event-card" style="--evc:${m.color}" data-go="${m.go || 'home'}">
+      <span class="event-ico">${e.emoji}</span>
+      <span class="event-body">
+        <span class="event-name">${EVENT_TEXT[e.type](e)}${e.partner ? ' <em class="event-partner">🤝</em>' : ''}</span>
+        <span class="event-left" data-ends="${e.ends_at}" data-dur="${e.duration || 0}">${eventLeft(left)}</span>
+      </span>
+      <i class="event-progress" style="--p:${pct}%"></i>
+    </button>`;
+  }).join('');
+  bar.querySelectorAll('[data-go]').forEach((b) => b.addEventListener('click', () => navigate(b.dataset.go)));
   const fx = document.getElementById('event-fx');
-  if (fx && !fx.childElementCount && EVENTS.length) {
-    fx.innerHTML = Array.from({ length: 14 }, (_, i) => `<i style="--x:${(i * 7.3) % 100}%;--d:${6 + (i % 5)}s;--delay:-${(i * 1.7) % 9}s;--s:${0.6 + (i % 3) * 0.25}"></i>`).join('');
-  } else if (fx && !EVENTS.length) fx.innerHTML = '';
+  if (fx) {
+    const pool = EVENTS.flatMap((e) => (EVENT_META[e.type] || {}).fx || ['✨']);
+    const sig = pool.join('');
+    if (fx.dataset.sig !== sig) {
+      fx.dataset.sig = sig;
+      fx.innerHTML = pool.length ? Array.from({ length: 16 }, (_, i) =>
+        `<i style="--x:${(i * 6.7 + 3) % 100}%;--d:${7 + (i % 5) * 1.3}s;--delay:-${(i * 1.9) % 11}s;--s:${0.7 + (i % 3) * 0.25}">${pool[i % pool.length]}</i>`).join('') : '';
+    }
+  }
   clearInterval(eventTimer);
   if (EVENTS.length) {
     eventTimer = setInterval(() => {
@@ -227,6 +239,8 @@ function applyEvents(list) {
         const left = Math.round(Number(el.dataset.ends) - t);
         if (left <= 0) expired = true;
         el.textContent = eventLeft(Math.max(0, left));
+        const dur = Number(el.dataset.dur);
+        if (dur) el.closest('.event-card').querySelector('.event-progress').style.setProperty('--p', `${Math.max(0, (left / dur) * 100)}%`);
       });
       if (expired) api('/api/events').then(applyEvents).catch(() => {});
     }, 1000);
@@ -242,23 +256,28 @@ function applyEvents(list) {
   }
 }
 function showEventSplash(e) {
+  const m = EVENT_META[e.type] || {};
   const el = document.createElement('div');
   el.className = `event-splash ev-${e.type}`;
+  el.style.setProperty('--evc', m.color || '#c6ff3d');
   el.innerHTML = `
     <div class="event-splash-rays"></div>
     <div class="event-splash-card">
-      <div class="event-splash-kicker">ИВЕНТ НАЧАЛСЯ</div>
-      <div class="event-splash-emoji">${e.emoji}</div>
+      <div class="event-splash-kicker">${e.partner ? '🤝 ИВЕНТ ОТ ПАРТНЁРА' : 'ИВЕНТ НАЧАЛСЯ'}</div>
+      <div class="event-splash-orb"><span>${e.emoji}</span></div>
       <div class="event-splash-title">${EVENT_TEXT[e.type](e)}</div>
       <div class="event-splash-sub">${EVENT_SUB[e.type]}</div>
-      <div class="event-splash-left">ещё ${eventLeft(e.seconds_left)}</div>
+      <div class="event-splash-left">⏳ ещё ${eventLeft(e.seconds_left)}</div>
+      <button class="event-splash-go">Погнали →</button>
     </div>
-    ${Array.from({ length: 24 }, (_, i) => `<b class="event-confetti" style="--a:${i * 15}deg;--r:${120 + (i % 4) * 40}px;--c:${['#c6ff3d', '#ffd24d', '#8b5cf6', '#22d3ee', '#f472b6'][i % 5]}"></b>`).join('')}`;
+    ${Array.from({ length: 28 }, (_, i) => `<b class="event-confetti" style="--a:${i * 12.86}deg;--r:${130 + (i % 4) * 45}px;--c:${[m.color, '#ffd24d', '#8b5cf6', '#22d3ee', '#f472b6', '#ffffff'][i % 6]}"></b>`).join('')}`;
   document.body.appendChild(el);
   haptic.success();
-  const close = () => { el.classList.add('leaving'); setTimeout(() => el.remove(), 400); };
+  let closed = false;
+  const close = () => { if (closed) return; closed = true; el.classList.add('leaving'); setTimeout(() => el.remove(), 400); };
+  el.querySelector('.event-splash-go').addEventListener('click', (ev) => { ev.stopPropagation(); close(); navigate(m.go || 'home'); });
   el.addEventListener('click', close);
-  setTimeout(close, 3200);
+  setTimeout(close, 5000);
 }
 // новые ивенты подхватываются без перезапуска
 setInterval(() => { api('/api/events').then(applyEvents).catch(() => {}); }, 60000);
@@ -270,8 +289,8 @@ function mountEventCards(box, endpoint, partner) {
       const on = data.active.find((a) => a.type === t.type);
       const wait = partner && !on ? t.cooldown_left : 0;
       return `
-        <div class="admin-event ${on ? 'on' : ''} ${wait ? 'cooldown' : ''}" data-ev="${t.type}">
-          <div class="admin-event-head"><span class="admin-event-emoji">${t.emoji}</span><b>${t.title}</b>
+        <div class="admin-event ${on ? 'on' : ''} ${wait ? 'cooldown' : ''}" data-ev="${t.type}" style="--evc:${(EVENT_META[t.type] || {}).color || '#c6ff3d'}">
+          <div class="admin-event-head"><span class="admin-event-emoji">${t.emoji}</span><span class="admin-event-titles"><b>${t.title}</b><small>${EVENT_SUB[t.type] || ''}</small></span>
             ${on ? `<span class="admin-event-live">идёт · ${EVENT_TEXT[t.type](on)} · ещё ${eventLeft(on.seconds_left)}</span>` : ''}
             ${wait ? `<span class="admin-event-wait">снова через ${eventLeft(wait)}</span>` : ''}</div>
           <div class="inline-form">
@@ -1332,7 +1351,7 @@ function showReveal(stage, c, qty, won) {
       <div class="result-rays"></div>
       <div class="drops-title">${won.length > 1 ? `Ваш дроп · <span data-count="${total}">0</span>${coinIcon()}` : 'Ваш дроп'}</div>
       <div class="result-grid n${won.length}">
-        ${won.map((w, i) => dropTile(w, `result-tile ${w.value >= Math.max(c.price_tokens, 5) ? 'is-win' : ''}`, `data-won="${i}"`, c.price_tokens)).join('')}
+        ${won.map((w, i) => dropTile(w, `result-tile ${w.value >= Math.max(c.price_tokens, 5) ? 'is-win' : ''} ${w.bonus ? 'is-bonus' : ''}`, `data-won="${i}"`, c.price_tokens)).join('')}
       </div>
       ${c.price_tokens ? `<div class="result-mult ${mult >= 1 ? 'up' : 'down'}">×${mult.toFixed(mult >= 10 ? 0 : 1)} к цене кейса</div>` : ''}
       ${won.length === 1 ? gameInfoHtml(won[0]) : ''}
@@ -2121,7 +2140,7 @@ async function renderUpgraderScreen(root) {
   const { stake, target } = upgraderState;
   const sv = stakeValue(stake);
   const ready = stake.length && target;
-  const chance = ready ? computeChance(sv, target.value) : 0;
+  const chance = ready ? Math.min(95, computeChance(sv, target.value) + eventValue('upgrade')) : 0;
   const mult = ready ? (target.value / sv).toFixed(2) : null;
   const stakeSlot = `
     <button class="upg-slot ${stake.length ? 'filled' : ''}" id="slot-contribution" style="${stake.length ? glowVars({ value: sv }) : ''}">

@@ -9,7 +9,10 @@
   * cashback — «Кэшбэк X%»: если открытие кейса не окупилось, X% от
                разницы (цена − дроп) возвращается на баланс;
   * battle   — «Батл-бонус +X%»: к победе в батле сверху X% от банка;
-  * free     — «Бесплатный кейс каждые N минут» вместо обычного кулдауна.
+  * free     — «Бесплатный кейс каждые N минут» вместо обычного кулдауна;
+  * upgrade  — «Апгрейд-буст +X%»: к шансу апгрейдера прибавляется X (до 95%);
+  * double   — «Двойной дроп»: с шансом X% кейс даёт ещё один брейнрот;
+  * quest    — «Квесты ×N»: награды за квесты умножаются.
 
 Длительность задаётся в минутах.
 
@@ -50,10 +53,14 @@ TYPES: dict[str, EventType] = {
     "cashback": EventType("cashback", "Кэшбэк с кейсов", "🛟", "%", 5, 50, 15),
     "battle": EventType("battle", "Батл-бонус", "⚔️", "%", 10, 200, 50),
     "free": EventType("free", "Бесплатный кейс чаще", "⏱", "min", 5, 720, 60),
+    "upgrade": EventType("upgrade", "Апгрейд-буст", "⬆️", "%", 2, 30, 10),
+    "double": EventType("double", "Двойной дроп", "✌️", "%", 5, 50, 15),
+    "quest": EventType("quest", "Квесты ×N", "📋", "x", 1.5, 5, 2),
 }
 MAX_MINUTES = 60 * 24 * 7
 
 _active: dict[str, tuple[float, float]] = {}  # код → (значение, конец unix)
+_started: dict[str, float] = {}  # код → старт unix (для полоски оставшегося времени)
 
 # Партнёрские ивенты: id партнёрского кода → тип → (значение, конец, старт)
 _partner: dict[int, dict[str, tuple[float, float, float]]] = {}
@@ -62,6 +69,7 @@ _audience: ContextVar[int | None] = ContextVar("event_audience", default=None)
 # Потолки для партнёров: для «free» — минимальный интервал, для остальных — максимум силы.
 PARTNER_LIMITS: dict[str, float] = {
     "luck": 2, "discount": 30, "deposit": 50, "sell": 30, "cashback": 25, "battle": 100, "free": 30,
+    "upgrade": 10, "double": 15, "quest": 2,
 }
 PARTNER_MAX_MINUTES = 180
 PARTNER_COOLDOWN_HOURS = 12
@@ -91,15 +99,24 @@ def value(code: str) -> float | None:
     return min(vals) if code == "free" else max(vals)  # у «free» сильнее — меньший интервал
 
 
-def _event_json(code: str, v: float, ends: float, partner: bool) -> dict:
+def _event_json(code: str, v: float, ends: float, partner: bool, started: float | None = None) -> dict:
+    duration = int(ends - started) if started and ends > started else None
     return {"type": code, "title": TYPES[code].title, "emoji": TYPES[code].emoji, "unit": TYPES[code].unit,
-            "value": v, "ends_at": int(ends), "seconds_left": max(0, int(ends - time.time())), "partner": partner}
+            "value": v, "ends_at": int(ends), "seconds_left": max(0, int(ends - time.time())), "partner": partner,
+            "duration": duration}
+
+
+def _partner_started(pc_id: int | None, code: str) -> float | None:
+    ev = _partner.get(pc_id or -1, {}).get(code)
+    return ev[2] if ev else None
 
 
 def as_json() -> list[dict]:
     """Ивенты, которые действуют на текущего игрока (глобальные + его партнёра)."""
-    out = [_event_json(code, v, ends, False) for code, (v, ends) in sorted(active().items())]
-    out += [_event_json(code, v, ends, True) for code, (v, ends) in sorted(partner_active(_audience.get()).items())]
+    pc = _audience.get()
+    out = [_event_json(code, v, ends, False, _started.get(code)) for code, (v, ends) in sorted(active().items())]
+    out += [_event_json(code, v, ends, True, _partner_started(pc, code))
+            for code, (v, ends) in sorted(partner_active(pc).items())]
     return out
 
 
@@ -137,9 +154,12 @@ async def load(session: AsyncSession) -> None:
     _active.clear()
     for row in rows:
         try:
-            v, ends = row.value.split("|")
-            _active[row.key.removeprefix("event_")] = (float(v), float(ends))
-        except ValueError:
+            parts = row.value.split("|")
+            code = row.key.removeprefix("event_")
+            _active[code] = (float(parts[0]), float(parts[1]))
+            if len(parts) > 2:
+                _started[code] = float(parts[2])
+        except (ValueError, IndexError):
             continue
     _partner.clear()
     for row in (await session.execute(select(AppMeta).where(AppMeta.key.like("pevent_%")))).scalars().all():
@@ -206,7 +226,7 @@ async def stop_partner(session: AsyncSession, pc_id: int, code: str) -> None:
 
 def all_partner_events() -> list[tuple[int, dict]]:
     """Все идущие партнёрские ивенты — для админки."""
-    return [(pc_id, _event_json(code, v, ends, True))
+    return [(pc_id, _event_json(code, v, ends, True, _partner_started(pc_id, code)))
             for pc_id in _partner for code, (v, ends) in sorted(partner_active(pc_id).items())]
 
 
@@ -219,9 +239,11 @@ async def start(session: AsyncSession, code: str, val: float, minutes: float) ->
         raise ValueError(f"{t.title}: от {t.min_value:g} до {t.max_value:g}{UNIT_LABEL[t.unit]}")
     if not 1 <= minutes <= MAX_MINUTES:
         raise ValueError(f"Длительность: от 1 до {MAX_MINUTES} минут")
-    ends = time.time() + minutes * 60
-    await settings_service.set_setting(session, _key(code), f"{val:g}|{ends:.0f}")
+    now = time.time()
+    ends = now + minutes * 60
+    await settings_service.set_setting(session, _key(code), f"{val:g}|{ends:.0f}|{now:.0f}")
     _active[code] = (val, ends)
+    _started[code] = now
 
 
 async def stop(session: AsyncSession, code: str) -> None:
@@ -271,6 +293,31 @@ def battle_bonus(pot: int) -> int:
     return int(pot * pct / 100) if pct else 0
 
 
+def upgrade_bonus() -> float:
+    return value("upgrade") or 0.0
+
+
+def upgrade_chances(chance: float, personal_luck: float | None) -> tuple[float, float]:
+    """(шанс, который видит игрок; реальный шанс) апгрейдера с ивентами.
+    Апгрейд-буст виден игроку (+X к шансу), подкрутка — нет; личная ×0 —
+    никогда не заходит."""
+    bonus = upgrade_bonus()
+    shown = min(95, chance + bonus)
+    luck = effective_luck(personal_luck)
+    if luck == 0:
+        return shown, 0
+    real = chance if luck is None else min(95, chance * luck)
+    return shown, min(95, real + bonus)
+
+
+def double_drop_chance() -> float:
+    return (value("double") or 0.0) / 100
+
+
+def quest_multiplier() -> float:
+    return value("quest") or 1.0
+
+
 def free_cooldown_hours(base_hours: float) -> float:
     minutes = value("free")
     return min(base_hours, minutes / 60) if minutes else base_hours
@@ -296,5 +343,8 @@ def announcement(code: str, val: float, minutes: float) -> str:
         "cashback": f"<b>Кэшбэк {val:g}%</b> — если кейс не окупился, часть потерянного вернётся на баланс.",
         "battle": f"<b>Батл-бонус +{val:g}%</b> — к каждой победе в батле сверху.",
         "free": f"<b>Бесплатный кейс каждые {val:g} мин</b> вместо обычного ожидания.",
+        "upgrade": f"<b>Апгрейд-буст +{val:g}%</b> — к каждому шансу в апгрейдере.",
+        "double": f"<b>Двойной дроп</b> — с шансом {val:g}% кейс даёт второй брейнрот бесплатно.",
+        "quest": f"<b>Квесты ×{val:g}</b> — награды за все квесты умножаются.",
     }[code]
     return f"{t.emoji} <b>ИВЕНТ В BRAINCORE!</b>\n\n{what}\n\n⏳ Действует {left} — успей!"
