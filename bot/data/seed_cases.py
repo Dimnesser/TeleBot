@@ -30,7 +30,7 @@ from bot.data.coins import COIN_RARITY, coin_name
 from bot.database.models import CaseCategory
 from bot.services.cases_service import CASE_WEIGHT_EXPONENT
 
-CASES_CONTENT_VERSION = "23-easy-cases"
+CASES_CONTENT_VERSION = "24-more-cases"
 
 TARGET_RTP = 0.94
 PAYBACK_TARGET = 0.30
@@ -207,10 +207,18 @@ SEED_CASES: list[SeedCase] = [
     _case(K, "double", "Дабл", 0, CaseTheme("coins", "lightning", ("#3f5fd8", "#14205a"), "#9fb4ff"),
           [BF, "Pizza and Ranch", "Capitano Moby", "La Food Combinasion", "Cooki and Milki", "Globa Steppa",
            "Los Amigos", "La Breakfast Combinasion", "Los Sekolahs", "Rico Dinero"], payback=EASY_PAYBACK),
+    _case(K, "razgon", "Разгон", 0, CaseTheme("candy", "confetti", ("#d06ad8", "#4a1850"), "#ffb3f5"),
+          ["Cooki and Milki", "Sammyni Fattini", "Spooky and Pumpky", "Cerberus", "Globa Steppa", "Reinito Sleighito",
+           "Los Amigos", "Fortunu and Cashuru", "Quackini Snackini", "La Breakfast Combinasion", "Venuspino"],
+          payback=EASY_PAYBACK),
     _case(K, "stairs", "Лесенка", 0, CaseTheme("wood", "dust", ("#b07a3a", "#4a2e10"), "#ffc27a"),
           ["Fragrama and Chocrama", "Cerberus", "Reinito Sleighito", "Quackini Snackini", "Duggy Bros", "Dug dug dug",
            "Ketupat Bros", "Bumbatron", "Dragon Cannelloni", "Jelly Moby", "Tirilikalika Tirilikalako"],
           payback=EASY_PAYBACK),
+    _case(K, "ryvok", "Рывок", 0, CaseTheme("crystals", "lightning", ("#2fb3c8", "#0c3a44"), "#8ff4ff"),
+          ["Los Secret Combinasionas", "Foxini Lanternini", "Rico Dinero", "Rosey and Teddy", "Bumbatron", "La Casa Boo",
+           "Bunny and Eggy", "Dragon Cannelloni", "Pancake and Syrup", "Hydra Dragon Cannelloni", "Moby Bros",
+           "Ginger Gerat"], payback=EASY_PAYBACK),
     _case(K, "turbo", "Турбо", 0, CaseTheme("embers", "lightning", ("#d8502f", "#5a1408"), "#ffb13b"),
           ["Rico Dinero", "La Casa Boo", "Bunny and Eggy", "Pancake and Syrup", "Sammyni Cakini", "Hydra Bunny",
            "Digi Narwhal", "La Supreme Combinasion", "Kraken", "Dragon Gingerini"], payback=EASY_PAYBACK),
@@ -256,6 +264,13 @@ SEED_CASES: list[SeedCase] = [
     _case(A, "highroller", "Хайроллер", 0, CaseTheme("bills", "lightning", ("#1d1d24", "#050507"), "#ffd84d"),
           ["Kalika Bros", "Antonio", "Love Love Bear", "Elefanto Frigo", "Meowl", "Signore Carapace",
            "Strawberry Elephant"]),
+    # --- мощные: дорогой вход, топ — Strawberry Elephant
+    _case(A, "jackpot", "Джекпот", 0, CaseTheme("coins", "fire", ("#f0b429", "#6a3a00"), "#ffe27a"),
+          ["Digi Narwhal", "La Supreme Combinasion", "Fishino Clownino", "Kraken", "Kalika Bros", "Dragon Aquanini",
+           "Dragon Gingerini", "Antonio", "Love Love Bear", "Meowl", "Signore Carapace", "Strawberry Elephant"]),
+    _case(A, "titan", "Титан", 0, CaseTheme("bolts", "lightning", ("#6a7384", "#15181f"), "#c9e4ff"),
+          ["Antonio", "Griffin", "Love Love Bear", "Arcadragon", "Elefanto Frigo", "Skibidi Toilet", "John Pork", "Meowl",
+           "Signore Carapace", "Strawberry Elephant"]),
     _case(A, "crown", "Корона", 0, CaseTheme("coins", "sparkle", ("#e9c24a", "#6b4c00"), "#fff2a8"),
           ["Griffin", "Love Love Bear", "Arcadragon", "Elefanto Frigo", "Skibidi Toilet", "John Pork", "Meowl",
            "Signore Carapace", "Strawberry Elephant"]),
