@@ -30,7 +30,7 @@ from bot.data.coins import COIN_RARITY, coin_name
 from bot.database.models import CaseCategory
 from bot.services.cases_service import CASE_WEIGHT_EXPONENT
 
-CASES_CONTENT_VERSION = "24-more-cases"
+CASES_CONTENT_VERSION = "25-titan-top"
 
 TARGET_RTP = 0.94
 PAYBACK_TARGET = 0.30
@@ -264,13 +264,13 @@ SEED_CASES: list[SeedCase] = [
     _case(A, "highroller", "Хайроллер", 0, CaseTheme("bills", "lightning", ("#1d1d24", "#050507"), "#ffd84d"),
           ["Kalika Bros", "Antonio", "Love Love Bear", "Elefanto Frigo", "Meowl", "Signore Carapace",
            "Strawberry Elephant"]),
-    # --- мощные: дорогой вход, топ — Strawberry Elephant
+    # --- мощные: дорогой вход, топ — Strawberry Elephant; Титан — самый дорогой кейс
     _case(A, "jackpot", "Джекпот", 0, CaseTheme("coins", "fire", ("#f0b429", "#6a3a00"), "#ffe27a"),
           ["Digi Narwhal", "La Supreme Combinasion", "Fishino Clownino", "Kraken", "Kalika Bros", "Dragon Aquanini",
            "Dragon Gingerini", "Antonio", "Love Love Bear", "Meowl", "Signore Carapace", "Strawberry Elephant"]),
     _case(A, "titan", "Титан", 0, CaseTheme("bolts", "lightning", ("#6a7384", "#15181f"), "#c9e4ff"),
-          ["Antonio", "Griffin", "Love Love Bear", "Arcadragon", "Elefanto Frigo", "Skibidi Toilet", "John Pork", "Meowl",
-           "Signore Carapace", "Strawberry Elephant"]),
+          ["Love Love Bear", "Arcadragon", "Elefanto Frigo", "Skibidi Toilet", "John Pork", "Meowl", "Signore Carapace",
+           "Strawberry Elephant"]),
     _case(A, "crown", "Корона", 0, CaseTheme("coins", "sparkle", ("#e9c24a", "#6b4c00"), "#fff2a8"),
           ["Griffin", "Love Love Bear", "Arcadragon", "Elefanto Frigo", "Skibidi Toilet", "John Pork", "Meowl",
            "Signore Carapace", "Strawberry Elephant"]),

@@ -117,3 +117,8 @@ async def test_case_detail_survives_legacy_coin_rows():
 
     assert _brainrot_json("🎫 5", 5, "coins")["coins"] is True
     assert _brainrot_json("Unknown Thing", 7, "coins")["rarity"]  # неизвестный тир — без 500
+
+
+def test_titan_is_the_most_expensive_case():
+    titan = SEED_CASES_BY_CODE["titan"]
+    assert titan.price_tokens == max(c.price_tokens or 0 for c in SEED_CASES)
