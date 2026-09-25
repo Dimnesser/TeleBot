@@ -282,6 +282,58 @@ function showEventSplash(e) {
 // новые ивенты подхватываются без перезапуска
 setInterval(() => { api('/api/events').then(applyEvents).catch(() => {}); }, 60000);
 
+/** Автоивенты: бот сам запускает случайный ивент через случайные паузы. */
+function mountAutoEvents(box) {
+  const STR = [['low', 'Слабые'], ['mid', 'Средние'], ['high', 'Сильные']];
+  const paint = (c) => {
+    const last = c.last ? `${(EVENT_META[c.last.type] ? EVENT_TEXT[c.last.type]({ value: c.last.value }) : c.last.type)} на ${c.last.minutes} мин` : 'ещё не было';
+    box.innerHTML = `
+      <div class="auto-head ${c.enabled ? 'on' : ''}">
+        <label class="auto-switch"><input type="checkbox" data-a="enabled" ${c.enabled ? 'checked' : ''}/><i></i></label>
+        <div><b>${c.enabled ? 'Включены' : 'Выключены'}</b>
+          <div class="muted">${c.enabled && c.next_in != null ? `следующий через ${eventLeft(c.next_in)}` : 'бот сам запускает случайные ивенты'}</div>
+        </div>
+      </div>
+      <div class="auto-grid">
+        <label>Пауза, мин<span><input class="field" type="number" min="5" data-a="gap_min" value="${c.gap_min}"/>–<input class="field" type="number" min="5" data-a="gap_max" value="${c.gap_max}"/></span></label>
+        <label>Длительность, мин<span><input class="field" type="number" min="1" data-a="dur_min" value="${c.dur_min}"/>–<input class="field" type="number" min="1" data-a="dur_max" value="${c.dur_max}"/></span></label>
+      </div>
+      <div class="pill-row auto-strength">${STR.map(([k, l]) => `<button class="pill ${c.strength === k ? 'active' : ''}" data-str="${k}">${l}</button>`).join('')}</div>
+      <div class="auto-types">${c.types_all.map((t) => `
+        <label class="auto-type ${c.types.includes(t.type) ? 'on' : ''}" style="--evc:${(EVENT_META[t.type] || {}).color}">
+          <input type="checkbox" data-type="${t.type}" ${c.types.includes(t.type) ? 'checked' : ''}/>${t.emoji} ${escapeHtml(t.title)}
+        </label>`).join('')}</div>
+      <label class="admin-event-notify"><input type="checkbox" data-a="notify" ${c.notify ? 'checked' : ''}/> 📣 Оповещать всех в боте</label>
+      <div class="muted admin-hint">Последний автоивент: ${last}</div>
+      <div class="btn-row"><button class="btn-chip" id="auto-save">Сохранить</button><button class="btn-chip ghost" id="auto-fire">🎲 Случайный сейчас</button></div>`;
+    let strength = c.strength;
+    box.querySelectorAll('[data-str]').forEach((b) => b.addEventListener('click', () => {
+      strength = b.dataset.str; box.querySelectorAll('[data-str]').forEach((x) => x.classList.toggle('active', x === b));
+    }));
+    box.querySelectorAll('[data-type]').forEach((cb) => cb.addEventListener('change', () => cb.closest('.auto-type').classList.toggle('on', cb.checked)));
+    const collect = () => {
+      const v = (k) => box.querySelector(`[data-a="${k}"]`);
+      return {
+        enabled: v('enabled').checked, notify: v('notify').checked, strength,
+        gap_min: Number(v('gap_min').value), gap_max: Number(v('gap_max').value),
+        dur_min: Number(v('dur_min').value), dur_max: Number(v('dur_max').value),
+        types: [...box.querySelectorAll('[data-type]:checked')].map((x) => x.dataset.type),
+      };
+    };
+    const send = async (extra, msg) => {
+      try {
+        paint(await api('/api/admin/auto-events', { method: 'POST', body: JSON.stringify({ ...collect(), ...extra }) }));
+        toast(msg, 'success'); haptic.success();
+        if (extra.fire) api('/api/events').then(applyEvents).catch(() => {});
+      } catch (err) { toast(err.message, 'error'); }
+    };
+    box.querySelector('[data-a="enabled"]').addEventListener('change', () => send({}, collect().enabled ? 'Автоивенты включены' : 'Автоивенты выключены'));
+    box.querySelector('#auto-save').addEventListener('click', () => send({}, 'Настройки автоивентов сохранены'));
+    box.querySelector('#auto-fire').addEventListener('click', () => send({ fire: true }, 'Случайный ивент запущен'));
+  };
+  api('/api/admin/auto-events').then(paint).catch((err) => { box.innerHTML = `<div class="muted">${escapeHtml(err.message)}</div>`; });
+}
+
 /** Карточки запуска ивентов: админка (для всех) и партнёр (для его аудитории). */
 function mountEventCards(box, endpoint, partner) {
   const paint = (data) => {
@@ -1700,6 +1752,9 @@ function adminPanelHtml() {
       </form>
       <div class="muted admin-hint" id="s-status"></div>
 
+      <div class="admin-sub">🎲 Автоивенты</div>
+      <div id="admin-auto-events" class="auto-events"><div class="muted">Загрузка…</div></div>
+
       <div class="admin-sub">Ивенты — для всех игроков</div>
       <div id="admin-events" class="admin-events"><div class="muted">Загрузка…</div></div>
 
@@ -1901,6 +1956,7 @@ async function bindAdminPanel(root) {
     if (off) off.addEventListener('click', () => saveSupportBot(''));
   };
   mountEventCards(panel.querySelector('#admin-events'), '/api/admin/events', false);
+  mountAutoEvents(panel.querySelector('#admin-auto-events'));
 
   panel.querySelector('#admin-clear-drops').addEventListener('click', async () => {
     if (!confirm('Очистить ленту «Последние выигрыши» у всех?')) return;

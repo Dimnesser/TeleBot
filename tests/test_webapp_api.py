@@ -1099,6 +1099,55 @@ async def test_upgrade_double_quest_events(client, auth_headers, admin_headers) 
         events_service._started.clear()
 
 
+async def test_auto_events_config_fire_and_tick(client, auth_headers, admin_headers, monkeypatch) -> None:
+    import asyncio
+    import time
+
+    from bot.services import auto_events, broadcast, events_service
+
+    try:
+        assert (await client.get("/api/admin/auto-events", headers=auth_headers)).status == 403
+        cfg = await (await client.get("/api/admin/auto-events", headers=admin_headers)).json()
+        assert cfg["enabled"] is False and len(cfg["types_all"]) == len(events_service.TYPES)
+
+        bad = await client.post("/api/admin/auto-events", headers=admin_headers, json={"gap_min": 100, "gap_max": 10})
+        assert bad.status == 400
+        bad = await client.post("/api/admin/auto-events", headers=admin_headers, json={"types": []})
+        assert bad.status == 400
+
+        r = await client.post("/api/admin/auto-events", headers=admin_headers, json={
+            "enabled": True, "gap_min": 60, "gap_max": 120, "dur_min": 10, "dur_max": 20,
+            "strength": "high", "types": ["luck", "discount"], "notify": False,
+        })
+        cfg = await r.json()
+        assert cfg["enabled"] and 59 * 60 <= cfg["next_in"] <= 120 * 60
+
+        # «случайный сейчас»
+        r = await client.post("/api/admin/auto-events", headers=admin_headers, json={"fire": True})
+        cfg = await r.json()
+        assert cfg["last"]["type"] in ("luck", "discount") and 10 <= cfg["last"]["minutes"] <= 20
+        assert cfg["last"]["type"] in events_service.active()
+
+        # по таймеру: время пришло — запускается второй (не тот, что уже идёт)
+        async with __import__("webapp.server", fromlist=["x"]).async_session() as session:
+            c = await auto_events.get_config(session)
+            c["next_at"] = time.time() - 1
+            await auto_events.save_config(session, c)
+        fired = await auto_events.tick(client.server.app["bot"])
+        assert fired and set(events_service.active()) == {"luck", "discount"}
+        assert await auto_events.tick(client.server.app["bot"]) is None  # следующий ещё не скоро
+
+        # сила: high берёт верх диапазона, для free — короткий интервал
+        for _ in range(30):
+            assert 3 <= auto_events.pick_value("luck", "high") <= 5
+            assert 5 <= auto_events.pick_value("free", "high") <= 365
+            assert auto_events.pick_value("discount", "low") <= 25
+        await asyncio.gather(*broadcast._tasks)
+    finally:
+        events_service._active.clear()
+        events_service._started.clear()
+
+
 async def test_stars_no_upper_limit(client, auth_headers) -> None:
     r = await client.post("/api/deposit/stars/quote", headers=auth_headers, json={"amount": 5_000_000})
     assert r.status == 200 and (await r.json())["credited"] == 8_750_000

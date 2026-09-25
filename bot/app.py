@@ -13,7 +13,7 @@ from aiogram.types import ErrorEvent, MenuButtonWebApp, WebAppInfo
 from bot.config import config
 from bot.database.engine import async_session, init_db
 from bot.database.repo.users import get_user_by_tg_id
-from bot.services import events_service
+from bot.services import auto_events, events_service
 from bot.env_loader import load_dotenv
 from bot import support_bot
 from bot.handlers import routers
@@ -102,4 +102,5 @@ async def main() -> None:
     await bot.delete_webhook(drop_pending_updates=True)
     await run_webapp(bot)
     await support_bot.start_from_settings()
+    auto_events.start(bot)  # автозапуск случайных ивентов (включается в админке)
     await dp.start_polling(bot)

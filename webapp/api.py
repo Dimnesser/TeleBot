@@ -75,7 +75,7 @@ from bot.database.repo import staking as staking_repo
 from bot.database.repo.known_items import list_known_items
 from bot.database.repo.users import get_user_by_tg_id
 from bot.database.repo.users import add_balance, count_referrals, find_user
-from bot.services import broadcast, deposit_moderation, drops, events_service, partner_service, quest_service, settings_service, stars_service, withdraw_service
+from bot.services import auto_events, broadcast, deposit_moderation, drops, events_service, partner_service, quest_service, settings_service, stars_service, withdraw_service
 from bot.services.deposit_service import cart_is_valid
 from bot.services.battle_service import BATTLE_QTYS, run_battle
 from bot.services.cases_service import REEL_REVEAL_INDEX, build_reel, draw_items, total_cost
@@ -1502,6 +1502,38 @@ async def post_partner_events(request: web.Request) -> web.Response:
     if notified is not None:
         data["notified"] = notified
     return web.json_response(data)
+
+
+def _auto_json(cfg: dict) -> dict:
+    return {**cfg, "next_in": max(0, int(cfg["next_at"] - time.time())) if cfg.get("next_at") else None,
+            "types_all": [{"type": t.code, "title": t.title, "emoji": t.emoji} for t in events_service.TYPES.values()]}
+
+
+@routes.get("/api/admin/auto-events")
+async def get_admin_auto_events(request: web.Request) -> web.Response:
+    if (denied := _require_admin(request)) is not None:
+        return denied
+    return web.json_response(_auto_json(await auto_events.get_config(request["session"])))
+
+
+@routes.post("/api/admin/auto-events")
+async def post_admin_auto_events(request: web.Request) -> web.Response:
+    """Настройки автоивентов; {"fire": true} — запустить случайный прямо сейчас."""
+    if (denied := _require_admin(request)) is not None:
+        return denied
+    session = request["session"]
+    body = await request.json()
+    cfg = await auto_events.get_config(session)
+    try:
+        cfg = auto_events.validate(body, cfg)
+    except ValueError as exc:
+        return web.json_response({"error": "bad_value", "message": str(exc)}, status=400)
+    await auto_events.save_config(session, cfg)
+    if body.get("fire"):
+        fired = await auto_events.fire(session, request.app["bot"], cfg, forced=True)
+        if fired is None:
+            return web.json_response({"error": "nothing", "message": "Нет ивентов для запуска"}, status=400)
+    return web.json_response(_auto_json(await auto_events.get_config(session)))
 
 
 @routes.post("/api/admin/drops/clear")
