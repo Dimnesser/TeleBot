@@ -3,7 +3,7 @@ from __future__ import annotations
 
 import secrets
 
-from sqlalchemy import desc, select
+from sqlalchemy import delete as sa_delete, desc, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from bot.database.models import CaseCredit, PromoCode, PromoKind, PromoRedemption, User
@@ -75,6 +75,18 @@ async def get_promo(session: AsyncSession, code: str) -> PromoCode | None:
 async def list_promos(session: AsyncSession, limit: int = 20) -> list[PromoCode]:
     result = await session.execute(select(PromoCode).order_by(desc(PromoCode.created_at), desc(PromoCode.id)).limit(limit))
     return list(result.scalars())
+
+
+async def delete_promo(session: AsyncSession, code: str) -> bool:
+    """Удаляет промокод (и записи об активациях) — код снова свободен.
+    Уже начисленное игрокам не забирается."""
+    promo = await get_promo(session, code)
+    if promo is None:
+        return False
+    await session.execute(sa_delete(PromoRedemption).where(PromoRedemption.promo_id == promo.id))
+    await session.delete(promo)
+    await session.commit()
+    return True
 
 
 class PromoError(Exception):

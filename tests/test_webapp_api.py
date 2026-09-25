@@ -1236,3 +1236,20 @@ async def test_admin_sets_upgrader_rtp(client, admin_headers) -> None:
         assert r.status == 400
     finally:
         upgrader_service.set_rtp(upgrader_service.DEFAULT_RTP_PERCENT)
+
+
+async def test_partner_code_taken_by_promo_can_be_freed(client, auth_headers, admin_headers) -> None:
+    await client.get("/api/me", headers=admin_headers)
+    await client.get("/api/me", headers=auth_headers)
+    r = await client.post("/api/admin/promos", headers=admin_headers, json={"kind": "balance", "amount": 10, "max_uses": 1, "code": "sleng"})
+    assert r.status == 200
+    await client.post("/api/promo/redeem", headers=auth_headers, json={"code": "SLENG"})
+    grant = {"user": "777000", "code": "SLENG", "commission_percent": 10, "deposit_bonus_percent": 15}
+    r = await client.post("/api/admin/partners", headers=admin_headers, json=grant)
+    assert r.status == 400 and "промокодом" in (await r.json())["message"]
+    r = await client.post("/api/admin/promos/delete", headers=admin_headers, json={"code": "SLENG"})
+    assert r.status == 200
+    r = await client.post("/api/admin/partners", headers=admin_headers, json=grant)
+    assert r.status == 200 and (await r.json())["code"] == "SLENG"
+    r = await client.post("/api/admin/promos/delete", headers=auth_headers, json={"code": "SLENG"})
+    assert r.status == 403

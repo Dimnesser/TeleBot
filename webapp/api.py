@@ -1825,6 +1825,20 @@ async def post_admin_partner(request: web.Request) -> web.Response:
     return web.json_response(await _admin_user_json(session, target))
 
 
+async def _code_taken_message(session, code: str, allow_user_id: int | None = None) -> str | None:
+    """Промокоды и партнёрские коды вводятся в одно поле, поэтому код должен
+    быть уникален среди обоих. Говорим, кем именно он занят."""
+    if promo := await rewards_repo.get_promo(session, code):
+        return (f"Код {promo.code} уже занят промокодом (активаций {promo.uses}/{promo.max_uses}) — "
+                "удали его в разделе «Промокод» (✕) или возьми другой код")
+    pc = await partner_service.get_partner_code(session, code)
+    if pc and pc.user_id != allow_user_id:
+        owner = await session.get(User, pc.user_id)
+        who = f"@{owner.username}" if owner and owner.username else f"id {owner.tg_id if owner else pc.user_id}"
+        return f"Код {pc.code} уже у партнёра {who}" + ("" if pc.is_active else " (партнёрка снята)")
+    return None
+
+
 @routes.get("/api/admin/promos")
 async def get_admin_promos(request: web.Request) -> web.Response:
     if (denied := _require_admin(request)) is not None:
@@ -1853,13 +1867,23 @@ async def post_admin_promo(request: web.Request) -> web.Response:
     custom = str(body.get("code") or "").strip().upper() or None
     if custom and (len(custom) > 32 or not custom.replace("_", "").replace("-", "").isalnum()):
         return web.json_response({"error": "bad_code", "message": "Код: буквы/цифры, до 32 символов"}, status=400)
-    if custom and (await rewards_repo.get_promo(session, custom) or await partner_service.get_partner_code(session, custom)):
-        return web.json_response({"error": "code_taken", "message": "Такой код уже есть"}, status=400)
+    if custom and (msg := await _code_taken_message(session, custom)) is not None:
+        return web.json_response({"error": "code_taken", "message": msg}, status=400)
     promo = await rewards_repo.create_promo(
         session, kind=kind, amount=amount, max_uses=max_uses, case_code=case_code,
         code=custom, created_by_tg_id=request["user"].tg_id,
     )
     return web.json_response(_promo_json(promo))
+
+
+@routes.post("/api/admin/promos/delete")
+async def post_admin_promo_delete(request: web.Request) -> web.Response:
+    if (denied := _require_admin(request)) is not None:
+        return denied
+    code = str((await request.json()).get("code") or "")
+    if not await rewards_repo.delete_promo(request["session"], code):
+        return web.json_response({"error": "not_found", "message": "Промокод не найден"}, status=404)
+    return web.json_response({"ok": True})
 
 
 # -------------------------------------------------------- админ: партнёрки
@@ -1918,9 +1942,8 @@ async def post_admin_partner_grant(request: web.Request) -> web.Response:
     if code:
         if len(code) > 32 or not code.replace("_", "").replace("-", "").isalnum():
             return web.json_response({"error": "bad_code", "message": "Код: буквы/цифры, до 32 символов"}, status=400)
-        taken = await partner_service.get_partner_code(session, code)
-        if (taken and taken.user_id != target.id) or await rewards_repo.get_promo(session, code):
-            return web.json_response({"error": "code_taken", "message": "Такой код уже занят"}, status=400)
+        if (msg := await _code_taken_message(session, code, allow_user_id=target.id)) is not None:
+            return web.json_response({"error": "code_taken", "message": msg}, status=400)
     pc = await partner_service.grant_partnership(
         session, target, commission_percent=commission, deposit_bonus_percent=bonus,
         case_code=case_code, case_amount=case_amount, code=code,

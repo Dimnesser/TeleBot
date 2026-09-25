@@ -2150,7 +2150,16 @@ async function bindAdminPanel(root) {
         <code>${escapeHtml(p.code)}</code>
         <span>${p.kind !== 'case' ? fmt(p.amount) + coinIcon() : '🎁 ' + p.amount + ' · ' + escapeHtml(((adminCases || []).find((c) => c.code === p.case_code) || {}).name || p.case_code)}</span>
         <span class="muted">${p.uses}/${p.max_uses}</span>
+        <button class="btn-chip danger promo-del" data-promo-del="${escapeHtml(p.code)}" title="Удалить">✕</button>
       </div>`).join('') || '<div class="muted">Пока нет</div>';
+    panel.querySelectorAll('[data-promo-del]').forEach((b) => b.addEventListener('click', async () => {
+      const code = b.dataset.promoDel;
+      if (!confirm(`Удалить промокод ${code}? Код освободится, уже начисленное не заберётся.`)) return;
+      try {
+        await api('/api/admin/promos/delete', { method: 'POST', body: JSON.stringify({ code }) });
+        toast(`Промокод ${code} удалён`, 'success'); loadPromos();
+      } catch (err) { toast(err.message, 'error'); }
+    }));
   }
   loadPromos();
 
