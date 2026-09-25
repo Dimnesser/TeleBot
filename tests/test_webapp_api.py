@@ -1224,3 +1224,15 @@ async def test_player_cancels_deposit_request(client, auth_headers) -> None:
     r = await client.post(f"/api/deposit/requests/{req['id']}/cancel", headers=auth_headers)
     assert (await r.json())["status"] == "cancelled"
     assert (await client.post(f"/api/deposit/requests/{req['id']}/cancel", headers=auth_headers)).status == 400
+
+
+async def test_admin_sets_upgrader_rtp(client, admin_headers) -> None:
+    from bot.services import upgrader_service
+    try:
+        r = await client.post("/api/admin/settings", headers=admin_headers, json={"upgrader_rtp": 40})
+        assert r.status == 200 and (await r.json())["upgrader_rtp"] == 40
+        assert upgrader_service.chance_percent(50, 100) == 20
+        r = await client.post("/api/admin/settings", headers=admin_headers, json={"upgrader_rtp": 150})
+        assert r.status == 400
+    finally:
+        upgrader_service.set_rtp(upgrader_service.DEFAULT_RTP_PERCENT)

@@ -14,8 +14,8 @@ from bot.services.upgrader_service import (
 
 
 def test_chance_percent_is_ratio_of_contribution_to_target():
-    assert chance_percent(50, 100) == 50
-    assert chance_percent(25, 100) == 25
+    assert chance_percent(50, 100, rtp=100) == 50
+    assert chance_percent(25, 100, rtp=100) == 25
 
 
 def test_chance_percent_clamped_to_config_bounds():
@@ -36,7 +36,7 @@ def test_target_value_for_chance_is_consistent_with_chance_percent():
     contribution = 100
     for chance in (30, 50, 75):
         target = target_value_for_chance(contribution, chance)
-        assert chance_percent(contribution, target) == chance
+        assert chance_percent(contribution, target, rtp=100) == chance
 
 
 def test_find_nearest_target_picks_closest_value():
@@ -61,3 +61,8 @@ def test_roll_success_respects_probability_statistically():
 
     counts_low = Counter(roll_success(10) for _ in range(500))
     assert counts_low[False] > counts_low[True]
+
+
+def test_rtp_lowers_chance():
+    assert chance_percent(50, 100, rtp=50) == 25
+    assert chance_percent(10, 100, rtp=50) == 5

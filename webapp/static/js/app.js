@@ -1748,6 +1748,7 @@ function adminPanelHtml() {
         <input class="field" id="s-hours" type="number" min="0.5" max="168" step="0.5" placeholder="Раз в N часов" />
         <input class="field" id="s-rate" type="number" min="0.01" step="0.01" placeholder="1 ⭐ = ? B" />
         <input class="field" id="s-bonus" type="number" min="0" step="1" placeholder="Бонус за код, %" />
+        <input class="field" id="s-upg" type="number" min="5" max="100" step="1" placeholder="Апгрейдер, %" title="Отдача апгрейдера: 100 — честно 1:1, 50 — шансы вдвое ниже" />
         <button class="btn-chip full" type="submit">Сохранить</button>
       </form>
       <div class="muted admin-hint" id="s-status"></div>
@@ -1943,10 +1944,11 @@ async function bindAdminPanel(root) {
     settingsForm.querySelector('#s-hours').value = st.free_case_cooldown_hours;
     settingsForm.querySelector('#s-rate').value = st.stars_rate;
     settingsForm.querySelector('#s-bonus').value = st.stars_code_bonus_percent;
+    settingsForm.querySelector('#s-upg').value = st.upgrader_rtp;
     panel.querySelector('#s-status').textContent = st.required_channel
       ? `Подписка на ${st.required_channel} обязательна · кейс раз в ${st.free_case_cooldown_hours} ч`
       : `Без обязательной подписки · кейс раз в ${st.free_case_cooldown_hours} ч`;
-    panel.querySelector('#s-status').textContent += ` · 1 ⭐ = ${st.stars_rate} B, код +${st.stars_code_bonus_percent}%`;
+    panel.querySelector('#s-status').textContent += ` · 1 ⭐ = ${st.stars_rate} B, код +${st.stars_code_bonus_percent}% · апгрейдер ${st.upgrader_rtp}%`;
     panel.querySelectorAll('[data-design]').forEach((b) => b.classList.toggle('active', b.dataset.design === st.design));
     const sb = panel.querySelector('#sb-status');
     sb.innerHTML = st.support_bot
@@ -1994,7 +1996,9 @@ async function bindAdminPanel(root) {
         free_case_cooldown_hours: Number(settingsForm.querySelector('#s-hours').value),
         stars_rate: Number(settingsForm.querySelector('#s-rate').value),
         stars_code_bonus_percent: Number(settingsForm.querySelector('#s-bonus').value),
+        upgrader_rtp: Number(settingsForm.querySelector('#s-upg').value),
       }) });
+      if (ME) ME.upgrader_rtp = st.upgrader_rtp;
       paintSettings(st);
       toast('Сохранено', 'success');
     } catch (err) { toast(err.message, 'error'); }
@@ -2179,8 +2183,10 @@ async function bindAdminPanel(root) {
 // Вклад — до 5 брейнротов инвентаря; сервер считает шанс по их сумме.
 const UPG_MAX_STAKE = 5;
 let upgraderState = { stake: [], target: null, preset: null };
-// Быстрый выбор цели: шанс или множитель (x2 = шанс ~50%, x5 ~20%, x10 ~10%).
-const UPG_PRESETS = [['c75', '75%', 75], ['c50', '50%', 50], ['c30', '30%', 30], ['x2', 'x2', 50], ['x5', 'x5', 20], ['x10', 'x10', 10]];
+// Быстрый выбор цели: шанс или множитель. Шанс = вклад / цель × отдача
+// апгрейдера (ME.upgrader_rtp, ставит админ), поэтому у x2/x5/x10 он считается.
+const upgRtp = () => (ME && ME.upgrader_rtp) || 50;
+const UPG_PRESETS = [['c35', '35%', 35], ['c20', '20%', 20], ['c10', '10%', 10], ['x2', 'x2', 2], ['x5', 'x5', 5], ['x10', 'x10', 10]];
 const stakeValue = (stake) => stake.reduce((sum, b) => sum + b.value, 0);
 let upgraderSpinning = false;
 let upgraderFx = null;
@@ -2233,7 +2239,7 @@ async function renderUpgraderScreen(root) {
       <div class="upg-slots">
         ${stakeSlot}
         <div class="upg-arrow">➜</div>
-        ${slot(target, 'Цель · шанс 75%…1%', 'slot-target')}
+        ${slot(target, 'Цель', 'slot-target')}
       </div>
       <div class="upg-presets">
         ${UPG_PRESETS.map(([key, label]) => `<button class="upg-preset ${upgraderState.preset === key ? 'active' : ''} ${key[0] === 'x' ? 'mult' : ''}" data-preset="${key}">${label}</button>`).join('')}
@@ -2271,14 +2277,15 @@ async function renderUpgraderScreen(root) {
     if (!st.length) { toast('Сначала выбери своих брейнротов', 'error'); return; }
     const targets = await api(`/api/upgrader/targets?min_value=${stakeValue(st)}${st.length === 1 ? '&exclude_name=' + encodeURIComponent(st[0].name) : ''}`);
     openBrainrotPicker('Во что прокачать', targets,
-      'Для этого брейнрота нет целей с шансом 75%…1% — выбери другого.',
+      'Для этого брейнрота нет подходящих целей — выбери другого.',
       (t) => { upgraderState.target = t; upgraderState.preset = null; renderUpgraderScreen(root); });
   });
   root.querySelectorAll('[data-preset]').forEach((b) => b.addEventListener('click', async () => {
     if (upgraderSpinning) return;
     const st = upgraderState.stake;
     if (!st.length) { toast('Сначала выбери своих брейнротов', 'error'); return; }
-    const [key, label, want] = UPG_PRESETS.find(([k]) => k === b.dataset.preset);
+    const [key, label, n] = UPG_PRESETS.find(([k]) => k === b.dataset.preset);
+    const want = key.startsWith('x') ? upgRtp() / n : n;
     const sv = stakeValue(st);
     const targets = await api(`/api/upgrader/targets?min_value=${sv}${st.length === 1 ? '&exclude_name=' + encodeURIComponent(st[0].name) : ''}`);
     if (!targets.length) { toast('Для этой ставки нет целей — добавь брейнротов подешевле или подороже', 'error'); return; }
@@ -2414,7 +2421,7 @@ function showUpgradeOnWheel(root, res, stake, target) {
 // Запасной расчёт (сервер присылает chance_percent у каждой цели).
 function computeChance(contributionValue, targetValue) {
   if (targetValue <= 0) return 95;
-  const raw = Math.round((contributionValue / targetValue) * 100);
+  const raw = Math.round((contributionValue / targetValue) * upgRtp());
   return Math.max(1, Math.min(95, raw));
 }
 

@@ -22,6 +22,7 @@ SUPPORT_BOT_TOKEN = "support_bot_token"
 UI_DESIGN = "ui_design"  # v3 (по умолчанию) | v2 «Neon Glass» | classic (самый первый)
 UI_DESIGNS = ("v3", "v2", "classic")
 SUPPORT_BOT_USERNAME = "support_bot_username"
+UPGRADER_RTP = "upgrader_rtp"  # отдача апгрейдера, % (см. upgrader_service)
 DEFAULT_FREE_CASE_COOLDOWN_HOURS = 12
 
 # Статусы getChatMember, при которых пользователь считается подписанным.

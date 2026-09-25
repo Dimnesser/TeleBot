@@ -82,6 +82,7 @@ from bot.services.cases_service import REEL_REVEAL_INDEX, build_reel, draw_items
 from bot.services.dice_service import COLORS, MATCH_PAYOUT_TABLE, resolve_roll
 from bot.services.giveaway_service import resolve_all_expired
 from bot.services.staking_service import MIN_STAKE_AMOUNT, STAKE_TIERS, is_matured, payout_amount, tier_by_term
+from bot.services import upgrader_service
 from bot.services.upgrader_service import chance_percent, roll_success
 from bot.utils.texts import FAQ_ENTRIES
 from webapp import crash_runtime as crash_rt
@@ -269,6 +270,7 @@ async def _user_json(request: web.Request) -> dict:
         "is_owner": is_owner(user.tg_id),
         "design": await settings_service.ui_design(session),
         "events": events_service.as_json(),
+        "upgrader_rtp": upgrader_service.RTP_PERCENT,
         "case_credits": await rewards_repo.case_credits(session, user),
         "partner_percent": user.partner_percent,
         "deposit_bonus_percent": user.deposit_bonus_percent,
@@ -1597,6 +1599,7 @@ async def get_admin_settings(request: web.Request) -> web.Response:
         "support_bot": await settings_service.get_setting(session, settings_service.SUPPORT_BOT_USERNAME),
         "design": await settings_service.ui_design(session),
         "events": events_service.as_json(),
+        "upgrader_rtp": upgrader_service.RTP_PERCENT,
         "stars_rate": await stars_service.rate(session),
         "stars_code_bonus_percent": await stars_service.code_bonus(session),
     })
@@ -1658,6 +1661,12 @@ async def post_admin_settings(request: web.Request) -> web.Response:
             await settings_service.set_setting(session, settings_service.SUPPORT_BOT_TOKEN, None)
             await settings_service.set_setting(session, settings_service.SUPPORT_BOT_USERNAME, None)
             await support_bot.stop()
+    if "upgrader_rtp" in body:
+        rtp = _num(body.get("upgrader_rtp"))
+        if rtp is None or not 5 <= rtp <= 100:
+            return web.json_response({"error": "bad_upgrader_rtp", "message": "Отдача апгрейдера: от 5 до 100%"}, status=400)
+        await settings_service.set_setting(session, settings_service.UPGRADER_RTP, f"{rtp:g}")
+        upgrader_service.set_rtp(rtp)
     if "free_case_cooldown_hours" in body:
         hours = _num(body.get("free_case_cooldown_hours"))
         if hours is None or not 0 < hours <= 24 * 7:

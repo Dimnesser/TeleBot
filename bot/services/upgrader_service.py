@@ -15,10 +15,32 @@ from bot.config import config
 from bot.database.repo.known_items import KnownItem
 
 
-def chance_percent(contribution_value: int, target_value: int) -> int:
+# Отдача апгрейдера, %: шанс = вклад / цель × отдача. 100 — честно 1:1,
+# 50 — шанс вдвое ниже (x2 даёт 25%). Меняется в админке, хранится в app_meta
+# (settings_service.UPGRADER_RTP) и подгружается при старте.
+DEFAULT_RTP_PERCENT = 50.0
+RTP_PERCENT = DEFAULT_RTP_PERCENT
+
+
+def set_rtp(percent: float) -> None:
+    global RTP_PERCENT
+    RTP_PERCENT = float(percent)
+
+
+async def load_rtp(session) -> float:
+    from bot.services import settings_service
+    raw = await settings_service.get_setting(session, settings_service.UPGRADER_RTP)
+    try:
+        set_rtp(float(raw) if raw else DEFAULT_RTP_PERCENT)
+    except ValueError:
+        set_rtp(DEFAULT_RTP_PERCENT)
+    return RTP_PERCENT
+
+
+def chance_percent(contribution_value: int, target_value: int, rtp: float | None = None) -> int:
     if target_value <= 0:
         return config.upgrader_max_chance_percent
-    raw = round(contribution_value / target_value * 100)
+    raw = round(contribution_value / target_value * (RTP_PERCENT if rtp is None else rtp))
     return max(config.upgrader_min_chance_percent, min(config.upgrader_max_chance_percent, raw))
 
 
