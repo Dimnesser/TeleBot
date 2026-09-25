@@ -1,0 +1,72 @@
+<!DOCTYPE html>
+<html>
+<head>
+<meta charset="utf-8">
+<!-- Логотип новостного канала BrainCore (640×640, Telegram обрезает в круг). Рендер: node render.js news -->
+<style>
+@font-face { font-family: "OswaldB"; font-weight: 700; src: url(oswald-lat.woff2) format("woff2"); }
+* { margin: 0; padding: 0; box-sizing: border-box; }
+html, body { width: 640px; height: 640px; overflow: hidden; background: #05050d; }
+.a {
+  position: relative; width: 640px; height: 640px; overflow: hidden;
+  background:
+    radial-gradient(300px 260px at 22% 18%, rgba(124, 92, 255, .75), transparent 70%),
+    radial-gradient(280px 240px at 84% 30%, rgba(34, 211, 238, .45), transparent 70%),
+    radial-gradient(340px 260px at 60% 96%, rgba(244, 114, 182, .45), transparent 70%),
+    linear-gradient(160deg, #150f3a 0%, #0a0822 55%, #05050d 100%);
+}
+.dots { position: absolute; inset: 0; opacity: .35;
+  background-image: radial-gradient(rgba(255,255,255,.25) 1.2px, transparent 1.2px); background-size: 24px 24px;
+  -webkit-mask-image: radial-gradient(circle at 50% 45%, #000 0%, transparent 70%); }
+/* радиоволны эфира */
+.waves { position: absolute; left: 50%; top: 43%; width: 600px; height: 600px; transform: translate(-50%, -50%); }
+.hex { position: absolute; left: 50%; top: 43%; width: 330px; height: 330px; transform: translate(-50%, -50%);
+  filter: drop-shadow(0 0 22px rgba(198,255,61,.85)) drop-shadow(0 0 60px rgba(198,255,61,.35)); }
+.hero { position: absolute; left: 50%; top: 43%; height: 285px; transform: translate(-50%, -50%);
+  filter: drop-shadow(0 0 16px rgba(139, 92, 246, .9)) drop-shadow(0 18px 22px rgba(0,0,0,.65)); }
+.live { position: absolute; right: 128px; top: 112px; display: flex; align-items: center; gap: 8px;
+  padding: 7px 14px 7px 11px; border-radius: 999px; background: linear-gradient(180deg, #ff3b5c, #d9143a);
+  font: 700 22px/1 "OswaldB", sans-serif; letter-spacing: 2px; color: #fff; transform: rotate(8deg);
+  box-shadow: 0 0 0 3px #0a0822, 0 0 26px rgba(255, 59, 92, .9); }
+.live i { width: 11px; height: 11px; border-radius: 50%; background: #fff; box-shadow: 0 0 10px #fff; }
+.word { position: absolute; left: 0; right: 0; text-align: center; font-family: "OswaldB", sans-serif; font-weight: 700; }
+.brand { bottom: 150px; font-size: 40px; letter-spacing: 9px; color: #fff; padding-left: 9px;
+  text-shadow: 0 0 18px rgba(167, 139, 250, .9), 2px 2px 0 #0a0822; }
+.brand b { color: #c6ff3d; text-shadow: 0 0 18px rgba(198,255,61,.8), 2px 2px 0 #0a0822; }
+.news { bottom: 58px; font-size: 104px; line-height: 1; letter-spacing: 6px; padding-left: 6px;
+  background: linear-gradient(180deg, #f4ffb0 0%, #c6ff3d 45%, #5cff9a 100%);
+  -webkit-background-clip: text; background-clip: text; color: transparent;
+  filter: drop-shadow(0 0 22px rgba(198,255,61,.55)) drop-shadow(4px 5px 0 #0a0822); }
+.rule { position: absolute; left: 50%; bottom: 196px; width: 230px; height: 3px; transform: translateX(-50%); border-radius: 3px;
+  background: linear-gradient(90deg, transparent, #8b5cf6, #22d3ee, transparent); box-shadow: 0 0 12px rgba(139,92,246,.9); }
+</style>
+</head>
+<body>
+<div class="a">
+  <div class="dots"></div>
+  <svg class="waves" viewBox="0 0 600 600" aria-hidden="true">
+    <defs>
+      <linearGradient id="wv" x1="0" y1="0" x2="1" y2="1">
+        <stop offset="0" stop-color="#a78bfa"/><stop offset="1" stop-color="#22d3ee"/>
+      </linearGradient>
+    </defs>
+    <g fill="none" stroke="url(#wv)" stroke-linecap="round" style="filter: drop-shadow(0 0 8px rgba(139,92,246,.9))">
+      <path d="M 120 190 A 200 200 0 0 0 120 410" stroke-width="10" opacity=".95"/>
+      <path d="M 78 150 A 255 255 0 0 0 78 450" stroke-width="9" opacity=".6"/>
+      <path d="M 38 110 A 310 310 0 0 0 38 490" stroke-width="8" opacity=".32"/>
+      <path d="M 480 190 A 200 200 0 0 1 480 410" stroke-width="10" opacity=".95"/>
+      <path d="M 522 150 A 255 255 0 0 1 522 450" stroke-width="9" opacity=".6"/>
+      <path d="M 562 110 A 310 310 0 0 1 562 490" stroke-width="8" opacity=".32"/>
+    </g>
+  </svg>
+  <svg class="hex" viewBox="0 0 32 32" aria-hidden="true">
+    <path d="M16 2.5 27.7 9.25v13.5L16 29.5 4.3 22.75V9.25z" fill="rgba(12,10,40,.72)" stroke="#c6ff3d" stroke-width="1.2" stroke-linejoin="round"/>
+  </svg>
+  <img class="hero" src="kraken_crop.png" alt="">
+  <div class="live"><i></i>LIVE</div>
+  <div class="rule"></div>
+  <div class="word brand">BRAIN<b>CORE</b></div>
+  <div class="word news">NEWS</div>
+</div>
+</body>
+</html>

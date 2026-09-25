@@ -11,10 +11,13 @@ const HERE = __dirname;
 const HERO_URL = 'https://static.wikia.nocookie.net/stealabr/images/d/d3/Kraken.png/revision/latest?cb=20260616235047';
 // node render.js          → bot/assets/welcome.jpg (баннер /start, 1280×656)
 // node render.js avatar   → bot/assets/avatar.png (аватарка бота, 640×640) + favicon Mini App
-const MODE = process.argv[2] === 'avatar' ? 'avatar' : 'welcome';
-const OUT = path.resolve(HERE, MODE === 'avatar' ? '../../bot/assets/avatar.png' : '../../bot/assets/welcome.jpg');
+// node render.js news     → bot/assets/news_logo.png (аватарка новостного канала, 640×640)
+const MODE = ['avatar', 'news'].includes(process.argv[2]) ? process.argv[2] : 'welcome';
+const OUT = path.resolve(HERE, {
+  avatar: '../../bot/assets/avatar.png', news: '../../bot/assets/news_logo.png', welcome: '../../bot/assets/welcome.jpg',
+}[MODE]);
 const FAVICON = path.resolve(HERE, '../../webapp/static/assets/favicon.png');
-const SIZE = MODE === 'avatar' ? { width: 640, height: 640 } : { width: 1280, height: 656 };
+const SIZE = MODE === 'welcome' ? { width: 1280, height: 656 } : { width: 640, height: 640 };
 
 (async () => {
   const hero = path.join(HERE, 'kraken_crop.png');
@@ -40,6 +43,8 @@ const SIZE = MODE === 'avatar' ? { width: 640, height: 640 } : { width: 1280, he
   server.close();
   if (MODE === 'avatar') {
     execFileSync('python3', ['-c', `from PIL import Image; im=Image.open(${JSON.stringify(png)}).convert('RGB'); im.save(${JSON.stringify(OUT)}); im.resize((192,192), Image.LANCZOS).save(${JSON.stringify(FAVICON)})`]);
+  } else if (MODE === 'news') {
+    execFileSync('python3', ['-c', `from PIL import Image; Image.open(${JSON.stringify(png)}).convert('RGB').save(${JSON.stringify(OUT)})`]);
   } else {
     execFileSync('python3', ['-c', `from PIL import Image; Image.open(${JSON.stringify(png)}).convert('RGB').save(${JSON.stringify(OUT)}, 'JPEG', quality=90, optimize=True)`]);
   }
