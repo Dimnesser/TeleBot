@@ -37,15 +37,15 @@ def test_paid_cases_form_a_price_ladder_and_all_in_is_top():
     assert min(c.price_tokens for c in main) < 30  # дешёвые кейсы — как на референсе (~19–30)
 
 
-def test_paid_cases_hold_only_withdrawable_brainrots_or_coins():
-    """В платных кейсах — брейнроты из каталога пополнения (от 41 B, их можно
-    вывести) и монеты B; мелочи вне каталога нет."""
+def test_paid_cases_hold_only_brainrots():
+    """В платных кейсах — только брейнроты ростера, без монет B (монеты —
+    лишь в бесплатном и реферальном)."""
+    assert SEED_CASES_BY_CODE["free"].price_tokens == 0
     for case in SEED_CASES:
-        assert SEED_CASES_BY_CODE["free"].price_tokens == 0
         if case.category in (CaseCategory.FREE, CaseCategory.REFERRAL):
             continue
         for item in case.items:
-            assert item.rarity == COIN_RARITY or item.value >= 41, (case.code, item.name)
+            assert item.rarity != COIN_RARITY and item.name in ROSTER_BY_NAME, (case.code, item.name)
 
 
 def test_every_roster_brainrot_has_official_render():

@@ -6,8 +6,10 @@
 Содержимое — только реальные персонажи Steal a Brainrot из
 bot.data.brainrot_roster; в бесплатных кейсах ещё и монеты.
 
-В платных кейсах — только брейнроты из каталога пополнения (от 41 B, их
-можно вывести из стока), мелкий дроп — монеты B сразу на баланс.
+В платных кейсах — только брейнроты: из каталога пополнения (от 41 B, их
+можно вывести из стока), а мелкий дроп — самые дешёвые брейнроты игры
+(67, La Grande Combinasion … Lavadorito Spinito, 5–31 B). Монеты B —
+только в бесплатном и реферальном кейсах.
 
 Баланс (вся выводится из данных, руками не проставлено ничего):
   * ценность предмета — его ценность в B со скриншотов пользователя
@@ -30,7 +32,7 @@ from bot.data.coins import COIN_RARITY, coin_name
 from bot.database.models import CaseCategory
 from bot.services.cases_service import CASE_WEIGHT_EXPONENT
 
-CASES_CONTENT_VERSION = "26-harsh"
+CASES_CONTENT_VERSION = "27-no-coins"
 
 TARGET_RTP = 0.90
 PAYBACK_TARGET = 0.22
@@ -179,26 +181,29 @@ SEED_CASES: list[SeedCase] = [
     ),
     # ------------------------------------------------------------ КЕЙСЫ
     _case(K, "start", "Старт", 0, CaseTheme("coins", "dust", ("#4f8f5a", "#1c3a22"), "#b7ff8a"),
-          [2, 3, 4, 5, 6, 8, GA, CC, BF]),
+          ["67", "La Grande Combinasion", "Money Money Puggy", "Los Combinasionas", "Nuclearo Dinossauro", GA, CC]),
     _case(K, "mini", "Мини", 0, CaseTheme("coins", "dust", ("#6f7c8f", "#2a3240"), "#c9d6e8"),
-          [4, 6, 8, 10, GA, CC, BF, "Pizza and Ranch", "Los Amigos"]),
+          ["67", "La Grande Combinasion", "Money Money Puggy", "Nuclearo Dinossauro", GA, CC, BF, "Pizza and Ranch", "Los Amigos"]),
     _case(K, "kopeika", "Копейка", 0, CaseTheme("coins", "sparkle", ("#b98b3a", "#5a3f12"), "#ffd24d"),
-          [6, 8, 10, 14, GA, CC, BF, "Popcuru and Fizzuru", "Fortunu and Cashuru"]),
+          ["La Grande Combinasion", "Money Money Puggy", "Los Combinasionas", "Tang Tang Keletang", GA, CC, BF,
+           "Popcuru and Fizzuru", "Fortunu and Cashuru"]),
     _case(K, "washer", "Стирка", 0, CaseTheme("water", "bubbles", ("#e8eef5", "#8497ad"), "#8fd8ff"),
-          [8, 10, 14, 18, GA, CC, "Capitano Moby", "Celestial Pegasus", "Jelly Moby"]),
+          ["La Grande Combinasion", "Nuclearo Dinossauro", "Orcaledon", "Lavadorito Spinito", GA, CC, "Capitano Moby",
+           "Celestial Pegasus", "Jelly Moby"]),
     _case(K, "sauce", "Соус", 0, CaseTheme("food", "fire", ("#d8b43a", "#8a2a12"), "#ff5a3a"),
-          [10, 14, 18, 22, BF, "Pizza and Ranch", "Popcuru and Fizzuru", "La Food Combinasion",
+          ["Money Money Puggy", "Nuclearo Dinossauro", "Tang Tang Keletang", "Ketupat Kepat", BF, "Pizza and Ranch", "Popcuru and Fizzuru", "La Food Combinasion",
            "Fragrama and Chocrama", "La Breakfast Combinasion"]),
     _case(K, "lasecret", "Ла Сикрет", 0, CaseTheme("bills", "lightning", ("#2a2a33", "#0b0b10"), "#f2f2f7"),
-          [14, 20, 25, 30, GA, CC, "La Secret Combinasion", "La Food Combinasion", "Los Secret Combinasionas"]),
+          ["Los Combinasionas", "La Grande Combinasion", "Tang Tang Keletang", "Lavadorito Spinito", GA, CC,
+           "La Secret Combinasion", "La Food Combinasion", "Los Secret Combinasionas"]),
     _case(K, "tirili", "Тирили", 0, CaseTheme("coins", "lightning", ("#2f74dc", "#163a7e"), "#ffe14d"),
-          [15, 20, 25, 30, GA, BF, "Capitano Moby", "Celestial Pegasus", "Globa Steppa", "Tirilikalika Tirilikalako"]),
+          ["Nuclearo Dinossauro", "Tang Tang Keletang", "Orcaledon", "Lavadorito Spinito", GA, BF, "Capitano Moby", "Celestial Pegasus", "Globa Steppa", "Tirilikalika Tirilikalako"]),
     _case(K, "safe", "Сейф", 0, CaseTheme("bills", "sparkle", ("#cda33c", "#6a4f10"), "#ffe07a"),
-          [30, GA, CC, "Los Amigos", "Fortunu and Cashuru", "Los Sekolahs", "Los Secret Combinasionas", "Rico Dinero"]),
+          ["Lavadorito Spinito", "Money Money Puggy", GA, CC, "Los Amigos", "Fortunu and Cashuru", "Los Sekolahs", "Los Secret Combinasionas", "Rico Dinero"]),
     _case(K, "boo", "Бу!", 0, CaseTheme("pumpkins", "smoke", ("#5d3894", "#231238"), "#ff9a2e"),
-          [40, GA, "Spooky and Pumpky", "Cerberus", "Duggy Bros", "Dug dug dug", "Foxini Lanternini", "La Casa Boo"]),
+          ["Tang Tang Keletang", "Orcaledon", GA, "Spooky and Pumpky", "Cerberus", "Duggy Bros", "Dug dug dug", "Foxini Lanternini", "La Casa Boo"]),
     _case(K, "fastfood", "Фастфуд", 0, CaseTheme("food", "sparkle", ("#d8402f", "#7a1a12"), "#ffb23d"),
-          [50, BF, "Pizza and Ranch", "Popcuru and Fizzuru", "La Food Combinasion", "Fragrama and Chocrama",
+          ["Ketupat Kepat", "Lavadorito Spinito", BF, "Pizza and Ranch", "Popcuru and Fizzuru", "La Food Combinasion", "Fragrama and Chocrama",
            "Cooki and Milki", "La Breakfast Combinasion", "Pancake and Syrup", "Sammyni Cakini"]),
     # --- для лёгкого раскрута: только брейнроты каталога, без монет,
     # окупаются чаще (~38% открытий), множители умеренные (×3–×4).
@@ -227,7 +232,7 @@ SEED_CASES: list[SeedCase] = [
           [CC, "Fortunu and Cashuru", "Quackini Snackini", "Los Sekolahs", "Ketupat Bros", "Rosey and Teddy",
            "Bunny and Eggy", "Moby Bros", "Digi Narwhal"]),
     _case(K, "capitano", "Капитан", 0, CaseTheme("water", "bubbles", ("#2a92a6", "#0e3c48"), "#6ff4ff"),
-          [20, 30, CC, "Pizza and Ranch", "Capitano Moby", "Globa Steppa", "Bumbatron", "Jelly Moby", "Moby Bros",
+          ["Orcaledon", "Tang Tang Keletang", CC, "Pizza and Ranch", "Capitano Moby", "Globa Steppa", "Bumbatron", "Jelly Moby", "Moby Bros",
            "Fishino Clownino"]),
     _case(K, "party", "Праздник", 0, CaseTheme("gifts", "confetti", ("#e0508f", "#7a1846"), "#ffd1e6"),
           ["La Food Combinasion", "Cooki and Milki", "Sammyni Fattini", "Reinito Sleighito", "Rosey and Teddy",
