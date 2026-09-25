@@ -946,6 +946,24 @@ async def test_admin_events_discount_luck_deposit(client, auth_headers, admin_he
         events_service._active.clear()
 
 
+async def test_event_start_notifies_all_players(client, auth_headers, admin_headers) -> None:
+    import asyncio
+
+    from bot.services import broadcast, events_service
+
+    try:
+        await client.get("/api/me", headers=auth_headers)
+        r = await client.post("/api/admin/events", headers=admin_headers,
+                              json={"type": "luck", "value": 2, "hours": 3, "notify": True})
+        body = await r.json()
+        assert body["notified"] >= 2 and body["active"][0]["type"] == "luck"
+        await asyncio.gather(*broadcast._tasks)
+        texts = [t for _, t in client.server.app["bot"].sent if "ИВЕНТ" in t]
+        assert len(texts) == body["notified"] and "Удача ×2" in texts[0] and "3 ч" in texts[0]
+    finally:
+        events_service._active.clear()
+
+
 async def test_stars_no_upper_limit(client, auth_headers) -> None:
     r = await client.post("/api/deposit/stars/quote", headers=auth_headers, json={"amount": 5_000_000})
     assert r.status == 200 and (await r.json())["credited"] == 8_750_000

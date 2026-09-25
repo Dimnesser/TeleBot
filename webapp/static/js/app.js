@@ -1822,6 +1822,7 @@ async function bindAdminPanel(root) {
             <button class="btn-chip" data-ev-start>${on ? 'Обновить' : 'Запустить'}</button>
             ${on ? '<button class="btn-chip danger" data-ev-stop>Стоп</button>' : ''}
           </div>
+          <label class="admin-event-notify"><input type="checkbox" data-ev-notify ${on ? '' : 'checked'} /> 📣 Оповестить всех в боте</label>
           <div class="muted admin-hint">${t.unit === 'x' ? `Сила ×${t.min}…×${t.max}` : `${t.min}…${t.max}%`} · длительность в часах</div>
         </div>`;
     }).join('');
@@ -1831,11 +1832,14 @@ async function bindAdminPanel(root) {
         try {
           const d = await api('/api/admin/events', { method: 'POST', body: JSON.stringify({ type, ...body }) });
           paintEvents(d); applyEvents(d.active);
-          toast(body.action === 'stop' ? 'Ивент остановлен' : 'Ивент запущен для всех игроков', 'success'); haptic.success();
+          toast(body.action === 'stop' ? 'Ивент остановлен'
+            : d.notified != null ? `Ивент запущен · рассылка ${d.notified} игрокам пошла` : 'Ивент запущен для всех игроков', 'success');
+          haptic.success();
         } catch (err) { toast(err.message, 'error'); }
       };
       card.querySelector('[data-ev-start]').addEventListener('click', () => send({
         action: 'start', value: Number(card.querySelector('[data-ev-value]').value), hours: Number(card.querySelector('[data-ev-hours]').value),
+        notify: card.querySelector('[data-ev-notify]').checked,
       }));
       card.querySelector('[data-ev-stop]')?.addEventListener('click', () => send({ action: 'stop' }));
     });

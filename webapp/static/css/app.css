@@ -1376,3 +1376,5 @@ html.ev-deposit .topbar-balance { animation: ev-wallet 1.8s ease-in-out infinite
 .admin-event-live { font-size: 11px; font-weight: 800; color: #5dff8a; }
 .admin-event .admin-hint { margin: 6px 0 0; }
 @media (prefers-reduced-motion: reduce) { .event-fx { display: none; } .event-chip, .event-splash-rays { animation: none; } }
+.admin-event-notify { display: flex; align-items: center; gap: 8px; margin-top: 8px; font-size: 13px; font-weight: 700; color: var(--text); cursor: pointer; }
+.admin-event-notify input { width: 18px; height: 18px; accent-color: #5dff8a; }

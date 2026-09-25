@@ -5,6 +5,8 @@ bot/handlers/*.py, просто с JSON вместо edit_text/inline-кнопо
 """
 from __future__ import annotations
 
+import json
+
 import random
 import time
 from datetime import datetime, timedelta
@@ -72,7 +74,7 @@ from bot.database.repo import staking as staking_repo
 from bot.database.repo.known_items import list_known_items
 from bot.database.repo.users import get_user_by_tg_id
 from bot.database.repo.users import add_balance, count_referrals, find_user
-from bot.services import deposit_moderation, drops, events_service, partner_service, quest_service, settings_service, stars_service, withdraw_service
+from bot.services import broadcast, deposit_moderation, drops, events_service, partner_service, quest_service, settings_service, stars_service, withdraw_service
 from bot.services.deposit_service import cart_is_valid
 from bot.services.battle_service import BATTLE_QTYS, run_battle
 from bot.services.cases_service import REEL_REVEAL_INDEX, build_reel, draw_items, total_cost
@@ -1403,6 +1405,12 @@ async def post_admin_events(request: web.Request) -> web.Response:
             await events_service.start(session, code, val, hours)
         except ValueError as exc:
             return web.json_response({"error": "bad_value", "message": str(exc)}, status=400)
+        if body.get("notify"):
+            recipients = await broadcast.start(request.app["bot"], events_service.announcement(code, val, hours))
+            response = await get_admin_events(request)
+            data = json.loads(response.text)
+            data["notified"] = recipients
+            return web.json_response(data)
     return await get_admin_events(request)
 
 

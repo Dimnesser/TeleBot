@@ -115,3 +115,15 @@ def price(base: int | None) -> int | None:
 
 def deposit_bonus_percent() -> float:
     return value("deposit") or 0.0
+
+
+def announcement(code: str, val: float, hours: float) -> str:
+    """Текст рассылки о запуске ивента."""
+    t = TYPES[code]
+    left = f"{hours:g} ч" if hours >= 1 else f"{round(hours * 60)} мин"
+    what = {
+        "luck": f"<b>Удача ×{val:g}</b> — у всех выше шанс окупающего дропа в кейсах и батлах и шанс апгрейда.",
+        "discount": f"<b>Скидка −{val:g}%</b> на все платные кейсы и батлы.",
+        "deposit": f"<b>+{val:g}% к пополнению</b> брейнротами, гирсами и Stars.",
+    }[code]
+    return f"{t.emoji} <b>ИВЕНТ В BRAINCORE!</b>\n\n{what}\n\n⏳ Действует {left} — успей!"
