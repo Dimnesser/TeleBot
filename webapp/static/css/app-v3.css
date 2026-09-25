@@ -227,10 +227,7 @@ html.ui-v3 .duel-vs {
     background: rgba(10, 9, 26, .8) padding-box, var(--holo) border-box;
     animation: v3-rot 10s linear infinite;
   }
-  html.ui-v3 .tab-item.active {
-    color: #0d1204; background: var(--v-lime);
-    box-shadow: inset 0 1px 0 rgba(255, 255, 255, .6), 0 8px 22px -8px rgba(198, 255, 61, 1);
-  }
+  html.ui-v3 .tab-item.active { color: #0d1204; background: none; box-shadow: none; } /* подложка — .tab-ind в app-v2.css */
   html.ui-v3 .tab-item.active .ic { filter: none; }
 }
 

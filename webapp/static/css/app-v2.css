@@ -342,3 +342,86 @@ html.ui-v2 .inv-act { font-size: 10.5px; }
 }
 html.ui-v2 .upg-preset { border: 0; border-radius: 12px; background: rgba(255, 255, 255, .05); box-shadow: var(--v-edge); }
 html.ui-v2 .upg-preset.active { background: linear-gradient(180deg, rgba(198, 255, 61, .24), rgba(198, 255, 61, .06)); box-shadow: inset 0 0 0 1px rgba(198, 255, 61, .7), 0 0 18px -6px rgba(198, 255, 61, .9); }
+
+/* =====================================================================
+   ПЛАВНОСТЬ (v2 и v3): переходы экранов, окна, меню, тосты, индикатор
+   вкладок, проявление картинок. Скорость самих игр не меняется.
+   ===================================================================== */
+html.ui-v2 { scroll-behavior: smooth; --ease-out: cubic-bezier(.16, 1, .3, 1); --ease-spring: cubic-bezier(.34, 1.4, .64, 1); }
+
+/* экраны: старый мягко уходит, новый поднимается блоками по очереди */
+html.ui-v2 .screen, html.ui-v3 .screen { animation: none; }
+html.ui-v2 .screen { transition: opacity .15s ease, transform .15s ease, filter .15s ease; }
+html.ui-v2 .screen.leave { opacity: 0; transform: translateY(-6px) scale(.995); filter: blur(3px); }
+html.ui-v2 .screen.enter > * { animation: v2-rise .55s var(--ease-out) both; animation-delay: calc(var(--si, 0) * 55ms); }
+@keyframes v2-rise { from { opacity: 0; transform: translateY(16px) scale(.985); filter: blur(4px); } to { opacity: 1; transform: none; filter: none; } }
+
+/* карточки внутри сеток — тоже ступенькой */
+html.ui-v2 .fade-in-up { animation-duration: .6s; animation-timing-function: var(--ease-out); }
+
+/* картинки проявляются по загрузке */
+html.ui-v2 img { transition: opacity .45s ease, transform .45s var(--ease-out); }
+html.ui-v2 img:not(.ld) { opacity: 0; transform: scale(.96); }
+
+/* окна: открытие пружиной, закрытие — вниз с затуханием */
+html.ui-v2 .modal-overlay { animation: v2-fade .25s ease both; }
+html.ui-v2 .modal-sheet { animation: v2-sheet-in .45s var(--ease-spring) both; }
+html.ui-v2 .modal-overlay.closing { animation: v2-fade-out .24s ease both; }
+html.ui-v2 .modal-overlay.closing .modal-sheet { animation: v2-sheet-out .24s ease both; }
+@keyframes v2-fade { from { opacity: 0; } }
+@keyframes v2-fade-out { to { opacity: 0; } }
+@keyframes v2-sheet-in { from { opacity: 0; transform: translateY(40px) scale(.97); } }
+@keyframes v2-sheet-out { to { opacity: 0; transform: translateY(30px) scale(.98); } }
+@media (min-width: 640px) {
+  html.ui-v2 .modal-sheet { animation-name: v2-pop-in; }
+  html.ui-v2 .modal-overlay.closing .modal-sheet { animation-name: v2-pop-out; }
+}
+@keyframes v2-pop-in { from { opacity: 0; transform: translateY(14px) scale(.94); } }
+@keyframes v2-pop-out { to { opacity: 0; transform: scale(.96); } }
+
+/* тосты */
+html.ui-v2 .toast { animation: v2-toast-in .4s var(--ease-spring) both; transition: opacity .25s ease, transform .25s ease; }
+html.ui-v2 .toast.leaving { opacity: 0; transform: translate(-50%, 12px) scale(.96); }
+@keyframes v2-toast-in { from { opacity: 0; transform: translate(-50%, 18px) scale(.94); } }
+
+/* боковое меню */
+html.ui-v2 .drawer { animation: v2-drawer-in .38s var(--ease-out) both; }
+html.ui-v2 .drawer.closing { animation: v2-drawer-out .22s ease both; }
+html.ui-v2 .drawer-overlay { animation: v2-fade .3s ease both; }
+html.ui-v2 .drawer-overlay.closing { animation: v2-fade-out .22s ease both; }
+@keyframes v2-drawer-in { from { transform: translateX(-100%); opacity: .4; } }
+@keyframes v2-drawer-out { to { transform: translateX(-100%); opacity: 0; } }
+html.ui-v2 .drawer-item { transition: background .25s ease, color .25s ease, transform .2s var(--ease-spring); }
+html.ui-v2 .drawer-item:active { transform: scale(.97); }
+
+/* нажатия: мягкая пружина вместо резкого щелчка */
+html.ui-v2 button { transition: transform .22s var(--ease-spring), filter .2s ease, background .25s ease, box-shadow .25s ease, color .2s ease, opacity .2s ease; }
+html.ui-v2 button:active { transition-duration: .08s; }
+
+/* число баланса */
+html.ui-v2 .num-pop { animation: v2-num .5s var(--ease-spring); }
+@keyframes v2-num { 30% { transform: scale(1.14); color: #fff; text-shadow: 0 0 14px rgba(255, 210, 77, .9); } }
+
+/* нижняя панель: индикатор «перетекает» между вкладками */
+@media (max-width: 999px) {
+  html.ui-v2 .tabbar { position: fixed; }
+  html.ui-v2 .tab-ind {
+    position: absolute; top: 6px; bottom: 6px; left: 6px; width: calc((100% - 20px) / 5); border-radius: 16px; pointer-events: none;
+    background: linear-gradient(180deg, rgba(198, 255, 61, .18), rgba(198, 255, 61, .04)); box-shadow: inset 0 0 0 1px rgba(198, 255, 61, .25);
+    transform: translateX(calc(var(--ti, 0) * (100% + 2px))); transition: transform .45s var(--ease-spring), opacity .25s ease;
+  }
+  html.ui-v2 .tabbar.no-active .tab-ind { opacity: 0; }
+  html.ui-v2 .tab-item { position: relative; z-index: 1; }
+  html.ui-v2 .tab-item.active { background: none; box-shadow: none; }
+  html.ui-v2 .tab-item .ic { transition: transform .35s var(--ease-spring), filter .3s ease; }
+  html.ui-v2 .tab-item.active .ic { transform: translateY(-1px) scale(1.12); }
+  html.ui-v3 .tab-ind { background: var(--v-lime); box-shadow: inset 0 1px 0 rgba(255, 255, 255, .6), 0 8px 22px -8px rgba(198, 255, 61, 1); }
+  html.ui-v3 .tab-item.active { color: #0d1204; }
+}
+.tab-ind { display: none; }
+@media (max-width: 999px) { html.ui-v2 .tab-ind { display: block; } }
+
+@media (prefers-reduced-motion: reduce) {
+  html.ui-v2 .screen.enter > *, html.ui-v2 .modal-sheet, html.ui-v2 .toast, html.ui-v2 .drawer { animation: none !important; }
+  html.ui-v2 img:not(.ld) { opacity: 1; transform: none; }
+}

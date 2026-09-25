@@ -104,13 +104,21 @@ function rarityBadge(b) {
 
 // ------------------------------------------------------------------- toast
 
+/* Плавные анимации — в дизайнах v2/v3 (класс ui-v2); классический как был. */
+const smooth = () => document.documentElement.classList.contains('ui-v2')
+  && !window.matchMedia('(prefers-reduced-motion: reduce)').matches;
+
 function toast(message, kind = 'info') {
   const root = document.getElementById('toast-root');
   const el = document.createElement('div');
   el.className = `toast ${kind}`;
   el.textContent = message;
   root.appendChild(el);
-  setTimeout(() => el.remove(), 2800);
+  setTimeout(() => {
+    if (!smooth()) { el.remove(); return; }
+    el.classList.add('leaving');
+    setTimeout(() => el.remove(), 260);
+  }, 2800);
 }
 
 // ------------------------------------------------------------------- modal
@@ -127,12 +135,30 @@ function openModal(innerHtml) {
 }
 function closeModal() {
   const existing = document.getElementById('active-modal');
-  if (existing) existing.remove();
+  if (!existing) return;
+  if (!smooth()) { existing.remove(); return; }
+  existing.removeAttribute('id'); // новое окно можно открыть сразу
+  existing.classList.add('closing');
+  existing.style.pointerEvents = 'none';
+  setTimeout(() => existing.remove(), 240);
 }
 
 // ------------------------------------------------------------------- state
 
 let ME = null;
+
+/* Баланс «перетекает» к новому значению, а не прыгает. */
+function tweenNumber(el, from, to, ms = 650) {
+  if (!el || from === to || !smooth()) { if (el) el.textContent = to; return; }
+  const t0 = performance.now();
+  cancelAnimationFrame(el._tween);
+  const step = (t) => {
+    const k = Math.min(1, (t - t0) / ms), e = 1 - Math.pow(1 - k, 3);
+    el.textContent = Math.round(from + (to - from) * e);
+    if (k < 1) el._tween = requestAnimationFrame(step);
+  };
+  el._tween = requestAnimationFrame(step);
+}
 
 function popNumber(el) {
   if (!el) return;
@@ -150,6 +176,16 @@ function applyDesign(design) {
   document.documentElement.classList.toggle('ui-v3', d === 'v3');
   try { localStorage.setItem('bb_design', d); } catch (e) {}
 }
+
+/* Картинки проявляются, когда загрузились (а не «выскакивают»). */
+document.addEventListener('load', (e) => { if (e.target.tagName === 'IMG') e.target.classList.add('ld'); }, true);
+document.addEventListener('error', (e) => { if (e.target.tagName === 'IMG') e.target.classList.add('ld'); }, true);
+new MutationObserver((muts) => {
+  for (const m of muts) for (const n of m.addedNodes) {
+    if (n.nodeType !== 1) continue;
+    (n.tagName === 'IMG' ? [n] : n.querySelectorAll('img')).forEach((img) => { if (img.complete) img.classList.add('ld'); });
+  }
+}).observe(document.body, { childList: true, subtree: true });
 
 /* v3: карточки кейсов наклоняются за пальцем/курсором (3D), блик следует за ним. */
 document.addEventListener('pointermove', (e) => {
@@ -177,8 +213,8 @@ async function refreshMe() {
   document.getElementById('drawer-balance').textContent = ME.balance;
   const topBalance = document.getElementById('topbar-tokens');
   if (topBalance) {
-    topBalance.textContent = ME.balance;
-    if (prevTokens !== null && prevTokens !== ME.balance) popNumber(topBalance);
+    if (prevTokens !== null && prevTokens !== ME.balance) { tweenNumber(topBalance, prevTokens, ME.balance); popNumber(topBalance); }
+    else topBalance.textContent = ME.balance;
   }
   return ME;
 }
@@ -239,9 +275,15 @@ function renderDrawer(active) {
   }
   const tabbar = document.getElementById('tabbar');
   if (tabbar) {
-    tabbar.innerHTML = TABBAR_SECTIONS.map(([key, label]) =>
-      `<button class="tab-item${key === active ? ' active' : ''}" data-tab="${key}">${icon(key)}<span>${label}</span></button>`).join('');
-    tabbar.querySelectorAll('[data-tab]').forEach((b) => b.addEventListener('click', () => { haptic.tick(); navigate(b.dataset.tab); }));
+    if (!tabbar.childElementCount) {
+      tabbar.innerHTML = '<i class="tab-ind"></i>' + TABBAR_SECTIONS.map(([key, label]) =>
+        `<button class="tab-item" data-tab="${key}">${icon(key)}<span>${label}</span></button>`).join('');
+      tabbar.querySelectorAll('[data-tab]').forEach((b) => b.addEventListener('click', () => { haptic.tick(); navigate(b.dataset.tab); }));
+    }
+    const idx = TABBAR_SECTIONS.findIndex(([key]) => key === active);
+    tabbar.querySelectorAll('[data-tab]').forEach((b) => b.classList.toggle('active', b.dataset.tab === active));
+    tabbar.style.setProperty('--ti', Math.max(idx, 0));
+    tabbar.classList.toggle('no-active', idx < 0);
   }
   // ПК: основные разделы прямо в шапке (виден только на широком экране)
   const nav = document.getElementById('topnav');
@@ -255,12 +297,16 @@ function renderDrawer(active) {
 }
 
 function openDrawer() {
-  document.getElementById('drawer').classList.remove('hidden');
-  document.getElementById('drawer-overlay').classList.remove('hidden');
+  const d = document.getElementById('drawer'), o = document.getElementById('drawer-overlay');
+  clearTimeout(d._hide);
+  d.classList.remove('hidden', 'closing'); o.classList.remove('hidden', 'closing');
 }
 function closeDrawer() {
-  document.getElementById('drawer').classList.add('hidden');
-  document.getElementById('drawer-overlay').classList.add('hidden');
+  const d = document.getElementById('drawer'), o = document.getElementById('drawer-overlay');
+  if (d.classList.contains('hidden')) return;
+  if (!smooth()) { d.classList.add('hidden'); o.classList.add('hidden'); return; }
+  d.classList.add('closing'); o.classList.add('closing');
+  d._hide = setTimeout(() => { d.classList.add('hidden'); o.classList.add('hidden'); d.classList.remove('closing'); o.classList.remove('closing'); }, 220);
 }
 
 document.getElementById('btn-drawer').addEventListener('click', openDrawer);
@@ -334,12 +380,24 @@ async function renderScreen(screen, params = {}) {
   renderDrawer(screen);
   setTimeout(syncBackButton, 0);
   const root = document.getElementById('screen');
+  const token = (renderScreen._n = (renderScreen._n || 0) + 1);
+  if (smooth() && root.childElementCount) {
+    root.classList.remove('enter'); root.classList.add('leave');
+    await sleep(150);
+    if (token !== renderScreen._n) return; // пока уходили, уже открыли другой экран
+    window.scrollTo({ top: 0 });
+  }
+  root.classList.remove('leave');
   root.innerHTML = `<div class="section-title">&nbsp;</div>${skeletonGrid()}`;
   try {
     const fn = SCREENS[screen] || renderCasesScreen;
     await fn(root, params);
   } catch (err) {
     root.innerHTML = `<div class="empty-state">Ошибка: ${escapeHtml(err.message)}</div>`;
+  }
+  if (smooth() && token === renderScreen._n) {
+    [...root.children].forEach((el, i) => el.style.setProperty('--si', Math.min(i, 8)));
+    root.classList.remove('enter'); void root.offsetWidth; root.classList.add('enter');
   }
 }
 
