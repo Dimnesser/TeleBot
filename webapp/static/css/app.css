@@ -1386,3 +1386,6 @@ html.ev-sell .inv-sell-btn { color: #ffb13b; box-shadow: inset 0 0 0 1px rgba(25
 html.ev-free .free-banner { box-shadow: inset 0 0 0 1.5px #c6ff3d, 0 0 40px -10px #c6ff3d; }
 html.ev-battle .battle-card { box-shadow: inset 0 0 0 1px rgba(255,90,74,.5), 0 0 26px -12px #ff5a4a; }
 .v-sub.ev-bonus { color: #ff8a4a; font-weight: 800; }
+.admin-event.cooldown { opacity: .7; }
+.admin-event-wait { font-size: 11px; font-weight: 800; color: var(--accent-gold); }
+.event-partner { font-style: normal; font-size: 10.5px; font-weight: 800; color: #9fe6ff; margin-left: 4px; }

@@ -55,6 +55,7 @@ from bot.database.models import (
 from bot.database.models import (
     AdminGrant,
     DropLog,
+    PartnerCode,
     DepositCategory,
     DepositRequest,
     DepositRequestStatus,
@@ -1387,8 +1388,18 @@ async def get_events(_request: web.Request) -> web.Response:
 async def get_admin_events(request: web.Request) -> web.Response:
     if (denied := _require_admin(request)) is not None:
         return denied
+    session = request["session"]
+    partner_events = []
+    for pc_id, ev in events_service.all_partner_events():
+        pc = await session.get(PartnerCode, pc_id)
+        owner = await session.get(User, pc.user_id) if pc else None
+        ev["partner_code"] = pc.code if pc else str(pc_id)
+        ev["partner_code_id"] = pc_id
+        ev["partner"] = (f"@{owner.username}" if owner and owner.username else (owner.first_name if owner else "?"))
+        partner_events.append(ev)
     return web.json_response({
-        "active": events_service.as_json(),
+        "active": [e for e in events_service.as_json() if not e["partner"]],
+        "partner_events": partner_events,
         "types": [{"type": t.code, "title": t.title, "emoji": t.emoji, "unit": t.unit, "min": t.min_value,
                    "max": t.max_value, "default": t.default} for t in events_service.TYPES.values()],
     })
@@ -1404,7 +1415,9 @@ async def post_admin_events(request: web.Request) -> web.Response:
     code = body.get("type")
     if code not in events_service.TYPES:
         return web.json_response({"error": "bad_type", "message": "Неизвестный ивент"}, status=400)
-    if body.get("action") == "stop":
+    if body.get("action") == "stop" and body.get("partner_code_id"):
+        await events_service.stop_partner(session, int(body["partner_code_id"]), code)
+    elif body.get("action") == "stop":
         await events_service.stop(session, code)
     else:
         val = _num(body.get("value"))
@@ -1424,6 +1437,60 @@ async def post_admin_events(request: web.Request) -> web.Response:
             data["notified"] = recipients
             return web.json_response(data)
     return await get_admin_events(request)
+
+
+async def _own_partner_code(request: web.Request):
+    pc = await partner_service.get_partner_code_of(request["session"], request["user"])
+    return pc if pc is not None and pc.is_active else None
+
+
+@routes.get("/api/partner/events")
+async def get_partner_events(request: web.Request) -> web.Response:
+    """Ивенты партнёра — только для его аудитории (рефералы и активировавшие код)."""
+    pc = await _own_partner_code(request)
+    if pc is None:
+        return web.json_response({"error": "not_partner", "message": "Ивенты доступны только партнёрам"}, status=403)
+    audience = len(await events_service.partner_audience_ids(request["session"], pc))
+    return web.json_response({
+        "active": [events_service._event_json(c, v, e, True) for c, (v, e) in sorted(events_service.partner_active(pc.id).items())],
+        "types": events_service.partner_types_json(pc.id),
+        "audience": audience,
+        "cooldown_hours": events_service.PARTNER_COOLDOWN_HOURS,
+    })
+
+
+@routes.post("/api/partner/events")
+async def post_partner_events(request: web.Request) -> web.Response:
+    pc = await _own_partner_code(request)
+    if pc is None:
+        return web.json_response({"error": "not_partner", "message": "Ивенты доступны только партнёрам"}, status=403)
+    session = request["session"]
+    body = await request.json()
+    code = body.get("type")
+    if code not in events_service.TYPES:
+        return web.json_response({"error": "bad_type", "message": "Неизвестный ивент"}, status=400)
+    notified = None
+    if body.get("action") == "stop":
+        await events_service.stop_partner(session, pc.id, code)
+    else:
+        val, minutes = _num(body.get("value")), _num(body.get("minutes"))
+        if val is None or minutes is None:
+            return web.json_response({"error": "bad_value", "message": "Укажи силу и длительность"}, status=400)
+        try:
+            await events_service.start_partner(session, pc.id, code, val, minutes)
+        except ValueError as exc:
+            return web.json_response({"error": "bad_value", "message": str(exc)}, status=400)
+        if body.get("notify"):
+            who = request["user"]
+            name = f"@{who.username}" if who.username else (who.first_name or "партнёра")
+            text = events_service.announcement(code, val, minutes).replace(
+                "ИВЕНТ В BRAINCORE!", f"ИВЕНТ ОТ ПАРТНЁРА {name}!")
+            notified = await broadcast.start(request.app["bot"], text,
+                                             await events_service.partner_audience_ids(session, pc))
+    data = json.loads((await get_partner_events(request)).text)
+    if notified is not None:
+        data["notified"] = notified
+    return web.json_response(data)
 
 
 @routes.post("/api/admin/drops/clear")

@@ -211,7 +211,7 @@ function applyEvents(list) {
   bar.innerHTML = EVENTS.map((e) => `
     <div class="event-chip ev-${e.type}">
       <span class="event-emoji">${e.emoji}</span>
-      <span class="event-name">${EVENT_TEXT[e.type](e)}</span>
+      <span class="event-name">${EVENT_TEXT[e.type](e)}${e.partner ? ' <em class="event-partner">🤝 партнёр</em>' : ''}</span>
       <span class="event-left" data-ends="${e.ends_at}">${eventLeft(Math.max(0, Math.round(e.ends_at - now)))}</span>
     </div>`).join('');
   const fx = document.getElementById('event-fx');
@@ -262,6 +262,63 @@ function showEventSplash(e) {
 }
 // новые ивенты подхватываются без перезапуска
 setInterval(() => { api('/api/events').then(applyEvents).catch(() => {}); }, 60000);
+
+/** Карточки запуска ивентов: админка (для всех) и партнёр (для его аудитории). */
+function mountEventCards(box, endpoint, partner) {
+  const paint = (data) => {
+    const cards = data.types.map((t) => {
+      const on = data.active.find((a) => a.type === t.type);
+      const wait = partner && !on ? t.cooldown_left : 0;
+      return `
+        <div class="admin-event ${on ? 'on' : ''} ${wait ? 'cooldown' : ''}" data-ev="${t.type}">
+          <div class="admin-event-head"><span class="admin-event-emoji">${t.emoji}</span><b>${t.title}</b>
+            ${on ? `<span class="admin-event-live">идёт · ${EVENT_TEXT[t.type](on)} · ещё ${eventLeft(on.seconds_left)}</span>` : ''}
+            ${wait ? `<span class="admin-event-wait">снова через ${eventLeft(wait)}</span>` : ''}</div>
+          <div class="inline-form">
+            <input class="field" data-ev-value type="number" step="${t.unit === 'x' ? 0.1 : 1}" min="${t.min}" max="${t.max}" value="${on ? on.value : t.default}" placeholder="${{ x: '×', '%': '%', min: 'мин' }[t.unit]}" />
+            <input class="field" data-ev-minutes type="number" step="1" min="1" max="${t.max_minutes || 10080}" value="60" placeholder="минут" />
+            ${partner && on ? '' : `<button class="btn-chip" data-ev-start ${wait ? 'disabled' : ''}>${on ? 'Обновить' : 'Запустить'}</button>`}
+            ${on ? '<button class="btn-chip danger" data-ev-stop>Стоп</button>' : ''}
+          </div>
+          <label class="admin-event-notify"><input type="checkbox" data-ev-notify ${on ? '' : 'checked'} /> 📣 Оповестить ${partner ? 'своих рефералов' : 'всех'} в боте</label>
+          <div class="muted admin-hint">${t.unit === 'x' ? `Сила ×${t.min}…×${t.max}` : t.unit === 'min' ? `Каждые ${t.min}…${t.max} мин` : `${t.min}…${t.max}%`} · до ${t.max_minutes ? t.max_minutes + ' мин' : '7 дней'}</div>
+        </div>`;
+    }).join('');
+    const partnerRows = (data.partner_events || []).map((ev) => `
+      <div class="partner-row"><div class="partner-head">
+        <span>${ev.emoji}</span><b>${EVENT_TEXT[ev.type](ev)}</b><span class="muted">${escapeHtml(ev.partner)} · ${escapeHtml(ev.partner_code)} · ещё ${eventLeft(ev.seconds_left)}</span>
+        <button class="btn-chip danger" data-pev-stop="${ev.type}" data-pc="${ev.partner_code_id}">Стоп</button>
+      </div></div>`).join('');
+    box.innerHTML = (partner ? `<div class="muted admin-hint">Действует только на твоих рефералов (сейчас ${data.audience}) · тот же ивент — раз в ${data.cooldown_hours} ч</div>` : '')
+      + cards + (partnerRows ? `<div class="admin-sub">Ивенты партнёров</div>${partnerRows}` : '');
+    box.querySelectorAll('[data-ev]').forEach((card) => {
+      const type = card.dataset.ev;
+      const send = async (body) => {
+        try {
+          const d = await api(endpoint, { method: 'POST', body: JSON.stringify({ type, ...body }) });
+          paint(d);
+          api('/api/events').then(applyEvents).catch(() => {});
+          toast(body.action === 'stop' ? 'Ивент остановлен'
+            : d.notified != null ? `Ивент запущен · рассылка ${d.notified} игрокам пошла`
+              : partner ? 'Ивент запущен для твоих рефералов' : 'Ивент запущен для всех игроков', 'success');
+          haptic.success();
+        } catch (err) { toast(err.message, 'error'); }
+      };
+      card.querySelector('[data-ev-start]')?.addEventListener('click', () => send({
+        action: 'start', value: Number(card.querySelector('[data-ev-value]').value), minutes: Number(card.querySelector('[data-ev-minutes]').value),
+        notify: card.querySelector('[data-ev-notify]').checked,
+      }));
+      card.querySelector('[data-ev-stop]')?.addEventListener('click', () => send({ action: 'stop' }));
+    });
+    box.querySelectorAll('[data-pev-stop]').forEach((b) => b.addEventListener('click', async () => {
+      try {
+        paint(await api(endpoint, { method: 'POST', body: JSON.stringify({ type: b.dataset.pevStop, action: 'stop', partner_code_id: Number(b.dataset.pc) }) }));
+        toast('Ивент партнёра остановлен', 'success');
+      } catch (err) { toast(err.message, 'error'); }
+    }));
+  };
+  api(endpoint).then(paint).catch((err) => { box.innerHTML = `<div class="muted">${escapeHtml(err.message)}</div>`; });
+}
 
 /* Дизайн задаёт админ: v3 (по умолчанию), v2 «Neon Glass» или classic
    (самый первый). v3 — слой поверх v2. Запоминаем, чтобы при следующем
@@ -1531,6 +1588,8 @@ async function renderProfileScreen(root) {
         <div class="panel-title">Ты партнёр BrainCore</div>
         <div class="admin-stats"><span>код <b>${escapeHtml(me.partner_code)}</b></span><span>${me.partner_percent}% с пополнений рефералов</span></div>
         <button class="btn-chip" id="copy-partner-link" style="margin-top:10px;width:100%">Скопировать ссылку</button>
+        <div class="admin-sub" style="margin-top:14px">Ивенты для твоих рефералов</div>
+        <div id="partner-events" class="admin-events"><div class="muted">Загрузка…</div></div>
       </div>` : ''}
     ${me.deposit_bonus_percent ? `<div class="panel"><div class="panel-title">Бонус к пополнению</div><div class="admin-stats"><span class="hl">+${me.deposit_bonus_percent}% к каждому пополнению</span></div></div>` : ''}
     ${promoCardHtml()}
@@ -1543,6 +1602,7 @@ async function renderProfileScreen(root) {
     const link = `${base}?start=${me.partner_code}`;
     try { await navigator.clipboard.writeText(link); toast('Ссылка скопирована', 'success'); } catch (_) { toast(link); }
   });
+  if (me.partner_code) mountEventCards(root.querySelector('#partner-events'), '/api/partner/events', true);
   if (me.is_admin) bindAdminPanel(root);
 }
 
@@ -1821,43 +1881,7 @@ async function bindAdminPanel(root) {
     const off = sb.querySelector('#sb-off');
     if (off) off.addEventListener('click', () => saveSupportBot(''));
   };
-  const paintEvents = (data) => {
-    const box = panel.querySelector('#admin-events');
-    box.innerHTML = data.types.map((t) => {
-      const on = data.active.find((a) => a.type === t.type);
-      return `
-        <div class="admin-event ${on ? 'on' : ''}" data-ev="${t.type}">
-          <div class="admin-event-head"><span class="admin-event-emoji">${t.emoji}</span><b>${t.title}</b>
-            ${on ? `<span class="admin-event-live">идёт · ${EVENT_TEXT[t.type](on)} · ещё ${eventLeft(on.seconds_left)}</span>` : ''}</div>
-          <div class="inline-form">
-            <input class="field" data-ev-value type="number" step="${t.unit === 'x' ? 0.1 : 1}" min="${t.min}" max="${t.max}" value="${on ? on.value : t.default}" placeholder="${{ x: '×', '%': '%', min: 'мин' }[t.unit]}" />
-            <input class="field" data-ev-minutes type="number" step="1" min="1" value="60" placeholder="минут" />
-            <button class="btn-chip" data-ev-start>${on ? 'Обновить' : 'Запустить'}</button>
-            ${on ? '<button class="btn-chip danger" data-ev-stop>Стоп</button>' : ''}
-          </div>
-          <label class="admin-event-notify"><input type="checkbox" data-ev-notify ${on ? '' : 'checked'} /> 📣 Оповестить всех в боте</label>
-          <div class="muted admin-hint">${t.unit === 'x' ? `Сила ×${t.min}…×${t.max}` : t.unit === 'min' ? `Каждые ${t.min}…${t.max} мин` : `${t.min}…${t.max}%`} · длительность в минутах</div>
-        </div>`;
-    }).join('');
-    box.querySelectorAll('[data-ev]').forEach((card) => {
-      const type = card.dataset.ev;
-      const send = async (body) => {
-        try {
-          const d = await api('/api/admin/events', { method: 'POST', body: JSON.stringify({ type, ...body }) });
-          paintEvents(d); applyEvents(d.active);
-          toast(body.action === 'stop' ? 'Ивент остановлен'
-            : d.notified != null ? `Ивент запущен · рассылка ${d.notified} игрокам пошла` : 'Ивент запущен для всех игроков', 'success');
-          haptic.success();
-        } catch (err) { toast(err.message, 'error'); }
-      };
-      card.querySelector('[data-ev-start]').addEventListener('click', () => send({
-        action: 'start', value: Number(card.querySelector('[data-ev-value]').value), minutes: Number(card.querySelector('[data-ev-minutes]').value),
-        notify: card.querySelector('[data-ev-notify]').checked,
-      }));
-      card.querySelector('[data-ev-stop]')?.addEventListener('click', () => send({ action: 'stop' }));
-    });
-  };
-  api('/api/admin/events').then(paintEvents).catch(() => {});
+  mountEventCards(panel.querySelector('#admin-events'), '/api/admin/events', false);
 
   panel.querySelector('#admin-clear-drops').addEventListener('click', async () => {
     if (!confirm('Очистить ленту «Последние выигрыши» у всех?')) return;

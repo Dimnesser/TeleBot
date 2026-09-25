@@ -4,14 +4,16 @@ from __future__ import annotations
 import logging
 import os
 
-from aiogram import Bot, Dispatcher
+from aiogram import BaseMiddleware, Bot, Dispatcher
 from aiogram.client.default import DefaultBotProperties
 from aiogram.enums import ParseMode
 from aiogram.exceptions import TelegramBadRequest
 from aiogram.types import ErrorEvent, MenuButtonWebApp, WebAppInfo
 
 from bot.config import config
-from bot.database.engine import init_db
+from bot.database.engine import async_session, init_db
+from bot.database.repo.users import get_user_by_tg_id
+from bot.services import events_service
 from bot.env_loader import load_dotenv
 from bot import support_bot
 from bot.handlers import routers
@@ -52,6 +54,24 @@ async def handle_message_not_modified(event: ErrorEvent) -> bool:
     return True
 
 
+class EventAudienceMiddleware(BaseMiddleware):
+    """Партнёрские ивенты действуют только на аудиторию партнёра — узнаём,
+    чья это аудитория, до хендлера (цены, шансы и бонусы в чате бота)."""
+
+    async def __call__(self, handler, event, data):
+        tg_user = data.get("event_from_user")
+        token = None
+        if tg_user is not None:
+            async with async_session() as session:
+                user = await get_user_by_tg_id(session, tg_user.id)
+                token = events_service.set_audience(await events_service.audience_of(session, user))
+        try:
+            return await handler(event, data)
+        finally:
+            if token is not None:
+                events_service.reset_audience(token)
+
+
 async def main() -> None:
     load_dotenv()
     setup_logging()
@@ -64,6 +84,8 @@ async def main() -> None:
     bot = Bot(token=config.bot_token, default=DefaultBotProperties(parse_mode=ParseMode.HTML))
     dp = Dispatcher()
     dp.errors.register(handle_message_not_modified)
+    dp.message.outer_middleware(EventAudienceMiddleware())
+    dp.callback_query.outer_middleware(EventAudienceMiddleware())
     for router in routers:
         dp.include_router(router)
 

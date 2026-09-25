@@ -114,9 +114,14 @@ async def resolve_deposit(
     credited = 0
     if approve:
         # бонус за код из заявки + бонус партнёрского кода игрока
+        # ивент «Бонус к пополнению» — глобальный или партнёра этого игрока
+        token = events_service.set_audience(await events_service.audience_of(session, user))
+        try:
+            event_bonus = events_service.deposit_bonus_percent()
+        finally:
+            events_service.reset_audience(token)
         credited = (request.total_b + bonus_amount(request.total_b, request.bonus_percent)
-                    + deposit_bonus(user, request.total_b)
-                    + bonus_amount(request.total_b, events_service.deposit_bonus_percent()))  # ивент «Бонус к пополнению»
+                    + deposit_bonus(user, request.total_b) + bonus_amount(request.total_b, event_bonus))
         user.balance += credited
         if request.category == DepositCategory.BRAINROT:
             # принятые брейнроты теперь у админа — сразу в сток для вывода

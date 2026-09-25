@@ -54,9 +54,10 @@ async def _send_all(bot: Bot, tg_ids: list[int], text: str) -> tuple[int, int]:
     return sent, failed
 
 
-async def start(bot: Bot, text: str) -> int:
-    """Запускает рассылку фоном, возвращает число получателей."""
-    tg_ids = await recipients()
+async def start(bot: Bot, text: str, tg_ids: list[int] | None = None) -> int:
+    """Запускает рассылку фоном (всем или списку tg_ids), возвращает число получателей."""
+    if tg_ids is None:
+        tg_ids = await recipients()
     task = asyncio.create_task(_send_all(bot, tg_ids, text))
     _tasks.add(task)
     task.add_done_callback(_tasks.discard)

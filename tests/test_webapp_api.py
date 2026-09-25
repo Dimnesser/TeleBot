@@ -1008,6 +1008,60 @@ async def test_more_events_sell_cashback_battle_free(client, auth_headers, admin
         events_service._active.clear()
 
 
+async def test_partner_events_only_for_own_audience(client, auth_headers, admin_headers) -> None:
+    import asyncio
+
+    from bot.services import broadcast, events_service
+
+    stranger = {"Authorization": "tma " + _init_data(555444)}
+    try:
+        await client.get("/api/me", headers=admin_headers)  # партнёр = 777000
+        await client.get("/api/me", headers=auth_headers)   # его реферал = 999111
+        await client.get("/api/me", headers=stranger)       # чужой игрок
+        assert (await client.get("/api/partner/events", headers=auth_headers)).status == 403
+        await client.post("/api/admin/partners", headers=admin_headers, json={
+            "user": "777000", "code": "evp", "commission_percent": 10, "deposit_bonus_percent": 0,
+        })
+        await client.post("/api/promo/redeem", headers=auth_headers, json={"code": "evp"})
+
+        info = await (await client.get("/api/partner/events", headers=admin_headers)).json()
+        assert info["audience"] == 1
+        luck = next(t for t in info["types"] if t["type"] == "luck")
+        assert luck["max"] == 2 and luck["max_minutes"] == 180
+
+        # выше потолка партнёра и дольше 3 часов — нельзя
+        bad = await client.post("/api/partner/events", headers=admin_headers, json={"type": "discount", "value": 50, "minutes": 30})
+        assert bad.status == 400
+        bad = await client.post("/api/partner/events", headers=admin_headers, json={"type": "discount", "value": 20, "minutes": 500})
+        assert bad.status == 400
+        r = await client.post("/api/partner/events", headers=admin_headers,
+                              json={"type": "discount", "value": 20, "minutes": 60, "notify": True})
+        body = await r.json()
+        assert body["notified"] == 1 and body["active"][0]["type"] == "discount"
+        await asyncio.gather(*broadcast._tasks)
+        texts = [t for chat, t in client.server.app["bot"].sent if "ПАРТНЁРА" in t]
+        assert len(texts) == 1
+
+        def party_price(cases):
+            return next(c for c in cases["cases"] if c["code"] == "party")
+        ref = party_price(await (await client.get("/api/cases?category=starter", headers=auth_headers)).json())
+        other = party_price(await (await client.get("/api/cases?category=starter", headers=stranger)).json())
+        assert ref["price_tokens"] < ref["price_full"] and other["price_tokens"] == other["price_full"]
+        ev = (await (await client.get("/api/me", headers=auth_headers)).json())["events"]
+        assert ev and ev[0]["partner"] is True
+        assert (await (await client.get("/api/me", headers=stranger)).json())["events"] == []
+
+        # остановить можно, но заново — только после кулдауна
+        await client.post("/api/partner/events", headers=admin_headers, json={"type": "discount", "action": "stop"})
+        again = await client.post("/api/partner/events", headers=admin_headers, json={"type": "discount", "value": 20, "minutes": 60})
+        assert again.status == 400 and "Снова можно" in (await again.json())["message"]
+        ref = party_price(await (await client.get("/api/cases?category=starter", headers=auth_headers)).json())
+        assert ref["price_tokens"] == ref["price_full"]
+    finally:
+        events_service._active.clear()
+        events_service._partner.clear()
+
+
 async def test_stars_no_upper_limit(client, auth_headers) -> None:
     r = await client.post("/api/deposit/stars/quote", headers=auth_headers, json={"amount": 5_000_000})
     assert r.status == 200 and (await r.json())["credited"] == 8_750_000

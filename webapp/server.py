@@ -17,6 +17,7 @@ from aiohttp import web
 from bot.config import config
 from bot.database.engine import async_session
 from bot.database.repo.users import get_or_create_user
+from bot.services import events_service
 from webapp.api import routes
 from webapp.auth import InitDataError, WebAppUser, validate_init_data
 
@@ -92,7 +93,12 @@ async def auth_middleware(request: web.Request, handler):
             user = await get_or_create_user(session, tg_user.tg_id, tg_user.username, tg_user.first_name)
             request["session"] = session
             request["user"] = user
-            return await handler(request)
+            # чьи партнёрские ивенты действуют на игрока (цены, шансы, бонусы)
+            token = events_service.set_audience(await events_service.audience_of(session, user))
+            try:
+                return await handler(request)
+            finally:
+                events_service.reset_audience(token)
 
     # Игрок закрыл Mini App посреди запроса — не обрываем работу с базой на
     # полпути (иначе сессия SQLite закрывается с ошибкой): доводим до конца.
