@@ -262,6 +262,7 @@ async def _user_json(request: web.Request) -> dict:
     return {
         "is_admin": is_admin(user.tg_id),
         "is_owner": is_owner(user.tg_id),
+        "design": await settings_service.ui_design(session),
         "case_credits": await rewards_repo.case_credits(session, user),
         "partner_percent": user.partner_percent,
         "deposit_bonus_percent": user.deposit_bonus_percent,
@@ -1403,6 +1404,7 @@ async def get_admin_settings(request: web.Request) -> web.Response:
         "free_case_cooldown_hours": await settings_service.free_case_cooldown_hours(session),
         "support_url": await settings_service.get_setting(session, settings_service.SUPPORT_URL),
         "support_bot": await settings_service.get_setting(session, settings_service.SUPPORT_BOT_USERNAME),
+        "design": await settings_service.ui_design(session),
         "stars_rate": await stars_service.rate(session),
         "stars_code_bonus_percent": await stars_service.code_bonus(session),
     })
@@ -1444,6 +1446,10 @@ async def post_admin_settings(request: web.Request) -> web.Response:
         except ValueError:
             return web.json_response({"error": "bad_link", "message": "Поддержка: @username или https-ссылка"}, status=400)
         await settings_service.set_setting(session, settings_service.SUPPORT_URL, support)
+    if "design" in body:
+        if body.get("design") not in settings_service.UI_DESIGNS:
+            return web.json_response({"error": "bad_design", "message": "Дизайн: v2 или classic"}, status=400)
+        await settings_service.set_setting(session, settings_service.UI_DESIGN, body["design"])
     if "support_bot_token" in body:
         token = str(body.get("support_bot_token") or "").strip()
         if token:

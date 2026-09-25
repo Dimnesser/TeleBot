@@ -212,7 +212,7 @@ body.stage-open { overflow: hidden; }
   background: color-mix(in srgb, var(--rc, transparent) 12%, var(--bg-elevated));
 }
 .filter-chip.active { background: var(--rc, var(--accent)); color: #08090f; }
-.inventory-grid { display: grid; grid-template-columns: repeat(3, 1fr); gap: 10px; }
+.inventory-grid { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 10px; }
 .inv-tile {
   background: var(--bg-card); border: 1px solid var(--rc); border-radius: var(--radius-sm);
   padding: 8px; display: flex; flex-direction: column; align-items: center; gap: 4px; text-align: center;
@@ -1180,7 +1180,7 @@ button.dep-item:active { transform: scale(.97); }
 
 /* вывести / обменять / отменить */
 .inv-actions { display: grid; grid-template-columns: 1fr 1fr; gap: 4px; margin-top: 4px; }
-.inv-act { height: 30px; border: 1px solid #1d2a4a; border-radius: 8px; background: #0e1424; color: #8fa6d8; font: 800 11px var(--font-body); }
+.inv-act { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; padding: 0 2px; height: 30px; border: 1px solid #1d2a4a; border-radius: 8px; background: #0e1424; color: #8fa6d8; font: 800 11px var(--font-body); }
 .inv-act:active { transform: scale(.96); }
 .dep-tabs.two { grid-template-columns: 1fr 1fr; }
 .dep-cancel { margin-top: 8px; height: 34px; padding: 0 14px; border: 1px solid #4a1d28; border-radius: 2px; background: #1a0a0e; color: #ff7a8e; font: 800 12px var(--font-body); }

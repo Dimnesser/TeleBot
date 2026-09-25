@@ -855,6 +855,15 @@ async def test_owner_grants_and_revokes_admin(client, auth_headers, admin_header
         config_module.set_granted_admins([])
 
 
+async def test_design_switch(client, auth_headers, admin_headers) -> None:
+    assert (await (await client.get("/api/me", headers=auth_headers)).json())["design"] == "v2"
+    r = await client.post("/api/admin/settings", headers=admin_headers, json={"design": "classic"})
+    assert (await r.json())["design"] == "classic"
+    assert (await (await client.get("/api/me", headers=auth_headers)).json())["design"] == "classic"
+    assert (await client.post("/api/admin/settings", headers=admin_headers, json={"design": "neon"})).status == 400
+    assert (await client.post("/api/admin/settings", headers=auth_headers, json={"design": "v2"})).status == 403
+
+
 async def test_stars_no_upper_limit(client, auth_headers) -> None:
     r = await client.post("/api/deposit/stars/quote", headers=auth_headers, json={"amount": 5_000_000})
     assert r.status == 200 and (await r.json())["credited"] == 8_750_000

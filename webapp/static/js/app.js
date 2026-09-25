@@ -141,9 +141,18 @@ function popNumber(el) {
   el.classList.add('num-pop');
 }
 
+/* Дизайн задаёт админ: v2 (новый) или classic (прошлый). Запоминаем, чтобы
+   при следующем запуске не мигал другой дизайн до ответа /api/me. */
+function applyDesign(design) {
+  const v2 = design !== 'classic';
+  document.documentElement.classList.toggle('ui-v2', v2);
+  try { localStorage.setItem('bb_design', v2 ? 'v2' : 'classic'); } catch (e) {}
+}
+
 async function refreshMe() {
   const prevTokens = ME ? ME.balance : null;
   ME = await api('/api/me');
+  applyDesign(ME.design);
   document.getElementById('drawer-username').textContent = ME.username ? '@' + ME.username : (ME.first_name || 'игрок');
   const drawerAvatar = document.getElementById('drawer-avatar');
   if (drawerAvatar && !drawerAvatar.dataset.ready) { drawerAvatar.outerHTML = avatarHtml(ME).replace('class="avatar ', 'id="drawer-avatar" data-ready="1" class="avatar '); }
@@ -197,6 +206,7 @@ const DRAWER_SECTIONS = [
   ['support', 'Поддержка'],
 ];
 
+const TABBAR_SECTIONS = [['home', 'Кейсы'], ['upgrader', 'Апгрейд'], ['battle', 'Батл'], ['crash', 'Краш'], ['inventory', 'Инвентарь']];
 const TOPNAV_SECTIONS = ['home', 'upgrader', 'dice', 'crash', 'battle', 'inventory', 'bonuses'];
 
 function renderDrawer(active) {
@@ -208,6 +218,12 @@ function renderDrawer(active) {
     btn.innerHTML = `${icon(key)}<span>${label}</span>`;
     btn.addEventListener('click', () => { closeDrawer(); if (key === 'support') openSupport(); else navigate(key); });
     root.appendChild(btn);
+  }
+  const tabbar = document.getElementById('tabbar');
+  if (tabbar) {
+    tabbar.innerHTML = TABBAR_SECTIONS.map(([key, label]) =>
+      `<button class="tab-item${key === active ? ' active' : ''}" data-tab="${key}">${icon(key)}<span>${label}</span></button>`).join('');
+    tabbar.querySelectorAll('[data-tab]').forEach((b) => b.addEventListener('click', () => { haptic.tick(); navigate(b.dataset.tab); }));
   }
   // ПК: основные разделы прямо в шапке (виден только на широком экране)
   const nav = document.getElementById('topnav');
@@ -1163,8 +1179,8 @@ function paintInventory(root, items) {
       <div class="inv-value">${fmt(i.value)}${coinIcon()}</div>
       <button class="inv-sell-btn" data-sell="${i.id}" data-payout="${i.value}">Продать · ${i.value}${coinIcon()}</button>
       <div class="inv-actions">
-        <button class="inv-act" data-wd="${i.id}">Вывести</button>
-        <button class="inv-act" data-ex="${i.id}">Обменять</button>
+        <button class="inv-act" data-wd="${i.id}">Вывод</button>
+        <button class="inv-act" data-ex="${i.id}">Обмен</button>
       </div>
     </div>`).join('') || '<div class="empty-state" style="grid-column:1/-1">Пусто — открой кейс на главной.</div>';
 
@@ -1380,6 +1396,12 @@ function adminPanelHtml() {
       </form>
       <div class="muted admin-hint" id="s-status"></div>
 
+      <div class="admin-sub">Дизайн</div>
+      <div class="pill-row" id="admin-design">
+        <button class="pill" data-design="v2">✨ Новый</button>
+        <button class="pill" data-design="classic">Классический</button>
+      </div>
+
       <div class="admin-sub">Бот поддержки</div>
       <form class="inline-form" id="admin-support-bot" autocomplete="off">
         <input class="field" id="sb-token" type="password" placeholder="Токен из @BotFather" />
@@ -1558,6 +1580,7 @@ async function bindAdminPanel(root) {
       ? `Подписка на ${st.required_channel} обязательна · кейс раз в ${st.free_case_cooldown_hours} ч`
       : `Без обязательной подписки · кейс раз в ${st.free_case_cooldown_hours} ч`;
     panel.querySelector('#s-status').textContent += ` · 1 ⭐ = ${st.stars_rate} B, код +${st.stars_code_bonus_percent}%`;
+    panel.querySelectorAll('[data-design]').forEach((b) => b.classList.toggle('active', b.dataset.design === st.design));
     const sb = panel.querySelector('#sb-status');
     sb.innerHTML = st.support_bot
       ? `✅ Подключён <b>@${escapeHtml(st.support_bot)}</b> — игроки пишут туда, обращения приходят тебе в этот бот, отвечай реплаем. Нажми в нём /start. <button class="btn-chip ghost danger" id="sb-off">Отключить</button>`
@@ -1565,6 +1588,13 @@ async function bindAdminPanel(root) {
     const off = sb.querySelector('#sb-off');
     if (off) off.addEventListener('click', () => saveSupportBot(''));
   };
+  panel.querySelectorAll('[data-design]').forEach((b) => b.addEventListener('click', async () => {
+    try {
+      const st = await api('/api/admin/settings', { method: 'POST', body: JSON.stringify({ design: b.dataset.design }) });
+      paintSettings(st); applyDesign(st.design);
+      toast(st.design === 'classic' ? 'Включён классический дизайн — у всех игроков' : 'Включён новый дизайн — у всех игроков', 'success');
+    } catch (err) { toast(err.message, 'error'); }
+  }));
   const saveSupportBot = async (token) => {
     try {
       paintSettings(await api('/api/admin/settings', { method: 'POST', body: JSON.stringify({ support_bot_token: token }) }));

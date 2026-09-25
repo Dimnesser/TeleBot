@@ -10,6 +10,10 @@
 <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
 <link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Manrope:wght@400;600;700;800&family=Space+Mono:wght@400;700&family=Unbounded:wght@600;700;800&display=swap" />
 <link rel="stylesheet" href="/static/css/app.css" />
+<!-- Новый дизайн (v2) — отдельный слой поверх классического; включается классом ui-v2.
+     Вернуть прошлый дизайн: админка → «Дизайн» → «Классический». -->
+<link rel="stylesheet" href="/static/css/app-v2.css" />
+<script>try { if (localStorage.getItem('bb_design') !== 'classic') document.documentElement.classList.add('ui-v2'); } catch (e) { document.documentElement.classList.add('ui-v2'); }</script>
 <script src="https://telegram.org/js/telegram-web-app.js"></script>
 </head>
 <body>
@@ -45,6 +49,7 @@
   </nav>
 
   <main id="screen" class="screen"></main>
+  <nav class="tabbar" id="tabbar" aria-label="Разделы"></nav>
 
   <div id="modal-root"></div>
   <div id="toast-root"></div>

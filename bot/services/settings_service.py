@@ -19,6 +19,8 @@ REQUIRED_CHANNEL = "required_channel"
 FREE_CASE_COOLDOWN_HOURS = "free_case_cooldown_hours"
 SUPPORT_URL = "support_url"
 SUPPORT_BOT_TOKEN = "support_bot_token"
+UI_DESIGN = "ui_design"  # v2 (новый, по умолчанию) | classic (прошлый дизайн)
+UI_DESIGNS = ("v2", "classic")
 SUPPORT_BOT_USERNAME = "support_bot_username"
 DEFAULT_FREE_CASE_COOLDOWN_HOURS = 12
 
@@ -92,3 +94,8 @@ async def is_subscribed(bot, channel: str, tg_id: int) -> bool:
     if status == "restricted":
         return bool(getattr(member, "is_member", False))
     return status in SUBSCRIBED_STATUSES
+
+
+async def ui_design(session: AsyncSession) -> str:
+    value = await get_setting(session, UI_DESIGN)
+    return value if value in UI_DESIGNS else "v2"
