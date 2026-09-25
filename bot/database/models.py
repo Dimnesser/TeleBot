@@ -154,6 +154,7 @@ class CaseItem(Base):
     name: Mapped[str] = mapped_column(String(128))
     value: Mapped[int] = mapped_column(Integer)
     rarity: Mapped[str | None] = mapped_column(String(16), nullable=True)
+    weight: Mapped[float | None] = mapped_column(Float, nullable=True)  # доля выпадения из балансировки; None — 1/ценность^k
     sort_order: Mapped[int] = mapped_column(Integer, default=0)
 
 
@@ -426,4 +427,19 @@ class AdminGrant(Base):
 
     tg_id: Mapped[int] = mapped_column(BigInteger, primary_key=True)
     granted_by: Mapped[int] = mapped_column(BigInteger)
+    created_at: Mapped[datetime] = mapped_column(DateTime, server_default=func.now())
+
+
+class DropLog(Base):
+    """Журнал выигрышей для ленты «Последние выигрыши». Пишется в момент
+    выпадения и не зависит от того, продал игрок предмет или вывел."""
+
+    __tablename__ = "drop_log"
+
+    id: Mapped[int] = mapped_column(primary_key=True)
+    user_id: Mapped[int] = mapped_column(ForeignKey("users.id"), index=True)
+    item_name: Mapped[str] = mapped_column(String(128))
+    value: Mapped[int] = mapped_column(Integer)
+    rarity: Mapped[str | None] = mapped_column(String(16), nullable=True)
+    source: Mapped[str] = mapped_column(String(128))
     created_at: Mapped[datetime] = mapped_column(DateTime, server_default=func.now())

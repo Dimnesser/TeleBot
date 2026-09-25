@@ -8,7 +8,9 @@ from pathlib import Path
 from bot.data.brainrot_roster import ROSTER, ROSTER_BY_NAME, Rarity
 from bot.data.coins import COIN_RARITY, coin_amount
 from bot.data.market import DEMAND, TIER
-from bot.data.seed_cases import CASE_THEMES, SEED_CASES, SEED_CASES_BY_CODE, TARGET_RTP, expected_value, price_for
+from bot.data.seed_cases import (
+    CASE_THEMES, PAYBACK_BAND, SEED_CASES, SEED_CASES_BY_CODE, TARGET_RTP, TOP_CHANCE_BAND, expected_value,
+)
 from bot.database.models import CaseCategory
 
 ASSETS = Path(__file__).resolve().parent.parent / "webapp" / "static" / "assets" / "brainrots"
@@ -35,11 +37,15 @@ def test_paid_cases_form_a_price_ladder_and_all_in_is_top():
     assert min(c.price_tokens for c in main) < 30  # дешёвые кейсы — как на референсе (~19–30)
 
 
-def test_coins_only_in_free_cases():
+def test_paid_cases_hold_only_withdrawable_brainrots_or_coins():
+    """В платных кейсах — брейнроты из каталога пополнения (от 41 B, их можно
+    вывести) и монеты B; мелочи вне каталога нет."""
     for case in SEED_CASES:
-        if any(i.rarity == COIN_RARITY for i in case.items):
-            assert case.category in (CaseCategory.FREE, CaseCategory.REFERRAL)
-    assert SEED_CASES_BY_CODE["free"].price_tokens == 0
+        assert SEED_CASES_BY_CODE["free"].price_tokens == 0
+        if case.category in (CaseCategory.FREE, CaseCategory.REFERRAL):
+            continue
+        for item in case.items:
+            assert item.rarity == COIN_RARITY or item.value >= 41, (case.code, item.name)
 
 
 def test_every_roster_brainrot_has_official_render():
@@ -64,14 +70,28 @@ def test_cases_contain_only_roster_brainrots_with_roster_values():
             assert item.rarity == entry.rarity.value
 
 
-def test_case_price_is_derived_from_pool():
+def test_paid_cases_are_balanced():
+    """Каждый платный кейс окупается в 25–40% открытий, возвращает ~94%
+    цены, топ выпадает в 0.5–8%; веса — доли, в сумме 1."""
+    lo, hi = PAYBACK_BAND
     for case in SEED_CASES:
-        values = [i.value for i in case.items]
-        if case.category == CaseCategory.FREE:
-            assert case.price_tokens == 0
+        if case.category in (CaseCategory.FREE, CaseCategory.REFERRAL):
             continue
-        assert case.price_tokens == price_for(values)
-        assert case.price_tokens >= expected_value(values) / TARGET_RTP
+        weights = [i.weight for i in case.items]
+        assert all(w and w > 0 for w in weights) and abs(sum(weights) - 1) < 1e-3, case.code
+        payback = sum(i.weight for i in case.items if i.value >= case.price_tokens)
+        rtp = sum(i.value * i.weight for i in case.items) / case.price_tokens
+        top = max(case.items, key=lambda i: i.value)
+        assert lo <= payback <= hi, (case.code, payback)
+        assert 0.88 <= rtp <= TARGET_RTP + 1e-6, (case.code, rtp)
+        assert TOP_CHANCE_BAND[0] <= top.weight <= TOP_CHANCE_BAND[1], (case.code, top.weight)
+
+
+def test_free_case_lets_you_climb():
+    """Бесплатный кейс в среднем даёт не меньше ~80% цены самого дешёвого кейса."""
+    free = SEED_CASES_BY_CODE["free"]
+    cheapest = min(c.price_tokens for c in SEED_CASES if c.category == CaseCategory.STARTER)
+    assert expected_value([i.value for i in free.items]) >= cheapest * 0.8
 
 
 def test_every_case_has_theme_and_unique_code():

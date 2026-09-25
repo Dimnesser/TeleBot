@@ -8,10 +8,10 @@ from aiogram.types import CallbackQuery
 from bot.database.engine import async_session
 from bot.database.models import CaseCategory
 from bot.database.repo import cases as cases_repo
-from bot.database.repo import inventory as inventory_repo
 from bot.database.repo.users import add_balance, get_or_create_user
 from bot.keyboards.battle import battle_cases_keyboard, battle_result_keyboard
 from bot.keyboards.callbacks import BattleHomeCB, BattleStartCB
+from bot.services import drops
 from bot.services.battle_service import run_battle
 from bot.utils.texts import (
     BATTLE_HOME_DISCLAIMER,
@@ -71,14 +71,9 @@ async def handle_battle_start(callback: CallbackQuery, callback_data: BattleStar
         result = run_battle(items, luck=user.luck, case_price=case.price_tokens)
 
         if result.winner == "player":
-            await inventory_repo.add_items(
-                session,
-                user,
-                f"Батл: {case.name}",
-                [
-                    (result.player_item.name, result.player_item.value),
-                    (result.bot_item.name, result.bot_item.value),
-                ],
+            await drops.grant(
+                session, user, f"Батл: {case.name}",
+                [(result.player_item.name, result.player_item.value), (result.bot_item.name, result.bot_item.value)],
                 case_id=case.id,
             )
         elif result.winner == "tie":

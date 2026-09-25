@@ -79,6 +79,28 @@ async def init_db() -> None:
     await _seed_cases_reconcile()
     await _seed_quests_if_empty()
     await load_granted_admins()
+    await _backfill_drop_log_once()
+
+
+async def _backfill_drop_log_once() -> None:
+    """Лента выигрышей теперь из DropLog; при первом запуске переносим туда
+    последние выигрыши из инвентаря, чтобы лента не была пустой."""
+    from bot.database.models import DropLog, InventoryItem
+
+    async with async_session() as session:
+        if (await session.execute(select(DropLog.id).limit(1))).first() is not None:
+            return
+        rows = (await session.execute(
+            select(InventoryItem)
+            .where(InventoryItem.case_name.not_in(["Отмена вывода", "Краш", "Дайсы"]))
+            .order_by(InventoryItem.id.desc()).limit(40)
+        )).scalars().all()
+        session.add_all(
+            DropLog(user_id=r.user_id, item_name=r.item_name, value=r.value, rarity=r.rarity, source=r.case_name,
+                    created_at=r.obtained_at)
+            for r in reversed(rows)
+        )
+        await session.commit()
 
 
 async def load_granted_admins() -> None:
@@ -112,6 +134,7 @@ async def _migrate_add_missing_columns() -> None:
         ("users", "luck", "FLOAT"),
         ("deposit_requests", "promo_code", "VARCHAR(32)"),
         ("deposit_requests", "bonus_percent", "FLOAT"),
+        ("case_items", "weight", "FLOAT"),
     ]
     async with engine.begin() as conn:
         for table, column, coltype in columns_to_add:
@@ -232,7 +255,8 @@ async def _seed_cases_reconcile() -> None:
             session.add(case)
             await session.flush()
             session.add_all(
-                CaseItem(case_id=case.id, name=item.name, value=item.value, rarity=item.rarity, sort_order=i)
+                CaseItem(case_id=case.id, name=item.name, value=item.value, rarity=item.rarity, weight=item.weight,
+                         sort_order=i)
                 for i, item in enumerate(seed_case.items)
             )
 

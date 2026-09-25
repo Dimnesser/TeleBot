@@ -6,13 +6,19 @@
 Содержимое — только реальные персонажи Steal a Brainrot из
 bot.data.brainrot_roster; в бесплатных кейсах ещё и монеты.
 
-Логика кейса (вся выводится из данных, руками не проставлено ничего):
+В платных кейсах — только брейнроты из каталога пополнения (от 41 B, их
+можно вывести из стока), мелкий дроп — монеты B сразу на баланс.
+
+Баланс (вся выводится из данных, руками не проставлено ничего):
   * ценность предмета — его ценность в B со скриншотов пользователя
     (brainrot_roster.ROSTER);
-  * шанс предмета ∝ 1 / ценность^0.8 — дорогие реже, но выпадают заметно
-    (bot.services.cases_service.item_weight);
-  * цена кейса = средний дроп / TARGET_RTP, округлённая вверх — кейс
-    возвращает в среднем 94% своей цены, окупается в 13–50% открытий.
+  * платный кейс окупается в PAYBACK_TARGET (~30%, коридор 25–40%)
+    открытий: вероятность делится между «окупающими» (ценность ≥ цены) и
+    остальными, внутри групп шанс ∝ 1 / ценность^0.8 — дорогие реже;
+  * цена = средний дроп / TARGET_RTP, округлённая вверх — кейс возвращает
+    в среднем 94% цены; топ кейса выпадает в 0.5–8% открытий;
+  * бесплатный кейс — натуральные веса 1/ценность^0.8, в среднем ≈ цене
+    самого дешёвого кейса «Старт»: с него реально подняться.
 """
 from __future__ import annotations
 
@@ -24,9 +30,12 @@ from bot.data.coins import COIN_RARITY, coin_name
 from bot.database.models import CaseCategory
 from bot.services.cases_service import CASE_WEIGHT_EXPONENT
 
-CASES_CONTENT_VERSION = "21-more-cases"
+CASES_CONTENT_VERSION = "22-balanced"
 
 TARGET_RTP = 0.94
+PAYBACK_TARGET = 0.30
+PAYBACK_BAND = (0.25, 0.40)
+TOP_CHANCE_BAND = (0.005, 0.08)
 
 
 @dataclass(frozen=True)
@@ -34,6 +43,7 @@ class SeedCaseItem:
     name: str
     value: int
     rarity: str | None = None
+    weight: float | None = None  # доля выпадения; None — 1/ценность^k
 
 
 @dataclass(frozen=True)
@@ -74,6 +84,40 @@ def price_for(values: list[int]) -> int:
     return math.ceil(expected_value(values) / TARGET_RTP)
 
 
+def balanced_weights(values: list[int]) -> tuple[list[float], int]:
+    """Веса и цена платного кейса: окупается в ~PAYBACK_TARGET открытий,
+    возвращает TARGET_RTP цены, топ в TOP_CHANCE_BAND. Перебирает порог
+    «окупающих» предметов и их суммарную долю, берёт лучший вариант
+    (ближе к цели и к натуральной цене)."""
+    natural = price_for(values)
+    best = None
+    lo, hi = PAYBACK_BAND
+    top = max(values)
+    for threshold in sorted(set(values))[1:]:
+        up = [i for i, v in enumerate(values) if v >= threshold]
+        down = [i for i, v in enumerate(values) if v < threshold]
+        w_up = sum(values[i] ** -CASE_WEIGHT_EXPONENT for i in up)
+        w_down = sum(values[i] ** -CASE_WEIGHT_EXPONENT for i in down)
+        for q100 in range(round(lo * 100), round(hi * 100) + 1):
+            q = q100 / 100
+            weights = [
+                (q / w_up if i in up else (1 - q) / w_down) * v ** -CASE_WEIGHT_EXPONENT
+                for i, v in enumerate(values)
+            ]
+            price = math.ceil(sum(v * w for v, w in zip(values, weights)) / TARGET_RTP)
+            payback = sum(w for v, w in zip(values, weights) if v >= price)
+            if not lo <= payback <= hi:
+                continue
+            top_chance = weights[values.index(top)]
+            score = (abs(payback - PAYBACK_TARGET) * 4 + abs(math.log(price / natural))
+                     + (0 if TOP_CHANCE_BAND[0] <= top_chance <= TOP_CHANCE_BAND[1] else 5))
+            if best is None or score < best[0]:
+                best = (score, weights, price)
+    if best is None:
+        raise ValueError(f"Кейс не балансируется: {values}")
+    return best[1], best[2]
+
+
 def _pool(names: list[str | int]) -> tuple[SeedCaseItem, ...]:
     """Имена брейнротов из ростера; число N — N B монетами (сразу на баланс)."""
     items = [
@@ -91,13 +135,18 @@ def _case(
     category: CaseCategory, code: str, name: str, sort_order: int, theme: CaseTheme, names: list[str | int],
     price: int | None = None,
 ) -> SeedCase:
+    """price=None — платный кейс, цена и веса из balanced_weights; иначе
+    (бесплатный/реферальный) — натуральные веса и заданная цена."""
     items = _pool(names)
     CASE_THEMES[code] = theme
+    if price is None:
+        weights, price = balanced_weights([i.value for i in items])
+        items = tuple(SeedCaseItem(i.name, i.value, i.rarity, round(w, 6)) for i, w in zip(items, weights))
     return SeedCase(
         category=category,
         code=code,
         name=name,
-        price_tokens=price if price is not None else price_for([i.value for i in items]),
+        price_tokens=price,
         item_count_label=len(items),
         items=items,
         sort_order=sort_order,
@@ -106,95 +155,93 @@ def _case(
 
 K, A = CaseCategory.STARTER, CaseCategory.APEX
 
-# Самые дешёвые Secret — «дно» дешёвых кейсов, как на референсе.
-CHEAP = ["67", "La Grande Combinasion", "Money Money Puggy", "Nuclearo Dinossauro", "Tang Tang Keletang",
-         "Orcaledon", "Lavadorito Spinito", "Ventoliero Pavonero", "Ketchuru and Musturu", "Noodle Noodle Poodle"]
+GA, CC, BF = "Garama and Madundung", "Cash or Card", "Burguro And Fryuro"
 
 SEED_CASES: list[SeedCase] = [
     # ------------------------------------------------------------ БЕСПЛАТНЫЕ
+    # В среднем ≈ 16 B — почти цена «Старта»; 15% — брейнрот из каталога.
     _case(
         CaseCategory.FREE, "free", "Бесплатный", 1,
         CaseTheme("junk", "none", ("#a87a4c", "#5a3b1c"), "#e0b98a"),
-        # Ровно как бесплатный кейс на референсе пользователя (11 предметов).
-        [2, 3, 5, "Los Combinasionas", "Nuclearo Dinossauro", "Ketupat Kepat", "Lavadorito Spinito",
-         "Ventoliero Pavonero", "Cash or Card", "Ketchuru and Musturu", "La Secret Combinasion"],
+        [3, 5, 8, 10, 15, GA, CC, BF, "Pizza and Ranch", "La Secret Combinasion", "Los Amigos"],
         price=0,
     ),
     # Не продаётся: открывается только бесплатными открытиями, которые
-    # выдаёт партнёрский код (bot.services.partner_service). Дроп мелкий.
+    # выдаёт партнёрский код (bot.services.partner_service).
     _case(
         CaseCategory.REFERRAL, "referral", "Реферальный", 2,
         CaseTheme("coins", "sparkle", ("#2c2c31", "#0c0c0f"), "#ffc93c"),
-        [2, 3, 5, "67", "La Grande Combinasion", "Money Money Puggy", "Nuclearo Dinossauro", "Tang Tang Keletang",
-         "Orcaledon"],
+        [3, 5, 8, 12, 20, GA, CC, "Pizza and Ranch"],
+        price=10,
     ),
     # ------------------------------------------------------------ КЕЙСЫ
+    _case(K, "start", "Старт", 0, CaseTheme("coins", "dust", ("#4f8f5a", "#1c3a22"), "#b7ff8a"),
+          [2, 3, 4, 5, 6, 8, GA, CC, BF]),
     _case(K, "mini", "Мини", 0, CaseTheme("coins", "dust", ("#6f7c8f", "#2a3240"), "#c9d6e8"),
-          ["Ketupat Kepat", "Tang Tang Keletang", "Nuclearo Dinossauro", "Money Money Puggy", "Los Combinasionas",
-           "La Grande Combinasion", "67"]),
+          [4, 6, 8, 10, GA, CC, BF, "Pizza and Ranch", "Los Amigos"]),
     _case(K, "kopeika", "Копейка", 0, CaseTheme("coins", "sparkle", ("#b98b3a", "#5a3f12"), "#ffd24d"),
-          ["Cash or Card", "Ventoliero Pavonero", "Garama and Madundung", "Nuclearo Dinossauro", "Money Money Puggy",
-           "Los Combinasionas", "La Grande Combinasion", "67"]),
+          [6, 8, 10, 14, GA, CC, BF, "Popcuru and Fizzuru", "Fortunu and Cashuru"]),
     _case(K, "washer", "Стирка", 0, CaseTheme("water", "bubbles", ("#e8eef5", "#8497ad"), "#8fd8ff"),
-          ["Noodle Noodle Poodle", "Lavadorito Spinito", "Orcaledon", "Ketupat Kepat", "Tang Tang Keletang",
-           "Nuclearo Dinossauro", "La Grande Combinasion", "67"]),
+          [8, 10, 14, 18, GA, CC, "Capitano Moby", "Celestial Pegasus", "Jelly Moby"]),
     _case(K, "sauce", "Соус", 0, CaseTheme("food", "fire", ("#d8b43a", "#8a2a12"), "#ff5a3a"),
-          ["Popcuru and Fizzuru", "Pizza and Ranch", "Burguro And Fryuro", "Ketchuru and Musturu", "Noodle Noodle Poodle",
-           "Cash or Card", "Garama and Madundung", "Tang Tang Keletang", "La Grande Combinasion", "67"]),
+          [10, 14, 18, 22, BF, "Pizza and Ranch", "Popcuru and Fizzuru", "La Food Combinasion",
+           "Fragrama and Chocrama", "La Breakfast Combinasion"]),
     _case(K, "lasecret", "Ла Сикрет", 0, CaseTheme("bills", "lightning", ("#2a2a33", "#0b0b10"), "#f2f2f7"),
-          ["La Secret Combinasion", "Ketchuru and Musturu", "Ventoliero Pavonero", "Lavadorito Spinito",
-           "Tang Tang Keletang", "Nuclearo Dinossauro", "La Grande Combinasion"]),
-    _case(K, "tirili", "Тирили", 1, CaseTheme("coins", "lightning", ("#2f74dc", "#163a7e"), "#ffe14d"),
-          ["Tirilikalika Tirilikalako", "Capitano Moby", "Burguro And Fryuro"] + CHEAP),
-    _case(K, "capitano", "Капитан", 2, CaseTheme("water", "bubbles", ("#2a92a6", "#0e3c48"), "#6ff4ff"),
-          ["Fishino Clownino", "Jelly Moby", "Capitano Moby", "Orcaledon", "Nuclearo Dinossauro", "Money Money Puggy",
-           "La Grande Combinasion", "Tang Tang Keletang", "Lavadorito Spinito", "Noodle Noodle Poodle",
-           "Ketchuru and Musturu"]),
-    _case(K, "safe", "Сейф", 3, CaseTheme("bills", "sparkle", ("#cda33c", "#6a4f10"), "#ffe07a"),
-          ["Rico Dinero", "Los Secret Combinasionas", "Los Sekolahs", "Fortunu and Cashuru", "Los Amigos",
-           "Cash or Card", "Money Money Puggy", "Garama and Madundung", "Ventoliero Pavonero", "Tang Tang Keletang"]),
-    _case(K, "boo", "Бу!", 4, CaseTheme("pumpkins", "smoke", ("#5d3894", "#231238"), "#ff9a2e"),
-          ["La Casa Boo", "Foxini Lanternini", "Dug dug dug", "Duggy Bros", "Cerberus", "Spooky and Pumpky",
-           "Garama and Madundung", "Tang Tang Keletang", "Orcaledon", "Lavadorito Spinito"]),
-    _case(K, "fastfood", "Фастфуд", 5, CaseTheme("food", "sparkle", ("#d8402f", "#7a1a12"), "#ffb23d"),
-          ["Sammyni Cakini", "Pancake and Syrup", "Cooki and Milki", "Fragrama and Chocrama", "La Food Combinasion",
-           "Popcuru and Fizzuru", "Pizza and Ranch", "Burguro And Fryuro", "Ketchuru and Musturu",
-           "Noodle Noodle Poodle", "Garama and Madundung"]),
-    _case(K, "party", "Праздник", 6, CaseTheme("gifts", "confetti", ("#e0508f", "#7a1846"), "#ffd1e6"),
-          ["Kalika Bros", "Hydra Bunny", "Bunny and Eggy", "Rosey and Teddy", "Reinito Sleighito", "Sammyni Fattini",
-           "Cooki and Milki", "Fragrama and Chocrama", "La Food Combinasion"]),
-    _case(K, "dragon", "Драгон", 7, CaseTheme("noodles", "fire", ("#a0703a", "#4a2c10"), "#ff8a1f"),
-          ["Dragon Gingerini", "Dragon Aquanini", "Hydra Dragon Cannelloni", "Dragon Cannelloni", "Cerberus",
-           "Celestial Pegasus", "Globa Steppa"]),
-    _case(K, "crystal", "Кристальный", 8, CaseTheme("crystals", "crystal", ("#b7a1de", "#5e4a8f"), "#e2d6ff"),
-          ["Kraken", "La Supreme Combinasion", "Tirilikalika Tirilikalako", "Hydra Dragon Cannelloni",
-           "Dragon Cannelloni", "Los Sekolahs", "Reinito Sleighito", "Globa Steppa", "Spooky and Pumpky", "Cerberus"]),
-    _case(K, "phantom", "Фантомный", 9, CaseTheme("smoke", "smoke", ("#3c3f47", "#131418"), "#d4dbea"),
-          ["Griffin", "Digi Narwhal", "Hydra Dragon Cannelloni", "La Casa Boo", "Foxini Lanternini", "Duggy Bros",
-           "Los Sekolahs", "Fortunu and Cashuru", "Los Amigos"]),
-    _case(K, "legend", "Легенда", 10, CaseTheme("embers", "fire", ("#8e1d1d", "#2a0606"), "#ff3b2f"),
-          ["Antonio", "Dragon Gingerini", "Kalika Bros", "Fishino Clownino", "La Supreme Combinasion", "Hydra Bunny",
-           "Dragon Cannelloni", "La Casa Boo", "Rico Dinero", "Los Sekolahs"]),
+          [14, 20, 25, 30, GA, CC, "La Secret Combinasion", "La Food Combinasion", "Los Secret Combinasionas"]),
+    _case(K, "tirili", "Тирили", 0, CaseTheme("coins", "lightning", ("#2f74dc", "#163a7e"), "#ffe14d"),
+          [15, 20, 25, 30, GA, BF, "Capitano Moby", "Celestial Pegasus", "Globa Steppa", "Tirilikalika Tirilikalako"]),
+    _case(K, "safe", "Сейф", 0, CaseTheme("bills", "sparkle", ("#cda33c", "#6a4f10"), "#ffe07a"),
+          [30, GA, CC, "Los Amigos", "Fortunu and Cashuru", "Los Sekolahs", "Los Secret Combinasionas", "Rico Dinero"]),
+    _case(K, "boo", "Бу!", 0, CaseTheme("pumpkins", "smoke", ("#5d3894", "#231238"), "#ff9a2e"),
+          [40, GA, "Spooky and Pumpky", "Cerberus", "Duggy Bros", "Dug dug dug", "Foxini Lanternini", "La Casa Boo"]),
+    _case(K, "fastfood", "Фастфуд", 0, CaseTheme("food", "sparkle", ("#d8402f", "#7a1a12"), "#ffb23d"),
+          [50, BF, "Pizza and Ranch", "Popcuru and Fizzuru", "La Food Combinasion", "Fragrama and Chocrama",
+           "Cooki and Milki", "La Breakfast Combinasion", "Pancake and Syrup", "Sammyni Cakini"]),
+    _case(K, "lucky", "Лаки", 0, CaseTheme("gifts", "sparkle", ("#2fa36b", "#0f3f28"), "#9dffc9"),
+          [CC, "Fortunu and Cashuru", "Quackini Snackini", "Los Sekolahs", "Ketupat Bros", "Rosey and Teddy",
+           "Bunny and Eggy", "Moby Bros", "Digi Narwhal"]),
+    _case(K, "capitano", "Капитан", 0, CaseTheme("water", "bubbles", ("#2a92a6", "#0e3c48"), "#6ff4ff"),
+          [20, 30, CC, "Pizza and Ranch", "Capitano Moby", "Globa Steppa", "Bumbatron", "Jelly Moby", "Moby Bros",
+           "Fishino Clownino"]),
+    _case(K, "party", "Праздник", 0, CaseTheme("gifts", "confetti", ("#e0508f", "#7a1846"), "#ffd1e6"),
+          ["La Food Combinasion", "Cooki and Milki", "Sammyni Fattini", "Reinito Sleighito", "Rosey and Teddy",
+           "Bunny and Eggy", "Sammyni Cakini", "Hydra Bunny", "Kalika Bros"]),
+    _case(K, "crystal", "Кристальный", 0, CaseTheme("crystals", "crystal", ("#b7a1de", "#5e4a8f"), "#e2d6ff"),
+          ["Cerberus", "Spooky and Pumpky", "Globa Steppa", "Reinito Sleighito", "Los Sekolahs", "Dragon Cannelloni",
+           "Hydra Dragon Cannelloni", "Tirilikalika Tirilikalako", "La Supreme Combinasion", "Kraken"]),
+    _case(K, "dragon", "Драгон", 0, CaseTheme("noodles", "fire", ("#a0703a", "#4a2c10"), "#ff8a1f"),
+          ["Celestial Pegasus", "Cerberus", "Globa Steppa", "Los Sekolahs", "Dragon Cannelloni", "Hydra Dragon Cannelloni",
+           "Arcadragon", "Dragon Aquanini", "Dragon Gingerini"]),
+    _case(K, "phantom", "Фантомный", 0, CaseTheme("smoke", "smoke", ("#3c3f47", "#131418"), "#d4dbea"),
+          ["Los Amigos", "Fortunu and Cashuru", "Los Sekolahs", "Duggy Bros", "Foxini Lanternini", "La Casa Boo",
+           "Hydra Dragon Cannelloni", "Digi Narwhal", "Griffin"]),
+    _case(K, "legend", "Легенда", 0, CaseTheme("embers", "fire", ("#8e1d1d", "#2a0606"), "#ff3b2f"),
+          ["Los Sekolahs", "Rico Dinero", "La Casa Boo", "Dragon Cannelloni", "Hydra Bunny", "La Supreme Combinasion",
+           "Fishino Clownino", "Kalika Bros", "Dragon Gingerini", "Antonio"]),
     _case(K, "kraken", "Океан", 0, CaseTheme("water", "bubbles", ("#1c6f8a", "#08283a"), "#5dfff0"),
-          ["Dragon Aquanini", "Kalika Bros", "Kraken", "Fishino Clownino", "La Supreme Combinasion", "Digi Narwhal",
-           "Ginger Gerat", "Hydra Bunny", "Tirilikalika Tirilikalako", "Moby Bros"]),
+          ["Moby Bros", "Tirilikalika Tirilikalako", "Hydra Bunny", "Ginger Gerat", "Digi Narwhal",
+           "La Supreme Combinasion", "Fishino Clownino", "Kraken", "Kalika Bros", "Dragon Aquanini"]),
     # ------------------------------------------------------------ ALL-IN
+    _case(A, "frigo", "Фриго", 0, CaseTheme("snow", "snow", ("#a3d6f2", "#3a6f8f"), "#e8f8ff"),
+          ["Dragon Cannelloni", "Ginger Gerat", "La Supreme Combinasion", "Fishino Clownino", "Dragon Gingerini",
+           "Antonio", "Love Love Bear", "Arcadragon", "Elefanto Frigo"]),
     _case(A, "antonio", "Любовь", 0, CaseTheme("embers", "fire", ("#3a3a44", "#111116"), "#ffb13b"),
-          ["Love Love Bear", "Griffin", "Antonio", "Dragon Gingerini", "Dragon Aquanini", "Kalika Bros", "Kraken",
-           "Fishino Clownino", "La Supreme Combinasion"]),
-    _case(A, "frigo", "Фриго", 1, CaseTheme("snow", "snow", ("#a3d6f2", "#3a6f8f"), "#e8f8ff"),
-          ["Elefanto Frigo", "Arcadragon", "Love Love Bear", "Antonio", "Dragon Gingerini", "Fishino Clownino",
-           "La Supreme Combinasion", "Ginger Gerat", "Dragon Cannelloni"]),
-    _case(A, "og", "OG", 2, CaseTheme("coins", "sparkle", ("#6a1f8f", "#2a0838"), "#ffd84d"),
-          ["Meowl", "Skibidi Toilet", "John Pork", "Love Love Bear", "Griffin", "Antonio", "Kalika Bros",
-           "Digi Narwhal", "Tirilikalika Tirilikalako"]),
-    _case(A, "strawberry", "Клубничный", 3, CaseTheme("strawberries", "leaves", ("#e8384a", "#7a0f1c"), "#ff9aa8"),
-          ["Strawberry Elephant", "Signore Carapace", "John Pork", "Meowl", "Skibidi Toilet", "Elefanto Frigo",
-           "Antonio", "Kalika Bros", "Dragon Aquanini"]),
+          ["La Supreme Combinasion", "Fishino Clownino", "Kraken", "Kalika Bros", "Dragon Aquanini", "Dragon Gingerini",
+           "Antonio", "Griffin", "Love Love Bear"]),
+    _case(A, "og", "OG", 0, CaseTheme("coins", "sparkle", ("#6a1f8f", "#2a0838"), "#ffd84d"),
+          ["Tirilikalika Tirilikalako", "Digi Narwhal", "Kalika Bros", "Antonio", "Griffin", "Love Love Bear",
+           "John Pork", "Skibidi Toilet", "Meowl"]),
     _case(A, "arca", "Мяу", 0, CaseTheme("crystals", "crystal", ("#7a4dff", "#2a1266"), "#d8c8ff"),
-          ["Meowl", "John Pork", "Skibidi Toilet", "Elefanto Frigo", "Arcadragon", "Love Love Bear", "Griffin", "Antonio"]),
+          ["Antonio", "Griffin", "Love Love Bear", "Arcadragon", "Elefanto Frigo", "Skibidi Toilet", "John Pork", "Meowl"]),
+    _case(A, "strawberry", "Клубничный", 0, CaseTheme("strawberries", "leaves", ("#e8384a", "#7a0f1c"), "#ff9aa8"),
+          ["Dragon Aquanini", "Kalika Bros", "Antonio", "Elefanto Frigo", "Skibidi Toilet", "Meowl", "John Pork",
+           "Signore Carapace", "Strawberry Elephant"]),
+    _case(A, "highroller", "Хайроллер", 0, CaseTheme("bills", "lightning", ("#1d1d24", "#050507"), "#ffd84d"),
+          ["Kalika Bros", "Antonio", "Love Love Bear", "Elefanto Frigo", "Meowl", "Signore Carapace",
+           "Strawberry Elephant"]),
     _case(A, "crown", "Корона", 0, CaseTheme("coins", "sparkle", ("#e9c24a", "#6b4c00"), "#fff2a8"),
-          ["Strawberry Elephant", "Signore Carapace", "Meowl", "John Pork", "Skibidi Toilet", "Elefanto Frigo", "Arcadragon"]),
+          ["Griffin", "Love Love Bear", "Arcadragon", "Elefanto Frigo", "Skibidi Toilet", "John Pork", "Meowl",
+           "Signore Carapace", "Strawberry Elephant"]),
 ]
 
 # Внутри раздела кейсы идут лестницей цен — sort_order по возрастанию цены.

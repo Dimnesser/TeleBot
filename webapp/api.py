@@ -71,7 +71,7 @@ from bot.database.repo import staking as staking_repo
 from bot.database.repo.known_items import list_known_items
 from bot.database.repo.users import get_user_by_tg_id
 from bot.database.repo.users import add_balance, count_referrals, find_user
-from bot.services import deposit_moderation, partner_service, quest_service, settings_service, stars_service, withdraw_service
+from bot.services import deposit_moderation, drops, partner_service, quest_service, settings_service, stars_service, withdraw_service
 from bot.services.deposit_service import cart_is_valid
 from bot.services.battle_service import BATTLE_QTYS, run_battle
 from bot.services.cases_service import REEL_REVEAL_INDEX, build_reel, draw_items, total_cost
@@ -313,15 +313,19 @@ async def post_inventory_sell(request: web.Request) -> web.Response:
 
 @routes.get("/api/recent-wins")
 async def get_recent_wins(request: web.Request) -> web.Response:
+    """Лента выигрышей: кейсы, батлы, апгрейдер (журнал DropLog, монеты не
+    показываем). Продажа или вывод предмета ленту не меняют."""
     session = request["session"]
-    limit = int(request.query.get("limit", "20"))
-    rows = await inventory_repo.list_recent_global(session, limit=limit)
+    try:
+        limit = max(1, min(int(request.query.get("limit", "20")), 50))
+    except ValueError:
+        limit = 20
     payload = []
-    for item, owner in rows:
-        entry = _brainrot_json(item.item_name, item.value, item.rarity)
+    for drop, owner in await drops.recent(session, limit=limit):
+        entry = _brainrot_json(drop.item_name, drop.value, drop.rarity)
         entry["player"] = f"@{owner.username}" if owner.username else (owner.first_name or "игрок")
-        entry["case_name"] = item.case_name
-        entry["obtained_at"] = item.obtained_at.isoformat()
+        entry["case_name"] = drop.source
+        entry["obtained_at"] = drop.created_at.isoformat() if drop.created_at else None
         payload.append(entry)
     return web.json_response(payload)
 
@@ -773,23 +777,17 @@ async def post_case_open(request: web.Request) -> web.Response:
     await session.commit()
     await session.refresh(user)
 
-    # Монеты — сразу на баланс B; брейнроты — в инвентарь.
-    coins_won = sum(coin_amount(i.name) or 0 for i in won)
-    if coins_won:
-        user = await add_balance(session, user, coins_won)
-    brainrots = [i for i in won if coin_amount(i.name) is None]
-    entries = iter(await inventory_repo.add_items(
-        session, user, case.name, [(i.name, i.value) for i in brainrots], case_id=case.id
-    ))
+    # Монеты — сразу на баланс B; брейнроты — в инвентарь; всё — в ленту.
+    entries = await drops.grant(session, user, case.name, [(i.name, i.value) for i in won], case_id=case.id)
     await quest_service.record_progress(session, user, f"open_case:{case.code}")
 
     won_payload = []
-    for item in won:
+    for item, entry in zip(won, entries):
         data = _case_item_json(item)
-        if data.get("coins"):
+        if entry is None:
             data["inventory_id"], data["sell_payout"] = None, 0
         else:
-            data["inventory_id"] = next(entries).id
+            data["inventory_id"] = entry.id
             data["sell_payout"] = round(item.value * SELL_RATE)
         won_payload.append(data)
 
@@ -886,7 +884,7 @@ async def post_upgrader_spin(request: web.Request) -> web.Response:
     won_item = None
     if success:
         won_item = _brainrot_json(target_name, int(target_value))
-        await inventory_repo.add_items(session, user, "Апгрейдер", [(target_name, int(target_value))])
+        await drops.grant(session, user, "Апгрейдер", [(target_name, int(target_value))])
     await quest_service.record_progress(session, user, "upgrader_spin")
 
     return web.json_response(
@@ -1065,12 +1063,9 @@ async def post_battle_start(request: web.Request) -> web.Response:
     result = run_battle(items, qty=qty, luck=user.luck, case_price=case.price_tokens)
 
     if result.winner == "player":
-        await inventory_repo.add_items(
-            session,
-            user,
-            f"Батл: {case.name}",
-            [(i.name, i.value) for i in (*result.player_items, *result.bot_items)],
-            case_id=case.id,
+        await drops.grant(
+            session, user, f"Батл: {case.name}",
+            [(i.name, i.value) for i in (*result.player_items, *result.bot_items)], case_id=case.id,
         )
     elif result.winner == "tie":
         await add_balance(session, user, cost)

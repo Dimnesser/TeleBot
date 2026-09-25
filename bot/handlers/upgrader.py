@@ -11,6 +11,7 @@ from aiogram.types import CallbackQuery
 
 from bot.database.engine import async_session
 from bot.database.repo import inventory as inventory_repo
+from bot.services import drops
 from bot.database.repo.known_items import list_known_items
 from bot.database.repo.users import get_or_create_user
 from bot.keyboards.callbacks import (
@@ -243,7 +244,7 @@ async def handle_confirm(callback: CallbackQuery, state: FSMContext) -> None:
 
         await inventory_repo.delete(session, item)
         if success:
-            await inventory_repo.add_items(session, user, "Апгрейдер", [(target_name, target_value)])
+            await drops.grant(session, user, "Апгрейдер", [(target_name, target_value)])
         await quest_service.record_progress(session, user, "upgrader_spin")
 
     await state.update_data(

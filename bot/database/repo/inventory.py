@@ -14,6 +14,8 @@ async def add_items(
     source_name: str,
     item_names_and_values: list[tuple[str, int]],
     case_id: int | None = None,
+    *,
+    commit: bool = True,
 ) -> list[InventoryItem]:
     # rarity — реальный тир персонажа из ростера (rarity_for); по ценности
     # угадывается только для имён вне ростера. Вызывающему коду
@@ -30,7 +32,10 @@ async def add_items(
         for name, value in item_names_and_values
     ]
     session.add_all(entries)
-    await session.commit()
+    if commit:
+        await session.commit()
+    else:
+        await session.flush()
     return entries
 
 

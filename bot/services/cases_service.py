@@ -13,6 +13,10 @@ CASE_WEIGHT_EXPONENT = 0.8
 
 
 def item_weight(item: CaseItem) -> float:
+    """Доля из балансировки кейса (seed_cases.balanced_weights), иначе 1/ценность^k."""
+    weight = getattr(item, "weight", None)
+    if weight is not None:
+        return weight
     return 1.0 / max(item.value, 1) ** CASE_WEIGHT_EXPONENT
 
 

@@ -19,7 +19,8 @@ from bot.keyboards.callbacks import (
     CasesInventoryCB,
 )
 from bot.keyboards.cases import case_detail_keyboard, cases_list_keyboard
-from bot.services import quest_service
+from bot.data.coins import coin_amount
+from bot.services import drops, quest_service
 from bot.data.brainrot_roster import RARITY_LABEL, rarity_for
 from bot.services.cases_service import draw_items, total_cost
 from bot.utils.texts import (
@@ -155,14 +156,13 @@ async def handle_confirm_open(callback: CallbackQuery, callback_data: CaseConfir
         await session.commit()
         await session.refresh(user)
 
-        await inventory_repo.add_items(
-            session, user, case.name, [(item.name, item.value) for item in won], case_id=case.id
-        )
+        await drops.grant(session, user, case.name, [(item.name, item.value) for item in won], case_id=case.id)
         await quest_service.record_progress(session, user, f"open_case:{case.code}")
         tokens_after = user.balance
 
     result_lines = [CASE_OPEN_RESULT_HEADER.format(name=case.name, qty=callback_data.qty)]
     result_lines.extend(
+        f"🪙 +{item.value} B на баланс" if coin_amount(item.name) is not None else
         CASE_OPEN_RESULT_LINE.format(name=item.name, value=item.value, rarity=RARITY_LABEL[rarity_for(item.name, item.value)])
         for item in won
     )

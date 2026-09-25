@@ -128,7 +128,7 @@ async def test_cases_feed_and_open(client, auth_headers) -> None:
     r = await client.get("/api/cases?category=starter", headers=auth_headers)
     assert r.status == 200
     cases = (await r.json())["cases"]
-    openable = next(c for c in cases if c["is_openable"] and c["price_tokens"])
+    openable = next(c for c in cases if c["is_openable"] and c["price_tokens"] and c["code"] == "party")
 
     r = await client.post(f"/api/cases/{openable['id']}/open", headers=auth_headers, json={"qty": 1})
     assert r.status == 200
@@ -143,7 +143,7 @@ async def test_cases_feed_and_open(client, auth_headers) -> None:
 
 async def test_inventory_sell(client, auth_headers) -> None:
     r = await client.get("/api/cases?category=starter", headers=auth_headers)
-    case = next(c for c in (await r.json())["cases"] if c["is_openable"] and c["price_tokens"])
+    case = next(c for c in (await r.json())["cases"] if c["is_openable"] and c["price_tokens"] and c["code"] == "party")
     r = await client.post(f"/api/cases/{case['id']}/open", headers=auth_headers, json={"qty": 1})
     won = (await r.json())["won"][0]
 
@@ -174,7 +174,7 @@ async def test_case_open_reel_lands_on_server_decided_winner(client, auth_header
     не может повлиять на won[]. Прогоняем несколько раз, т.к. и выбор
     результата, и наполнение ленты — рандом."""
     r = await client.get("/api/cases?category=starter", headers=auth_headers)
-    case = next(c for c in (await r.json())["cases"] if c["is_openable"] and c["price_tokens"])
+    case = next(c for c in (await r.json())["cases"] if c["is_openable"] and c["price_tokens"] and c["code"] == "party")
 
     for _ in range(8):
         r = await client.get(f"/api/me", headers=auth_headers)
@@ -216,7 +216,7 @@ async def test_case_open_rejects_insufficient_tokens(client, auth_headers) -> No
 
 async def test_upgrader_spin_consumes_contribution(client, auth_headers) -> None:
     r = await client.get("/api/cases?category=starter", headers=auth_headers)
-    case = next(c for c in (await r.json())["cases"] if c["is_openable"] and c["price_tokens"])
+    case = next(c for c in (await r.json())["cases"] if c["is_openable"] and c["price_tokens"] and c["code"] == "party")
     r = await client.post(f"/api/cases/{case['id']}/open", headers=auth_headers, json={"qty": 1})
     won = (await r.json())["won"][0]
 
@@ -258,7 +258,7 @@ async def test_upgrader_spin_consumes_contribution(client, auth_headers) -> None
 
 async def test_crash_start_state_cashout(client, auth_headers) -> None:
     r = await client.get("/api/cases?category=starter", headers=auth_headers)
-    case = next(c for c in (await r.json())["cases"] if c["is_openable"] and c["price_tokens"])
+    case = next(c for c in (await r.json())["cases"] if c["is_openable"] and c["price_tokens"] and c["code"] == "party")
     await client.post(f"/api/cases/{case['id']}/open", headers=auth_headers, json={"qty": 1})
 
     r = await client.get("/api/inventory", headers=auth_headers)
@@ -291,7 +291,7 @@ async def test_crash_start_state_cashout(client, auth_headers) -> None:
 
 async def test_dice_roll(client, auth_headers) -> None:
     r = await client.get("/api/cases?category=starter", headers=auth_headers)
-    case = next(c for c in (await r.json())["cases"] if c["is_openable"] and c["price_tokens"])
+    case = next(c for c in (await r.json())["cases"] if c["is_openable"] and c["price_tokens"] and c["code"] == "party")
     await client.post(f"/api/cases/{case['id']}/open", headers=auth_headers, json={"qty": 1})
 
     r = await client.get("/api/inventory", headers=auth_headers)
@@ -878,11 +878,23 @@ async def test_battle_three_and_five_cases(client, auth_headers, admin_headers) 
         assert body["player_total"] == sum(i["value"] for i in body["player_items"])
         inv_after = len(await (await client.get("/api/inventory?limit=500", headers=auth_headers)).json())
         if body["winner"] == "player":
-            assert inv_after - inv_before == qty * 2 and body["player_total"] > body["bot_total"]
+            won = [i for i in (*body["player_items"], *body["bot_items"]) if not i.get("coins")]
+            assert inv_after - inv_before == len(won) and body["player_total"] > body["bot_total"]
         elif body["winner"] == "bot":
             assert inv_after == inv_before and body["balance"] == before - body["cost"]
         else:
             assert body["balance"] == before
+
+
+async def test_recent_wins_feed_survives_sell(client, auth_headers) -> None:
+    cases = (await (await client.get("/api/cases?category=starter", headers=auth_headers)).json())["cases"]
+    party = next(c for c in cases if c["code"] == "party")
+    won = (await (await client.post(f"/api/cases/{party['id']}/open", headers=auth_headers, json={"qty": 3})).json())["won"]
+    for w in won:
+        await client.post(f"/api/inventory/{w['inventory_id']}/sell", headers=auth_headers)
+    feed = await (await client.get("/api/recent-wins?limit=10", headers=auth_headers)).json()
+    assert [f["name"] for f in feed[:3]] == [w["name"] for w in reversed(won)]
+    assert all(f["case_name"] == party["name"] for f in feed[:3])
 
 
 async def test_stars_no_upper_limit(client, auth_headers) -> None:
