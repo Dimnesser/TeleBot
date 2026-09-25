@@ -897,6 +897,18 @@ async def test_recent_wins_feed_survives_sell(client, auth_headers) -> None:
     assert all(f["case_name"] == party["name"] for f in feed[:3])
 
 
+async def test_admin_clears_recent_wins(client, auth_headers, admin_headers) -> None:
+    cases = (await (await client.get("/api/cases?category=starter", headers=auth_headers)).json())["cases"]
+    party = next(c for c in cases if c["code"] == "party")
+    await client.post(f"/api/cases/{party['id']}/open", headers=auth_headers, json={"qty": 1})
+    assert await (await client.get("/api/recent-wins", headers=auth_headers)).json()
+    assert (await client.post("/api/admin/drops/clear", headers=auth_headers)).status == 403
+    r = await client.post("/api/admin/drops/clear", headers=admin_headers)
+    assert (await r.json())["removed"] >= 1
+    assert await (await client.get("/api/recent-wins", headers=auth_headers)).json() == []
+    assert len(await (await client.get("/api/inventory", headers=auth_headers)).json()) == 1
+
+
 async def test_stars_no_upper_limit(client, auth_headers) -> None:
     r = await client.post("/api/deposit/stars/quote", headers=auth_headers, json={"amount": 5_000_000})
     assert r.status == 200 and (await r.json())["credited"] == 8_750_000

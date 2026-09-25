@@ -5,6 +5,7 @@ bot/app.py) — оба используют один и тот же async_sessio
 """
 from __future__ import annotations
 
+import asyncio
 import hashlib
 import logging
 import subprocess
@@ -86,11 +87,16 @@ async def auth_middleware(request: web.Request, handler):
     if tg_user is None:
         return web.json_response({"error": "unauthorized"}, status=401)
 
-    async with async_session() as session:
-        user = await get_or_create_user(session, tg_user.tg_id, tg_user.username, tg_user.first_name)
-        request["session"] = session
-        request["user"] = user
-        return await handler(request)
+    async def run() -> web.StreamResponse:
+        async with async_session() as session:
+            user = await get_or_create_user(session, tg_user.tg_id, tg_user.username, tg_user.first_name)
+            request["session"] = session
+            request["user"] = user
+            return await handler(request)
+
+    # Игрок закрыл Mini App посреди запроса — не обрываем работу с базой на
+    # полпути (иначе сессия SQLite закрывается с ошибкой): доводим до конца.
+    return await asyncio.shield(asyncio.ensure_future(run()))
 
 
 def create_app(bot: Bot) -> web.Application:

@@ -12,7 +12,7 @@ from pathlib import Path
 
 from aiogram.types import LabeledPrice
 from aiohttp import web
-from sqlalchemy import select
+from sqlalchemy import delete, select
 
 from bot.config import config, is_admin, is_owner, set_granted_admins
 from bot import support_bot
@@ -52,6 +52,7 @@ from bot.database.models import (
 )
 from bot.database.models import (
     AdminGrant,
+    DropLog,
     DepositCategory,
     DepositRequest,
     DepositRequestStatus,
@@ -1362,6 +1363,17 @@ async def post_admin_luck(request: web.Request) -> web.Response:
         target.luck = value
     await session.commit()
     return web.json_response(await _admin_user_json(session, target))
+
+
+@routes.post("/api/admin/drops/clear")
+async def post_admin_clear_drops(request: web.Request) -> web.Response:
+    """Очистить ленту «Последние выигрыши» (журнал DropLog). Инвентари игроков не трогаются."""
+    if (denied := _require_admin(request)) is not None:
+        return denied
+    session = request["session"]
+    removed = (await session.execute(delete(DropLog))).rowcount
+    await session.commit()
+    return web.json_response({"removed": removed})
 
 
 @routes.get("/api/admin/deposits")

@@ -30,11 +30,12 @@ from bot.data.coins import COIN_RARITY, coin_name
 from bot.database.models import CaseCategory
 from bot.services.cases_service import CASE_WEIGHT_EXPONENT
 
-CASES_CONTENT_VERSION = "22-balanced"
+CASES_CONTENT_VERSION = "23-easy-cases"
 
 TARGET_RTP = 0.94
 PAYBACK_TARGET = 0.30
 PAYBACK_BAND = (0.25, 0.40)
+EASY_PAYBACK = 0.38  # кейсы «для раскрута»
 TOP_CHANCE_BAND = (0.005, 0.08)
 
 
@@ -84,7 +85,7 @@ def price_for(values: list[int]) -> int:
     return math.ceil(expected_value(values) / TARGET_RTP)
 
 
-def balanced_weights(values: list[int]) -> tuple[list[float], int]:
+def balanced_weights(values: list[int], target: float = PAYBACK_TARGET) -> tuple[list[float], int]:
     """Веса и цена платного кейса: окупается в ~PAYBACK_TARGET открытий,
     возвращает TARGET_RTP цены, топ в TOP_CHANCE_BAND. Перебирает порог
     «окупающих» предметов и их суммарную долю, берёт лучший вариант
@@ -109,7 +110,7 @@ def balanced_weights(values: list[int]) -> tuple[list[float], int]:
             if not lo <= payback <= hi:
                 continue
             top_chance = weights[values.index(top)]
-            score = (abs(payback - PAYBACK_TARGET) * 4 + abs(math.log(price / natural))
+            score = (abs(payback - target) * 4 + abs(math.log(price / natural))
                      + (0 if TOP_CHANCE_BAND[0] <= top_chance <= TOP_CHANCE_BAND[1] else 5))
             if best is None or score < best[0]:
                 best = (score, weights, price)
@@ -133,14 +134,15 @@ CASE_THEMES: dict[str, CaseTheme] = {}
 
 def _case(
     category: CaseCategory, code: str, name: str, sort_order: int, theme: CaseTheme, names: list[str | int],
-    price: int | None = None,
+    price: int | None = None, payback: float = PAYBACK_TARGET,
 ) -> SeedCase:
-    """price=None — платный кейс, цена и веса из balanced_weights; иначе
-    (бесплатный/реферальный) — натуральные веса и заданная цена."""
+    """price=None — платный кейс, цена и веса из balanced_weights (payback —
+    целевая доля окупающих открытий); иначе (бесплатный/реферальный) —
+    натуральные веса и заданная цена."""
     items = _pool(names)
     CASE_THEMES[code] = theme
     if price is None:
-        weights, price = balanced_weights([i.value for i in items])
+        weights, price = balanced_weights([i.value for i in items], payback)
         items = tuple(SeedCaseItem(i.name, i.value, i.rarity, round(w, 6)) for i, w in zip(items, weights))
     return SeedCase(
         category=category,
@@ -197,6 +199,21 @@ SEED_CASES: list[SeedCase] = [
     _case(K, "fastfood", "Фастфуд", 0, CaseTheme("food", "sparkle", ("#d8402f", "#7a1a12"), "#ffb23d"),
           [50, BF, "Pizza and Ranch", "Popcuru and Fizzuru", "La Food Combinasion", "Fragrama and Chocrama",
            "Cooki and Milki", "La Breakfast Combinasion", "Pancake and Syrup", "Sammyni Cakini"]),
+    # --- для лёгкого раскрута: только брейнроты каталога, без монет,
+    # окупаются чаще (~38% открытий), множители умеренные (×3–×4).
+    _case(K, "raskrut", "Раскрут", 0, CaseTheme("bills", "sparkle", ("#3a8f4f", "#123a1c"), "#9dff7a"),
+          [GA, CC, BF, "Pizza and Ranch", "Popcuru and Fizzuru", "Capitano Moby", "Celestial Pegasus",
+           "La Food Combinasion", "Fragrama and Chocrama", "Los Amigos"], payback=EASY_PAYBACK),
+    _case(K, "double", "Дабл", 0, CaseTheme("coins", "lightning", ("#3f5fd8", "#14205a"), "#9fb4ff"),
+          [BF, "Pizza and Ranch", "Capitano Moby", "La Food Combinasion", "Cooki and Milki", "Globa Steppa",
+           "Los Amigos", "La Breakfast Combinasion", "Los Sekolahs", "Rico Dinero"], payback=EASY_PAYBACK),
+    _case(K, "stairs", "Лесенка", 0, CaseTheme("wood", "dust", ("#b07a3a", "#4a2e10"), "#ffc27a"),
+          ["Fragrama and Chocrama", "Cerberus", "Reinito Sleighito", "Quackini Snackini", "Duggy Bros", "Dug dug dug",
+           "Ketupat Bros", "Bumbatron", "Dragon Cannelloni", "Jelly Moby", "Tirilikalika Tirilikalako"],
+          payback=EASY_PAYBACK),
+    _case(K, "turbo", "Турбо", 0, CaseTheme("embers", "lightning", ("#d8502f", "#5a1408"), "#ffb13b"),
+          ["Rico Dinero", "La Casa Boo", "Bunny and Eggy", "Pancake and Syrup", "Sammyni Cakini", "Hydra Bunny",
+           "Digi Narwhal", "La Supreme Combinasion", "Kraken", "Dragon Gingerini"], payback=EASY_PAYBACK),
     _case(K, "lucky", "Лаки", 0, CaseTheme("gifts", "sparkle", ("#2fa36b", "#0f3f28"), "#9dffc9"),
           [CC, "Fortunu and Cashuru", "Quackini Snackini", "Los Sekolahs", "Ketupat Bros", "Rosey and Teddy",
            "Bunny and Eggy", "Moby Bros", "Digi Narwhal"]),

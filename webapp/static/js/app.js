@@ -930,7 +930,7 @@ function closeStage() {
   clearTimeout(el._freeTick);
   if (el._fx) { el._fx.stop(); el._fx = null; }
   el.classList.add('leaving');
-  setTimeout(() => el.remove(), 200);
+  setTimeout(() => el.remove(), 250);
   document.body.classList.remove('stage-open');
 }
 
@@ -1089,8 +1089,24 @@ async function runOpening(stage, c, qty, fast = false) {
   showReveal(stage, c, qty, res.won);
 }
 
-/** Лента: победитель уже стоит на revealIndex. Замедление с длинным
- * хвостом, остановка в случайной точке внутри карточки победителя. */
+/** Кривая Безье для ленты (как CSS cubic-bezier): мягкий разгон, длинное
+ * плавное торможение без рывков в конце. */
+function bezierEase(x1, y1, x2, y2) {
+  const cx = 3 * x1, bx = 3 * (x2 - x1) - cx, ax = 1 - cx - bx;
+  const cy = 3 * y1, by = 3 * (y2 - y1) - cy, ay = 1 - cy - by;
+  const sx = (t) => ((ax * t + bx) * t + cx) * t, sy = (t) => ((ay * t + by) * t + cy) * t;
+  const dx = (t) => (3 * ax * t + 2 * bx) * t + cx;
+  return (x) => {
+    let t = x;
+    for (let i = 0; i < 6; i++) { const d = dx(t); if (Math.abs(d) < 1e-6) break; t -= (sx(t) - x) / d; }
+    return sy(Math.min(1, Math.max(0, t)));
+  };
+}
+const REEL_EASE = bezierEase(0.25, 0.08, 0.1, 1);
+
+/** Лента: победитель уже стоит на revealIndex. Плавный разгон и долгое
+ * торможение сразу в финальную точку (случайное место внутри карточки
+ * победителя) — без «доводки» к центру после остановки. */
 function spinReel(reelEl, revealIndex, duration) {
   const track = reelEl.querySelector('.reel-track');
   const cards = track.children;
@@ -1100,32 +1116,36 @@ function spinReel(reelEl, revealIndex, duration) {
   const step = cards[1].offsetLeft - cards[0].offsetLeft;
   const viewW = reelEl.clientWidth;
   const center = winner.offsetLeft - cards[0].offsetLeft + cardW / 2 - viewW / 2;
-  const target = center + (Math.random() - 0.5) * cardW * 0.8;
-  let skipped = false, lastIdx = -1, resolve;
+  const target = center + (Math.random() - 0.5) * cardW * 0.7;
+  let skipped = false, lastIdx = -1, lastTick = 0, resolve;
   const done = new Promise((r) => { resolve = r; });
   const start = performance.now();
-  const ease = (t) => 1 - Math.pow(1 - t, 5);
 
-  function finish(snap) {
-    track.style.transition = snap ? 'transform 260ms ease-out' : 'transform 450ms cubic-bezier(.25,.1,.25,1)';
-    track.style.transform = `translate3d(${-center}px,0,0)`;
+  function land(snap) {
+    if (snap) {
+      track.style.transition = 'transform 320ms cubic-bezier(.16,1,.3,1)';
+      track.style.transform = `translate3d(${-target}px,0,0)`;
+    }
     setTimeout(() => {
       winner.classList.add('won');
       reelEl.classList.add('stopped');
       resolve();
-    }, snap ? 280 : 470);
+    }, snap ? 330 : 120);
   }
   function frame(now) {
     if (skipped) return;
     const t = Math.min(1, (now - start) / duration);
-    const x = target * ease(t);
+    const x = target * REEL_EASE(t);
     track.style.transform = `translate3d(${-x}px,0,0)`;
     const idx = Math.floor((x + viewW / 2) / step);
-    if (idx !== lastIdx) { lastIdx = idx; if (t < 0.98) haptic.tick(); }
-    if (t < 1) requestAnimationFrame(frame); else finish(false);
+    if (idx !== lastIdx) {
+      lastIdx = idx;
+      if (t < 0.97 && now - lastTick > 55) { lastTick = now; haptic.tick(); }
+    }
+    if (t < 1) requestAnimationFrame(frame); else land(false);
   }
   requestAnimationFrame(frame);
-  return { done, skip() { if (!skipped) { skipped = true; finish(true); } } };
+  return { done, skip() { if (!skipped) { skipped = true; land(true); } } };
 }
 
 function gameInfoHtml(b) {
@@ -1500,6 +1520,10 @@ function adminPanelHtml() {
       </form>
       <div class="muted admin-hint" id="s-status"></div>
 
+      <div class="admin-sub">Лента выигрышей</div>
+      <button class="btn-chip danger" id="admin-clear-drops" style="width:100%;min-height:40px">🧹 Очистить «Последние выигрыши»</button>
+      <div class="muted admin-hint">Лента на главной станет пустой и начнёт заполняться заново. Инвентари игроков не трогаются.</div>
+
       <div class="admin-sub">Дизайн</div>
       <div class="pill-row" id="admin-design">
         <button class="pill" data-design="v3">💎 v3 Holo</button>
@@ -1693,6 +1717,13 @@ async function bindAdminPanel(root) {
     const off = sb.querySelector('#sb-off');
     if (off) off.addEventListener('click', () => saveSupportBot(''));
   };
+  panel.querySelector('#admin-clear-drops').addEventListener('click', async () => {
+    if (!confirm('Очистить ленту «Последние выигрыши» у всех?')) return;
+    try {
+      const r = await api('/api/admin/drops/clear', { method: 'POST' });
+      toast(`Лента очищена · убрано ${r.removed}`, 'success'); haptic.success();
+    } catch (err) { toast(err.message, 'error'); }
+  });
   panel.querySelectorAll('[data-design]').forEach((b) => b.addEventListener('click', async () => {
     try {
       const st = await api('/api/admin/settings', { method: 'POST', body: JSON.stringify({ design: b.dataset.design }) });

@@ -250,3 +250,71 @@ html.ui-v3 .duel-vs {
 }
 html.ui-v3 .upg-preset.active { color: #0d1204; background: var(--v-lime); box-shadow: inset 0 1px 0 rgba(255, 255, 255, .6), 0 8px 20px -8px rgba(198, 255, 61, 1); }
 html.ui-v3 .upg-preset.mult.active { background: linear-gradient(135deg, #ffe38a, #ffb13b); box-shadow: 0 8px 20px -8px rgba(255, 190, 60, 1); }
+
+/* =====================================================================
+   ПРОИЗВОДИТЕЛЬНОСТЬ (v2 и v3): всё, что двигается постоянно, — только
+   transform/opacity (считает видеокарта, без перерисовки). Размытие фона —
+   только у шапки, панели вкладок и окон; на карточках его нет.
+   ===================================================================== */
+html.ui-v2 #app::before { will-change: transform; }
+html.ui-v2 #app::after { will-change: opacity; }
+html.ui-v2 .card, html.ui-v2 .panel, html.ui-v2 .drops-panel, html.ui-v2 .admin-user, html.ui-v2 .dep-panel,
+html.ui-v2 .partner-row, html.ui-v2 .dep-bar, html.ui-v3 .hero-stats div { -webkit-backdrop-filter: none; backdrop-filter: none; }
+html.ui-v2 .case-card-glow { animation: none; opacity: .85; }
+html.ui-v2 .brand-mark { will-change: transform; }
+
+/* блики кнопок — сдвиг transform вместо left */
+html.ui-v2 .btn-primary::after, html.ui-v2 .open-btn::after, html.ui-v3 .hero-btn::after {
+  left: 0; width: 40%; transform: translateX(-160%) skewX(-18deg); will-change: transform;
+  animation: v2-shine-t 3.6s ease-in-out infinite;
+}
+@keyframes v2-shine-t { 0%, 55% { transform: translateX(-160%) skewX(-18deg); } 100% { transform: translateX(360%) skewX(-18deg); } }
+
+/* перелив по баннеру и балансу — тоже transform */
+html.ui-v2 .free-banner::before, html.ui-v3 .topbar-balance::before {
+  inset: 0 -100%; background: linear-gradient(100deg, transparent 42%, rgba(255, 255, 255, .09) 50%, transparent 58%);
+  background-size: 100% 100%; will-change: transform; animation: v2-sweep-t 5s ease-in-out infinite;
+}
+@keyframes v2-sweep-t { 0% { transform: translateX(-40%); } 60%, 100% { transform: translateX(40%); } }
+
+/* голо-рамки: статичный перелив вместо перерисовки каждый кадр */
+html.ui-v3 .topbar::after, html.ui-v3 .profile-hero, html.ui-v3 .hero, html.ui-v3 .duel-side.win { animation: none; }
+html.ui-v3 .free-banner { animation: fade-in-up .45s cubic-bezier(.16, 1, .3, 1) both; }
+@media (max-width: 999px) { html.ui-v3 .tabbar { animation: none; } }
+html.ui-v3 .hero::before {
+  animation: v3-grid-t 3s linear infinite; will-change: transform;
+}
+@keyframes v3-grid-t {
+  from { transform: perspective(300px) rotateX(62deg) translateY(0); }
+  to { transform: perspective(300px) rotateX(62deg) translateY(34px); }
+}
+html.ui-v3 .hero-art img { will-change: transform; }
+
+/* переходы экранов без blur (blur дорогой на телефонах) */
+html.ui-v2 .screen.leave { filter: none; }
+html.ui-v2 .screen.enter > * { animation-name: v2-rise-t; }
+@keyframes v2-rise-t { from { opacity: 0; transform: translateY(14px); } to { opacity: 1; transform: none; } }
+html.ui-v2 img:not(.ld) { transform: none; }
+
+/* 3D-карточки: слой только во время наклона */
+html.ui-v3 .case-card { will-change: auto; }
+html.ui-v3 .case-card.tilt { will-change: transform; }
+
+/* лента открытия кейса */
+.reel-track { will-change: transform; }
+.reel { contain: layout paint; }
+html.ui-v2 .reel .drop-tile img { filter: none; }
+html.ui-v2 .reel .drop-tile { transition: opacity .6s ease, transform .6s cubic-bezier(.34, 1.4, .64, 1), box-shadow .6s ease; }
+html.ui-v2 .reel.stopped .drop-tile.won { transform: translateY(-4px) scale(1.06); animation: v2-win-glow 1.2s ease-in-out .2s 2 alternate; }
+@keyframes v2-win-glow { to { box-shadow: inset 0 0 0 1.5px #ffd24d, 0 0 34px -4px #ffd24d; } }
+html.ui-v2 .reels { animation: v2-reels-in .45s cubic-bezier(.16, 1, .3, 1) both; }
+@keyframes v2-reels-in { from { opacity: 0; transform: scale(.96); } }
+html.ui-v2 .result { animation: v2-result-in .55s cubic-bezier(.16, 1, .3, 1) both; }
+@keyframes v2-result-in { from { opacity: 0; transform: translateY(12px) scale(.97); } }
+html.ui-v2 .result-tile { animation-duration: .6s; }
+html.ui-v2 .stage { animation: v2-stage-in .4s cubic-bezier(.16, 1, .3, 1) both; }
+html.ui-v2 .stage.leaving { animation: v2-stage-out .25s ease both; }
+@keyframes v2-stage-in { from { opacity: 0; transform: translateY(18px) scale(.985); } }
+@keyframes v2-stage-out { to { opacity: 0; transform: translateY(10px); } }
+html.ui-v2 .stage-art { animation: v2-art-in .6s cubic-bezier(.34, 1.3, .64, 1) both; }
+@keyframes v2-art-in { from { opacity: 0; transform: scale(.9) translateY(10px); } }
