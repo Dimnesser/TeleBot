@@ -251,3 +251,5 @@ html.ui-v3 .duel-vs {
   html.ui-v3 *, html.ui-v3 *::before, html.ui-v3 *::after { animation: none !important; }
   html.ui-v3 .case-card { transform: none; }
 }
+html.ui-v3 .upg-preset.active { color: #0d1204; background: var(--v-lime); box-shadow: inset 0 1px 0 rgba(255, 255, 255, .6), 0 8px 20px -8px rgba(198, 255, 61, 1); }
+html.ui-v3 .upg-preset.mult.active { background: linear-gradient(135deg, #ffe38a, #ffb13b); box-shadow: 0 8px 20px -8px rgba(255, 190, 60, 1); }

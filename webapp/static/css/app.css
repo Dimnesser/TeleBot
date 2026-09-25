@@ -1266,3 +1266,13 @@ button.dep-item:active { transform: scale(.97); }
 .duel-mini.on { opacity: 1; animation: reveal-pop .35s ease; }
 .duel-mini .p-tile { width: 100%; height: 100%; border-radius: 8px; }
 .v3-only { display: none; }
+
+/* апгрейдер: быстрый выбор шанса / множителя */
+.upg-presets { display: grid; grid-template-columns: repeat(6, minmax(0, 1fr)); gap: 6px; margin-top: 12px; }
+.upg-preset {
+  height: 38px; border-radius: 10px; border: 1px solid var(--border); background: var(--bg-elevated);
+  color: var(--text-dim); font: 800 13px var(--font-mono); transition: transform .1s ease, background .15s ease, color .15s ease;
+}
+.upg-preset.mult { color: #ffd24d; }
+.upg-preset:active { transform: scale(.94); }
+.upg-preset.active { background: rgba(198,255,61,.16); border-color: var(--accent); color: var(--accent); box-shadow: 0 0 16px -6px var(--accent); }

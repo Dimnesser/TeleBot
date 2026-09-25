@@ -1848,7 +1848,9 @@ async function bindAdminPanel(root) {
 
 // Вклад — до 5 брейнротов инвентаря; сервер считает шанс по их сумме.
 const UPG_MAX_STAKE = 5;
-let upgraderState = { stake: [], target: null };
+let upgraderState = { stake: [], target: null, preset: null };
+// Быстрый выбор цели: шанс или множитель (x2 = шанс ~50%, x5 ~20%, x10 ~10%).
+const UPG_PRESETS = [['c75', '75%', 75], ['c50', '50%', 50], ['c30', '30%', 30], ['x2', 'x2', 50], ['x5', 'x5', 20], ['x10', 'x10', 10]];
 const stakeValue = (stake) => stake.reduce((sum, b) => sum + b.value, 0);
 let upgraderSpinning = false;
 let upgraderFx = null;
@@ -1903,6 +1905,9 @@ async function renderUpgraderScreen(root) {
         <div class="upg-arrow">➜</div>
         ${slot(target, 'Цель · шанс 75%…1%', 'slot-target')}
       </div>
+      <div class="upg-presets">
+        ${UPG_PRESETS.map(([key, label]) => `<button class="upg-preset ${upgraderState.preset === key ? 'active' : ''} ${key[0] === 'x' ? 'mult' : ''}" data-preset="${key}">${label}</button>`).join('')}
+      </div>
     </div>
     <div id="upg-actions">
       <div class="upg-row">
@@ -1927,7 +1932,7 @@ async function renderUpgraderScreen(root) {
     // упрётся в пустой список целей.
     const hasTarget = (v) => all.some((t) => t.value * 75 >= v * 100 && t.value <= v * 100);
     openStakePicker(items.slice().sort((a, b) => b.value - a.value), upgraderState.stake, hasTarget, (stake) => {
-      upgraderState = { stake, target: null }; renderUpgraderScreen(root);
+      upgraderState = { stake, target: null, preset: null }; renderUpgraderScreen(root);
     });
   });
   root.querySelector('#slot-target').addEventListener('click', async () => {
@@ -1937,11 +1942,26 @@ async function renderUpgraderScreen(root) {
     const targets = await api(`/api/upgrader/targets?min_value=${stakeValue(st)}${st.length === 1 ? '&exclude_name=' + encodeURIComponent(st[0].name) : ''}`);
     openBrainrotPicker('Во что прокачать', targets,
       'Для этого брейнрота нет целей с шансом 75%…1% — выбери другого.',
-      (t) => { upgraderState.target = t; renderUpgraderScreen(root); });
+      (t) => { upgraderState.target = t; upgraderState.preset = null; renderUpgraderScreen(root); });
   });
+  root.querySelectorAll('[data-preset]').forEach((b) => b.addEventListener('click', async () => {
+    if (upgraderSpinning) return;
+    const st = upgraderState.stake;
+    if (!st.length) { toast('Сначала выбери своих брейнротов', 'error'); return; }
+    const [key, label, want] = UPG_PRESETS.find(([k]) => k === b.dataset.preset);
+    const sv = stakeValue(st);
+    const targets = await api(`/api/upgrader/targets?min_value=${sv}${st.length === 1 ? '&exclude_name=' + encodeURIComponent(st[0].name) : ''}`);
+    if (!targets.length) { toast('Для этой ставки нет целей — добавь брейнротов подешевле или подороже', 'error'); return; }
+    const chanceOf = (t) => t.chance_percent ?? computeChance(sv, t.value);
+    const best = targets.reduce((a, t) => (Math.abs(chanceOf(t) - want) < Math.abs(chanceOf(a) - want) ? t : a));
+    haptic.tick();
+    upgraderState.target = best; upgraderState.preset = key;
+    renderUpgraderScreen(root);
+    if (Math.abs(chanceOf(best) - want) > want * 0.35) toast(`Ближе всего к ${label}: шанс ${chanceOf(best)}%`);
+  }));
   root.querySelector('#btn-reset').addEventListener('click', () => {
     if (upgraderSpinning) return;
-    upgraderState = { stake: [], target: null };
+    upgraderState = { stake: [], target: null, preset: null };
     renderUpgraderScreen(root);
   });
 
