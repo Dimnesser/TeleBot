@@ -1300,3 +1300,22 @@ async def test_contract_trades_items_for_one_brainrot(client, auth_headers, in_m
 def test_contract_expected_multiplier_below_one() -> None:
     from bot.services import contract_service
     assert 0.85 < contract_service.expected_multiplier() < 1.0
+
+
+async def test_contract_rtp_setting_and_boost_event(client, auth_headers, admin_headers) -> None:
+    from bot.services import contract_service, events_service
+    await client.get("/api/me", headers=admin_headers)
+    try:
+        r = await client.post("/api/admin/settings", headers=admin_headers, json={"contract_rtp": 80})
+        assert r.status == 200 and (await r.json())["contract_rtp"] == 80
+        assert abs(contract_service.expected_multiplier() - 0.8) < 0.01
+        r = await client.post("/api/admin/settings", headers=admin_headers, json={"contract_rtp": 500})
+        assert r.status == 400
+        base = (await (await client.get("/api/contract", headers=auth_headers)).json())["tiers"]
+        await client.post("/api/admin/events", headers=admin_headers, json={"type": "contract", "value": 25, "minutes": 5})
+        info = await (await client.get("/api/contract", headers=auth_headers)).json()
+        assert info["bonus_percent"] == 25
+        assert info["tiers"][0]["mult"] > base[0]["mult"]
+    finally:
+        contract_service.set_rtp(contract_service.DEFAULT_RTP_PERCENT)
+        events_service._active.clear()

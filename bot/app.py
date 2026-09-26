@@ -14,7 +14,7 @@ from bot.config import config
 from bot.database.engine import async_session, init_db
 from bot.database.repo.users import get_user_by_tg_id
 from bot.database import engine as db_engine
-from bot.services import auto_events, events_service, upgrader_service
+from bot.services import auto_events, contract_service, events_service, upgrader_service
 from bot.env_loader import load_dotenv
 from bot import support_bot
 from bot.handlers import routers
@@ -105,5 +105,6 @@ async def main() -> None:
     await support_bot.start_from_settings()
     async with db_engine.async_session() as session:
         await upgrader_service.load_rtp(session)
+        await contract_service.load_rtp(session)
     auto_events.start(bot)  # автозапуск случайных ивентов (включается в админке)
     await dp.start_polling(bot)

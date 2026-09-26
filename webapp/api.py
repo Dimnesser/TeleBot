@@ -841,7 +841,8 @@ async def get_contract(request: web.Request) -> web.Response:
     return web.json_response({
         "min_items": contract_service.MIN_ITEMS,
         "max_items": contract_service.MAX_ITEMS,
-        "tiers": [{"mult": m, "chance": w} for m, w in contract_service.TIERS],
+        "tiers": [{"mult": m, "chance": w} for m, w in contract_service.tiers(events_service.contract_bonus())],
+        "bonus_percent": events_service.contract_bonus(),
     })
 
 
@@ -865,7 +866,8 @@ async def post_contract(request: web.Request) -> web.Response:
     if not pool:
         return web.json_response({"error": "no_pool", "message": "Контракт временно недоступен"}, status=503)
     stake = sum(it.value for it in items)
-    mult = contract_service.roll_multiplier()
+    bonus = events_service.contract_bonus()
+    mult = contract_service.roll_multiplier(bonus_percent=bonus)
     won_name, won_value = contract_service.pick_result(pool, stake, mult)
     reel = contract_service.reel(pool, stake, (won_name, won_value))
     contributions = [_brainrot_json(it.item_name, it.value, it.rarity) for it in items]
@@ -1679,6 +1681,7 @@ async def get_admin_settings(request: web.Request) -> web.Response:
         "design": await settings_service.ui_design(session),
         "events": events_service.as_json(),
         "upgrader_rtp": upgrader_service.RTP_PERCENT,
+        "contract_rtp": contract_service.RTP_PERCENT,
         "stars_rate": await stars_service.rate(session),
         "stars_code_bonus_percent": await stars_service.code_bonus(session),
     })
@@ -1746,6 +1749,12 @@ async def post_admin_settings(request: web.Request) -> web.Response:
             return web.json_response({"error": "bad_upgrader_rtp", "message": "Отдача апгрейдера: от 5 до 100%"}, status=400)
         await settings_service.set_setting(session, settings_service.UPGRADER_RTP, f"{rtp:g}")
         upgrader_service.set_rtp(rtp)
+    if "contract_rtp" in body:
+        crtp = _num(body.get("contract_rtp"))
+        if crtp is None or not 30 <= crtp <= 110:
+            return web.json_response({"error": "bad_contract_rtp", "message": "Отдача контракта: от 30 до 110%"}, status=400)
+        await settings_service.set_setting(session, settings_service.CONTRACT_RTP, f"{crtp:g}")
+        contract_service.set_rtp(crtp)
     if "free_case_cooldown_hours" in body:
         hours = _num(body.get("free_case_cooldown_hours"))
         if hours is None or not 0 < hours <= 24 * 7:

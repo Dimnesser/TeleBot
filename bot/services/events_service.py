@@ -57,6 +57,7 @@ TYPES: dict[str, EventType] = {
     "upgrade": EventType("upgrade", "Апгрейд-буст", "⬆️", "%", 2, 30, 10),
     "double": EventType("double", "Двойной дроп", "✌️", "%", 5, 50, 15),
     "quest": EventType("quest", "Квесты ×N", "📋", "x", 1.5, 5, 2),
+    "contract": EventType("contract", "Контракт-буст", "📜", "%", 5, 50, 15),
 }
 MAX_MINUTES = 60 * 24 * 7
 
@@ -73,7 +74,7 @@ _audience: ContextVar[int | None] = ContextVar("event_audience", default=None)
 # Потолки для партнёров: для «free» — минимальный интервал, для остальных — максимум силы.
 PARTNER_LIMITS: dict[str, float] = {
     "luck": 2, "discount": 30, "deposit": 50, "sell": 30, "cashback": 25, "battle": 100, "free": 30,
-    "upgrade": 10, "double": 15, "quest": 2,
+    "upgrade": 10, "double": 15, "quest": 2, "contract": 20,
 }
 PARTNER_MAX_MINUTES = 180
 PARTNER_COOLDOWN_HOURS = 12
@@ -344,6 +345,11 @@ def upgrade_chances(chance: float, personal_luck: float | None) -> tuple[float, 
     return shown, min(95, real + bonus)
 
 
+def contract_bonus() -> float:
+    """Ивент «Контракт-буст»: +X% к множителю контракта."""
+    return value("contract") or 0.0
+
+
 def double_drop_chance() -> float:
     return (value("double") or 0.0) / 100
 
@@ -380,5 +386,6 @@ def announcement(code: str, val: float, minutes: float) -> str:
         "upgrade": f"<b>Апгрейд-буст +{val:g}%</b> — к каждому шансу в апгрейдере.",
         "double": f"<b>Двойной дроп</b> — с шансом {val:g}% кейс даёт второй брейнрот бесплатно.",
         "quest": f"<b>Квесты ×{val:g}</b> — награды за все квесты умножаются.",
+        "contract": f"<b>Контракт-буст +{val:g}%</b> — каждый контракт даёт брейнрота дороже.",
     }[code]
     return f"{t.emoji} <b>ИВЕНТ В BRAINCORE!</b>\n\n{what}\n\n⏳ Действует {left} — успей!"

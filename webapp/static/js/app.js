@@ -183,6 +183,7 @@ const EVENT_META = {
   battle: { text: (e) => `Батл-бонус +${e.value}%`, sub: 'К каждой победе в батле — бонус сверху', color: '#ff5a4a', fx: ['⚔️', '🔥'], go: 'battle' },
   free: { text: (e) => `Free кейс каждые ${e.value} мин`, sub: 'Бесплатный кейс намного чаще', color: '#c6ff3d', fx: ['⏱️', '🎁'], go: 'home' },
   upgrade: { text: (e) => `Апгрейд +${e.value}%`, sub: 'К каждому шансу в апгрейдере', color: '#7c9bff', fx: ['⬆️', '⚡'], go: 'upgrader' },
+  contract: { text: (e) => `Контракт +${e.value}%`, sub: 'Каждый контракт даёт брейнрота дороже', color: '#ffb347', fx: ['📜', '✨'], go: 'contract' },
   double: { text: (e) => `Двойной дроп ${e.value}%`, sub: 'Кейс может дать второй брейнрот бесплатно', color: '#e28bff', fx: ['✌️', '🎰'], go: 'home' },
   quest: { text: (e) => `Квесты ×${e.value}`, sub: 'Награды за квесты умножены', color: '#4fe3c8', fx: ['📋', '🏆'], go: 'quests' },
 };
@@ -1759,6 +1760,7 @@ function adminPanelHtml() {
         <input class="field" id="s-rate" type="number" min="0.01" step="0.01" placeholder="1 ⭐ = ? B" />
         <input class="field" id="s-bonus" type="number" min="0" step="1" placeholder="Бонус за код, %" />
         <input class="field" id="s-upg" type="number" min="5" max="100" step="1" placeholder="Апгрейдер, %" title="Отдача апгрейдера: 100 — честно 1:1, 50 — шансы вдвое ниже" />
+        <input class="field" id="s-ctr" type="number" min="30" max="110" step="1" placeholder="Контракт, %" title="Отдача контракта: сколько в среднем возвращается от вклада (по умолчанию 92)" />
         <button class="btn-chip full" type="submit">Сохранить</button>
       </form>
       <div class="muted admin-hint" id="s-status"></div>
@@ -1955,10 +1957,11 @@ async function bindAdminPanel(root) {
     settingsForm.querySelector('#s-rate').value = st.stars_rate;
     settingsForm.querySelector('#s-bonus').value = st.stars_code_bonus_percent;
     settingsForm.querySelector('#s-upg').value = st.upgrader_rtp;
+    settingsForm.querySelector('#s-ctr').value = st.contract_rtp;
     panel.querySelector('#s-status').textContent = st.required_channel
       ? `Подписка на ${st.required_channel} обязательна · кейс раз в ${st.free_case_cooldown_hours} ч`
       : `Без обязательной подписки · кейс раз в ${st.free_case_cooldown_hours} ч`;
-    panel.querySelector('#s-status').textContent += ` · 1 ⭐ = ${st.stars_rate} B, код +${st.stars_code_bonus_percent}% · апгрейдер ${st.upgrader_rtp}%`;
+    panel.querySelector('#s-status').textContent += ` · 1 ⭐ = ${st.stars_rate} B, код +${st.stars_code_bonus_percent}% · апгрейдер ${st.upgrader_rtp}% · контракт ${st.contract_rtp}%`;
     panel.querySelectorAll('[data-design]').forEach((b) => b.classList.toggle('active', b.dataset.design === st.design));
     const sb = panel.querySelector('#sb-status');
     sb.innerHTML = st.support_bot
@@ -2007,6 +2010,7 @@ async function bindAdminPanel(root) {
         stars_rate: Number(settingsForm.querySelector('#s-rate').value),
         stars_code_bonus_percent: Number(settingsForm.querySelector('#s-bonus').value),
         upgrader_rtp: Number(settingsForm.querySelector('#s-upg').value),
+        contract_rtp: Number(settingsForm.querySelector('#s-ctr').value),
       }) });
       if (ME) ME.upgrader_rtp = st.upgrader_rtp;
       paintSettings(st);
@@ -2207,7 +2211,7 @@ let contractInfo = null;
 let contractBusy = false;
 
 async function renderContractScreen(root) {
-  contractInfo = contractInfo || await api('/api/contract');
+  contractInfo = await api('/api/contract'); // таблица зависит от ивента «Контракт-буст»
   const { min_items: MIN, max_items: MAX, tiers } = contractInfo;
   const stake = contractState.stake;
   const sv = stakeValue(stake);
@@ -2223,6 +2227,7 @@ async function renderContractScreen(root) {
   root.innerHTML = `
     <div class="section-title">КОНТРАКТ</div>
     <div class="ctr-hint">Отдай <b>${MIN}–${MAX}</b> своих брейнротов — получи <b>один случайный</b>. Чем дороже вклад, тем дороже результат.</div>
+    ${contractInfo.bonus_percent ? `<div class="ctr-boost">📜 Контракт-буст: все множители +${contractInfo.bonus_percent}%</div>` : ''}
     <div class="ctr-stage" id="ctr-stage">
       <div class="ctr-paper">
         <div class="ctr-paper-head"><span>📜 КОНТРАКТ</span><span class="muted">${stake.length}/${MAX}</span></div>
