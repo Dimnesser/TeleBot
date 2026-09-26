@@ -455,6 +455,7 @@ async function refreshMe() {
 
 // Линейные иконки 24×24 (stroke = currentColor) — вместо эмодзи в меню.
 const ICONS = {
+  contract: '<path d="M7 3h8l4 4v14H7z"/><path d="M15 3v4h4"/><path d="M10 12h6M10 16h4"/>',
   home: '<path d="M3 10.5 12 3l9 7.5"/><path d="M5 9.5V21h5v-6h4v6h5V9.5"/>',
   deposit: '<rect x="3" y="6" width="18" height="14" rx="3"/><path d="M3 10h18"/><path d="M16 15h2"/><path d="M7 6V4.5h10V6"/>',
   upgrader: '<path d="M12 20V6"/><path d="m6 12 6-6 6 6"/><path d="M5 3h14"/>',
@@ -479,6 +480,7 @@ function icon(name, cls = '') {
 const DRAWER_SECTIONS = [
   ['home', 'Кейсы'],
   ['upgrader', 'Апгрейдер'],
+  ['contract', 'Контракт'],
   ['dice', 'Дайсы'],
   ['crash', 'Краш'],
   ['battle', 'Батл'],
@@ -493,7 +495,7 @@ const DRAWER_SECTIONS = [
 ];
 
 const TABBAR_SECTIONS = [['home', 'Кейсы'], ['upgrader', 'Апгрейд'], ['battle', 'Батл'], ['crash', 'Краш'], ['inventory', 'Инвентарь']];
-const TOPNAV_SECTIONS = ['home', 'upgrader', 'dice', 'crash', 'battle', 'inventory', 'bonuses'];
+const TOPNAV_SECTIONS = ['home', 'upgrader', 'contract', 'dice', 'crash', 'battle', 'inventory', 'bonuses'];
 
 function renderDrawer(active) {
   const root = document.getElementById('drawer-items');
@@ -554,6 +556,7 @@ const SCREENS = {
   home: renderCasesScreen,
   profile: renderProfileScreen,
   upgrader: renderUpgraderScreen,
+  contract: renderContractScreen,
   battle: renderBattleScreen,
   dice: renderDiceScreen,
   crash: renderCrashScreen,
@@ -2195,6 +2198,132 @@ async function bindAdminPanel(root) {
 }
 
 
+// =================================================================== КОНТРАКТ
+
+// Отдаёшь 3–10 брейнротов — получаешь один случайный. Шансы множителей
+// приходят с сервера (/api/contract) и показаны игроку как есть.
+let contractState = { stake: [] };
+let contractInfo = null;
+let contractBusy = false;
+
+async function renderContractScreen(root) {
+  contractInfo = contractInfo || await api('/api/contract');
+  const { min_items: MIN, max_items: MAX, tiers } = contractInfo;
+  const stake = contractState.stake;
+  const sv = stakeValue(stake);
+  const lo = Math.round(sv * tiers[0].mult * 0.9), hi = Math.round(sv * tiers[tiers.length - 1].mult * 1.1);
+  const ready = stake.length >= MIN;
+  const slots = Array.from({ length: MAX }, (_, i) => {
+    const b = stake[i];
+    return b
+      ? `<button class="ctr-slot filled" data-slot="${i}" style="${glowVars(b)}">${brainrotArt(b)}<span class="ctr-slot-v">${fmt(b.value)}</span></button>`
+      : `<button class="ctr-slot ${i < MIN ? 'need' : ''}" data-slot="${i}"><span>+</span></button>`;
+  }).join('');
+  const tierClass = (m) => (m < 1 ? 'lose' : m >= 2.5 ? 'jack' : 'win');
+  root.innerHTML = `
+    <div class="section-title">КОНТРАКТ</div>
+    <div class="ctr-hint">Отдай <b>${MIN}–${MAX}</b> своих брейнротов — получи <b>один случайный</b>. Чем дороже вклад, тем дороже результат.</div>
+    <div class="ctr-stage" id="ctr-stage">
+      <div class="ctr-paper">
+        <div class="ctr-paper-head"><span>📜 КОНТРАКТ</span><span class="muted">${stake.length}/${MAX}</span></div>
+        <div class="ctr-grid" id="ctr-grid">${slots}</div>
+        <div class="ctr-sum">
+          <div><small>Вклад</small><b>${fmt(sv)}${coinIcon()}</b></div>
+          <div class="ctr-range"><small>Получишь</small><b>${ready ? `${fmt(lo)} – ${fmt(hi)}` : '—'}${ready ? coinIcon() : ''}</b></div>
+        </div>
+      </div>
+      <div class="ctr-tiers">${tiers.map((t) => `
+        <div class="ctr-tier ${tierClass(t.mult)}"><b>×${t.mult}</b><span>${t.chance}%</span><i style="--w:${t.chance}"></i></div>`).join('')}
+      </div>
+    </div>
+    <div class="upg-row">
+      <button class="open-btn upg-btn" id="ctr-sign" ${ready ? '' : 'disabled'} style="--c1:#ffcf5c;--c2:#ff8a3d">
+        <span class="open-btn-shine"></span>
+        <span class="open-btn-label">${ready ? 'Подписать контракт' : `Выбери ещё ${MIN - stake.length}`}</span>
+      </button>
+    </div>
+    <div class="btn-row ctr-tools">
+      <button class="btn btn-ghost" id="ctr-auto">⚡ Самые дешёвые</button>
+      <button class="btn btn-ghost" id="ctr-reset">Сбросить</button>
+    </div>`;
+
+  const pick = async () => {
+    if (contractBusy) return;
+    const items = await api('/api/inventory?limit=200');
+    openStakePicker(items.slice().sort((a, b) => a.value - b.value), contractState.stake, () => true, (sel) => {
+      contractState.stake = sel; renderContractScreen(root);
+    }, MAX, MIN);
+  };
+  root.querySelectorAll('.ctr-slot').forEach((el) => el.addEventListener('click', pick));
+  root.querySelector('#ctr-reset').addEventListener('click', () => { if (!contractBusy) { contractState.stake = []; renderContractScreen(root); } });
+  root.querySelector('#ctr-auto').addEventListener('click', async () => {
+    if (contractBusy) return;
+    const items = (await api('/api/inventory?limit=200')).sort((a, b) => a.value - b.value);
+    if (items.length < MIN) { toast(`Нужно минимум ${MIN} брейнрота в инвентаре`, 'error'); return; }
+    contractState.stake = items.slice(0, MAX); haptic.tick(); renderContractScreen(root);
+  });
+  root.querySelector('#ctr-sign').addEventListener('click', async () => {
+    if (contractBusy || !ready) return;
+    contractBusy = true;
+    let res;
+    try {
+      res = await api('/api/contract', { method: 'POST', body: JSON.stringify({ item_ids: stake.map((b) => b.id) }) });
+    } catch (err) { contractBusy = false; toast(err.message, 'error'); return; }
+    haptic.tick();
+    contractState.stake = [];
+    await playContract(root, res);
+    contractBusy = false;
+    refreshMe().catch(() => {});
+  });
+}
+
+async function playContract(root, res) {
+  const stage = root.querySelector('#ctr-stage');
+  const fast = !smooth();
+  // 1) вклад «сгорает» в центр
+  root.querySelectorAll('.ctr-slot.filled').forEach((el, i) => { el.style.setProperty('--d', `${i * 45}ms`); el.classList.add('burn'); });
+  root.querySelector('#ctr-sign').disabled = true;
+  if (!fast) await sleep(650);
+  // 2) перебор кандидатов с замедлением
+  stage.insertAdjacentHTML('beforeend', `
+    <div class="ctr-reveal" id="ctr-reveal">
+      <div class="ctr-card" id="ctr-card">${brainrotArt(res.reel[0])}</div>
+      <div class="ctr-card-name" id="ctr-card-name">…</div>
+    </div>`);
+  const card = stage.querySelector('#ctr-card');
+  if (!fast) {
+    for (let i = 0; i < res.reel.length - 1; i++) {
+      card.innerHTML = brainrotArt(res.reel[i]);
+      card.style.setProperty('--rc', valueBand(res.reel[i].value)[1]);
+      haptic.tick();
+      await sleep(55 + i * i * 1.6);
+    }
+  }
+  // 3) результат
+  const w = res.won_item;
+  const up = w.value >= res.stake_value;
+  card.innerHTML = brainrotArt(w);
+  card.classList.add('done', up ? 'up' : 'down');
+  card.setAttribute('style', glowVars(w));
+  root.querySelectorAll('#ctr-sign, .ctr-tools').forEach((el) => { el.style.visibility = 'hidden'; });
+  stage.querySelector('#ctr-card-name').innerHTML = `<div class="ctr-won"><b>${escapeHtml(w.name)}</b><span>${fmt(w.value)}${coinIcon()}</span></div>
+    <div class="ctr-mult ${up ? 'up' : 'down'}">×${res.multiplier} · ${up ? '+' : '−'}${fmt(Math.abs(w.value - res.stake_value))}${coinIcon()}</div>
+    <div class="btn-row ctr-after">
+      <button class="btn-chip" id="ctr-again">📜 Ещё контракт</button>
+      ${w.id ? `<button class="btn-chip ghost" id="ctr-sell">Продать за ${fmt(w.value)}${coinIcon()}</button>` : ''}
+    </div>`;
+  if (up) haptic.success(); else haptic.impact('heavy');
+  stage.querySelector('#ctr-again').addEventListener('click', () => renderContractScreen(root));
+  const sell = stage.querySelector('#ctr-sell');
+  if (sell) sell.addEventListener('click', async () => {
+    try {
+      await api(`/api/inventory/${w.id}/sell`, { method: 'POST' });
+      toast(`Продано за ${fmt(w.value)} B`, 'success'); refreshMe().catch(() => {}); renderContractScreen(root);
+    } catch (err) { toast(err.message, 'error'); }
+  });
+}
+
+
 // =================================================================== АПГРЕЙДЕР
 
 // Вклад — до 5 брейнротов инвентаря; сервер считает шанс по их сумме.
@@ -2369,11 +2498,11 @@ async function renderUpgraderScreen(root) {
 }
 
 /** Выбор вклада: до UPG_MAX_STAKE брейнротов, внизу — сумма и «Готово». */
-function openStakePicker(items, current, hasTarget, onDone) {
+function openStakePicker(items, current, hasTarget, onDone, max = UPG_MAX_STAKE, min = 1) {
   const picked = new Set(current.map((b) => b.id));
   const overlay = openModal(`
     <button class="modal-close" onclick="closeModal()">✕</button>
-    <div class="picker-title">Твои брейнроты <span class="muted">· до ${UPG_MAX_STAKE}</span></div>
+    <div class="picker-title">Твои брейнроты <span class="muted">· до ${max}</span></div>
     ${items.length ? `<div class="pick-grid">${items.map((b) => `
       <button class="pick-tile" data-id="${b.id}" style="${glowVars(b)}">
         ${brainrotArt(b)}
@@ -2391,16 +2520,16 @@ function openStakePicker(items, current, hasTarget, onDone) {
     overlay.querySelectorAll('.pick-tile').forEach((el) => {
       const on = picked.has(Number(el.dataset.id));
       el.classList.toggle('picked', on);
-      el.disabled = !on && picked.size >= UPG_MAX_STAKE;
+      el.disabled = !on && picked.size >= max;
     });
     overlay.querySelector('#stake-sum').innerHTML = sel.length
-      ? `${sel.length}/${UPG_MAX_STAKE} · ${fmt(sum)}${coinIcon()}${hasTarget(sum) ? '' : ' <span class="stake-warn">нет целей</span>'}`
+      ? `${sel.length}/${max} · ${fmt(sum)}${coinIcon()}${sel.length < min ? ` <span class="stake-warn">минимум ${min}</span>` : hasTarget(sum) ? '' : ' <span class="stake-warn">нет целей</span>'}`
       : 'Выбери брейнротов';
-    overlay.querySelector('#stake-done').disabled = !sel.length || !hasTarget(sum);
+    overlay.querySelector('#stake-done').disabled = sel.length < min || !hasTarget(sum);
   };
   overlay.querySelectorAll('.pick-tile').forEach((el) => el.addEventListener('click', () => {
     const id = Number(el.dataset.id);
-    if (picked.has(id)) picked.delete(id); else if (picked.size < UPG_MAX_STAKE) picked.add(id);
+    if (picked.has(id)) picked.delete(id); else if (picked.size < max) picked.add(id);
     haptic.tick(); paint();
   }));
   overlay.querySelector('#stake-done').addEventListener('click', () => {

@@ -1271,3 +1271,32 @@ async def test_admin_sees_who_started_event_and_created_promo(client, admin_head
     await client.post("/api/admin/promos", headers=admin_headers, json={"kind": "balance", "amount": 5, "code": "WHO1"})
     promos = await (await client.get("/api/admin/promos", headers=admin_headers)).json()
     assert next(p for p in promos if p["code"] == "WHO1")["created_by"]
+
+
+async def test_contract_trades_items_for_one_brainrot(client, auth_headers, in_memory_db) -> None:
+    from bot.database.models import User
+    from bot.database.repo import inventory as inventory_repo
+    from sqlalchemy import select
+
+    await client.get("/api/me", headers=auth_headers)
+    async with in_memory_db() as session:
+        user = (await session.execute(select(User).where(User.tg_id == 999111))).scalar_one()
+        await inventory_repo.add_items(session, user, "test", [("Garama and Madundung", 41)] * 4)
+    info = await (await client.get("/api/contract", headers=auth_headers)).json()
+    assert sum(t["chance"] for t in info["tiers"]) == 100
+    ids = [i["id"] for i in await (await client.get("/api/inventory", headers=auth_headers)).json()]
+    r = await client.post("/api/contract", headers=auth_headers, json={"item_ids": ids[:2]})
+    assert r.status == 400 and (await r.json())["error"] == "bad_count"
+    r = await client.post("/api/contract", headers=auth_headers, json={"item_ids": ids[:3]})
+    body = await r.json()
+    assert r.status == 200 and body["stake_value"] == 123 and len(body["contributions"]) == 3
+    assert body["reel"][-1]["name"] == body["won_item"]["name"]
+    left = await (await client.get("/api/inventory", headers=auth_headers)).json()
+    assert len(left) == 2 and any(i["name"] == body["won_item"]["name"] for i in left)
+    r = await client.post("/api/contract", headers=auth_headers, json={"item_ids": ids[:3]})
+    assert r.status == 404
+
+
+def test_contract_expected_multiplier_below_one() -> None:
+    from bot.services import contract_service
+    assert 0.85 < contract_service.expected_multiplier() < 1.0

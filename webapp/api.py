@@ -82,7 +82,7 @@ from bot.services.cases_service import REEL_REVEAL_INDEX, build_reel, draw_items
 from bot.services.dice_service import COLORS, MATCH_PAYOUT_TABLE, resolve_roll
 from bot.services.giveaway_service import resolve_all_expired
 from bot.services.staking_service import MIN_STAKE_AMOUNT, STAKE_TIERS, is_matured, payout_amount, tier_by_term
-from bot.services import upgrader_service
+from bot.services import contract_service, upgrader_service
 from bot.services.upgrader_service import chance_percent, roll_success
 from bot.utils.texts import FAQ_ENTRIES
 from webapp import crash_runtime as crash_rt
@@ -827,6 +827,63 @@ async def post_case_open(request: web.Request) -> web.Response:
 
 
 # -------------------------------------------------------------------- апгрейдер
+
+
+# ---------------------------------------------------------------- контракт
+
+
+async def _contract_pool(session) -> list[tuple[str, int]]:
+    return [(i.name, int(i.value)) for i in await list_known_items(session) if i.name in ROSTER_BY_NAME and i.value > 0]
+
+
+@routes.get("/api/contract")
+async def get_contract(request: web.Request) -> web.Response:
+    return web.json_response({
+        "min_items": contract_service.MIN_ITEMS,
+        "max_items": contract_service.MAX_ITEMS,
+        "tiers": [{"mult": m, "chance": w} for m, w in contract_service.TIERS],
+    })
+
+
+@routes.post("/api/contract")
+async def post_contract(request: web.Request) -> web.Response:
+    """Вклад — 3–10 брейнротов инвентаря; они сгорают, взамен — один брейнрот
+    ростера ценой ≈ сумма × случайный множитель из открытой таблицы."""
+    session, user = request["session"], request["user"]
+    body = await request.json()
+    try:
+        ids = list(dict.fromkeys(int(i) for i in body.get("item_ids") or []))
+    except (TypeError, ValueError):
+        ids = []
+    if not contract_service.MIN_ITEMS <= len(ids) <= contract_service.MAX_ITEMS:
+        return web.json_response({"error": "bad_count", "message":
+                                  f"Нужно от {contract_service.MIN_ITEMS} до {contract_service.MAX_ITEMS} брейнротов"}, status=400)
+    items = [await inventory_repo.get_by_id(session, i) for i in ids]
+    if any(it is None or it.user_id != user.id for it in items):
+        return web.json_response({"error": "item_gone", "message": "Какого-то брейнрота уже нет в инвентаре"}, status=404)
+    pool = await _contract_pool(session)
+    if not pool:
+        return web.json_response({"error": "no_pool", "message": "Контракт временно недоступен"}, status=503)
+    stake = sum(it.value for it in items)
+    mult = contract_service.roll_multiplier()
+    won_name, won_value = contract_service.pick_result(pool, stake, mult)
+    reel = contract_service.reel(pool, stake, (won_name, won_value))
+    contributions = [_brainrot_json(it.item_name, it.value, it.rarity) for it in items]
+    for it in items:
+        await inventory_repo.delete(session, it)
+    granted = await drops.grant(session, user, "Контракт", [(won_name, won_value)])
+    won = _brainrot_json(won_name, won_value)
+    if granted and granted[0] is not None:
+        won["id"] = granted[0].id
+    await session.refresh(user)
+    return web.json_response({
+        "stake_value": stake,
+        "won_item": won,
+        "multiplier": round(won_value / stake, 2) if stake else 0,
+        "contributions": contributions,
+        "reel": [_brainrot_json(n, v) for n, v in reel],
+        "balance": user.balance,
+    })
 
 
 @routes.get("/api/upgrader/targets")
